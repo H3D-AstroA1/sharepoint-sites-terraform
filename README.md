@@ -37,7 +37,8 @@ sharepoint-sites-terraform/
 │   └── terraform.tfvars.example # Example variable values
 │
 ├── scripts/                     # Automation scripts
-│   └── deploy.py                # ⭐ MAIN DEPLOYMENT SCRIPT
+│   ├── deploy.py                # ⭐ MAIN DEPLOYMENT SCRIPT
+│   └── populate_files.py        # ⭐ FILE POPULATION SCRIPT
 │
 └── docs/                        # Additional documentation
     └── TROUBLESHOOTING.md       # Common issues and solutions
@@ -175,6 +176,64 @@ python deploy.py --environment Production --random 5 --auto-approve
 
 # Quick deployment skipping all prompts
 python deploy.py --random 5 --skip-prerequisites --auto-approve
+```
+
+---
+
+## 📄 File Population (Optional Step 2)
+
+After creating SharePoint sites, you can populate them with realistic-looking files to simulate an actual organization's document structure.
+
+### Quick Start
+
+```bash
+cd sharepoint-sites-terraform/scripts
+
+# Interactive mode
+python populate_files.py
+
+# Create 100 files distributed across all sites
+python populate_files.py --files 100
+
+# Create 50 files only in HR-related sites
+python populate_files.py --files 50 --site hr
+
+# List available sites
+python populate_files.py --list-sites
+```
+
+### File Types Generated
+
+The script creates realistic files based on each site's department type:
+
+| Department | Example Files |
+|------------|---------------|
+| **Executive** | Board Meeting Agenda, Strategic Plan, CEO Town Hall Presentation |
+| **HR** | Employee Handbook, Job Descriptions, Onboarding Checklist, Benefits Summary |
+| **Finance** | Monthly Financial Report, Annual Budget, Cash Flow Statement, Expense Reports |
+| **IT** | System Architecture Diagram, Security Policy, Disaster Recovery Plan |
+| **Marketing** | Marketing Plan, Brand Guidelines, Campaign Performance, Social Media Calendar |
+| **Sales** | Sales Proposals, Contracts, Pipeline Analysis, Territory Maps |
+| **Legal** | NDA Templates, Compliance Checklist, Privacy Policy, Terms of Service |
+| **Operations** | SOPs, Inventory Reports, Facility Maintenance, Quality Control |
+
+### File Distribution
+
+Files are randomly distributed across sites with:
+- **Realistic folder structures** (e.g., "Board Materials", "Policies", "Reports")
+- **Department-appropriate naming** (e.g., "Q3_Board_Meeting_Agenda_2024.docx")
+- **Various file types** (Word, Excel, PowerPoint, PDF)
+- **Random dates and version numbers** for authenticity
+
+### Command Line Options
+
+```bash
+python populate_files.py --help
+
+Options:
+  -f, --files COUNT    Number of files to create (1-1000)
+  -s, --site FILTER    Filter sites by name (e.g., "hr", "finance")
+  -l, --list-sites     List available SharePoint sites and exit
 ```
 
 ---
