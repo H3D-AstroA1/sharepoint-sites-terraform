@@ -17,13 +17,14 @@ Requirements:
     - Terraform (will be installed automatically if missing)
 """
 
+import json
 import os
 import platform
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict, Any
 
 # ============================================================================
 # CONFIGURATION
@@ -418,6 +419,9 @@ def print_menu(prereq_status: dict) -> None:
     print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}├──────────────────────────────────────────────────────────────┤{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.CYAN}[C]{Colors.NC} {Colors.WHITE}⚙️  Edit Configuration{Colors.NC}                                 {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Environments, sites, and settings{Colors.NC}                     {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.WHITE}[H]{Colors.NC} {Colors.WHITE}❓ Help & Documentation{Colors.NC}                               {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.WHITE}[Q]{Colors.NC} {Colors.WHITE}🚪 Quit{Colors.NC}                                                {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
@@ -472,6 +476,220 @@ def print_help() -> None:
     print(f"    • {Colors.BLUE}docs/TROUBLESHOOTING.md{Colors.NC} - Common issues")
     print()
     input(f"  {Colors.YELLOW}Press Enter to return to menu...{Colors.NC}")
+
+# ============================================================================
+# CONFIGURATION EDITING
+# ============================================================================
+
+CONFIG_DIR = SCRIPT_DIR.parent / "config"
+ENVIRONMENTS_FILE = CONFIG_DIR / "environments.json"
+SITES_FILE = CONFIG_DIR / "sites.json"
+
+def open_file_in_editor(file_path: Path) -> bool:
+    """Open a file in the system's default editor."""
+    import platform
+    
+    if not file_path.exists():
+        print_error(f"File not found: {file_path}")
+        return False
+    
+    try:
+        system = platform.system().lower()
+        
+        if system == "windows":
+            # Try VS Code first, then notepad
+            try:
+                subprocess.run(["code", str(file_path)], check=True)
+            except FileNotFoundError:
+                os.startfile(str(file_path))
+        elif system == "darwin":  # macOS
+            subprocess.run(["open", str(file_path)], check=True)
+        else:  # Linux
+            # Try common editors
+            for editor in ["code", "gedit", "nano", "vim"]:
+                try:
+                    subprocess.run([editor, str(file_path)], check=True)
+                    break
+                except FileNotFoundError:
+                    continue
+        
+        return True
+    except Exception as e:
+        print_error(f"Could not open file: {e}")
+        return False
+
+def view_file_contents(file_path: Path) -> None:
+    """Display the contents of a configuration file."""
+    if not file_path.exists():
+        print_error(f"File not found: {file_path}")
+        return
+    
+    try:
+        with open(file_path, 'r') as f:
+            content = f.read()
+        
+        print()
+        print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+        print(f"  {Colors.WHITE}Contents of {file_path.name}:{Colors.NC}")
+        print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+        print()
+        
+        # Print with line numbers
+        for i, line in enumerate(content.split('\n'), 1):
+            print(f"  {Colors.DIM}{i:3}{Colors.NC} │ {line}")
+        
+        print()
+        print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+    except Exception as e:
+        print_error(f"Could not read file: {e}")
+
+def edit_configuration_menu() -> None:
+    """Show the configuration editing menu."""
+    while True:
+        clear_screen()
+        print()
+        print(f"  {Colors.CYAN}{'=' * 60}{Colors.NC}")
+        print(f"  {Colors.WHITE}{Colors.BOLD}⚙️  Edit Configuration{Colors.NC}")
+        print(f"  {Colors.CYAN}{'=' * 60}{Colors.NC}")
+        print()
+        print(f"  {Colors.WHITE}Configuration Files:{Colors.NC}")
+        print()
+        print(f"  {Colors.CYAN}╭──────────────────────────────────────────────────────────────╮{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.GREEN}[1]{Colors.NC} {Colors.WHITE}📋 Edit environments.json{Colors.NC}                            {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Configure Azure tenants and subscriptions{Colors.NC}            {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.BLUE}[2]{Colors.NC} {Colors.WHITE}📋 Edit sites.json{Colors.NC}                                    {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Define custom SharePoint sites to create{Colors.NC}             {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}├──────────────────────────────────────────────────────────────┤{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.YELLOW}[3]{Colors.NC} {Colors.WHITE}👁️  View environments.json{Colors.NC}                            {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.YELLOW}[4]{Colors.NC} {Colors.WHITE}👁️  View sites.json{Colors.NC}                                   {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}├──────────────────────────────────────────────────────────────┤{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.MAGENTA}[5]{Colors.NC} {Colors.WHITE}➕ Add new environment{Colors.NC}                               {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Interactive wizard to add a tenant{Colors.NC}                   {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.RED}[B]{Colors.NC} {Colors.WHITE}← Back to main menu{Colors.NC}                                 {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}╰──────────────────────────────────────────────────────────────╯{Colors.NC}")
+        print()
+        
+        choice = input(f"  {Colors.YELLOW}Enter your choice:{Colors.NC} ").strip().lower()
+        
+        if choice == '1':
+            print()
+            print_info(f"Opening {ENVIRONMENTS_FILE.name} in editor...")
+            if open_file_in_editor(ENVIRONMENTS_FILE):
+                print_success("File opened in editor")
+            input(f"  {Colors.YELLOW}Press Enter when done editing...{Colors.NC}")
+            
+        elif choice == '2':
+            print()
+            print_info(f"Opening {SITES_FILE.name} in editor...")
+            if open_file_in_editor(SITES_FILE):
+                print_success("File opened in editor")
+            input(f"  {Colors.YELLOW}Press Enter when done editing...{Colors.NC}")
+            
+        elif choice == '3':
+            view_file_contents(ENVIRONMENTS_FILE)
+            input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            
+        elif choice == '4':
+            view_file_contents(SITES_FILE)
+            input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            
+        elif choice == '5':
+            add_environment_wizard()
+            
+        elif choice == 'b':
+            break
+        else:
+            print_error("Invalid choice")
+            input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+
+def add_environment_wizard() -> None:
+    """Interactive wizard to add a new environment."""
+    clear_screen()
+    print()
+    print(f"  {Colors.CYAN}{'=' * 60}{Colors.NC}")
+    print(f"  {Colors.WHITE}{Colors.BOLD}➕ Add New Environment{Colors.NC}")
+    print(f"  {Colors.CYAN}{'=' * 60}{Colors.NC}")
+    print()
+    print(f"  {Colors.WHITE}This wizard will help you add a new environment configuration.{Colors.NC}")
+    print()
+    
+    # Get environment name
+    print(f"  {Colors.YELLOW}Step 1: Environment Name{Colors.NC}")
+    name = input(f"  Enter a name for this environment (e.g., 'Production'): ").strip()
+    if not name:
+        print_error("Name is required")
+        input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        return
+    
+    print()
+    print(f"  {Colors.YELLOW}Step 2: Azure Tenant ID{Colors.NC}")
+    print(f"  {Colors.DIM}You can find this in Azure Portal > Azure Active Directory > Overview{Colors.NC}")
+    tenant_id = input(f"  Enter Tenant ID (GUID): ").strip()
+    
+    print()
+    print(f"  {Colors.YELLOW}Step 3: Azure Subscription ID{Colors.NC}")
+    print(f"  {Colors.DIM}You can find this in Azure Portal > Subscriptions{Colors.NC}")
+    subscription_id = input(f"  Enter Subscription ID (GUID): ").strip()
+    
+    print()
+    print(f"  {Colors.YELLOW}Step 4: Resource Group (optional){Colors.NC}")
+    resource_group = input(f"  Enter Resource Group name (or leave blank): ").strip()
+    
+    print()
+    print(f"  {Colors.YELLOW}Step 5: M365 Domain (optional){Colors.NC}")
+    print(f"  {Colors.DIM}e.g., contoso.onmicrosoft.com{Colors.NC}")
+    m365_domain = input(f"  Enter M365 domain (or leave blank): ").strip()
+    
+    # Create the environment object
+    new_env = {
+        "name": name,
+        "azure": {
+            "tenant_id": tenant_id,
+            "subscription_id": subscription_id
+        }
+    }
+    
+    if resource_group:
+        new_env["azure"]["resource_group"] = resource_group
+    
+    if m365_domain:
+        new_env["m365"] = {"domain": m365_domain}
+    
+    # Load existing environments
+    try:
+        if ENVIRONMENTS_FILE.exists():
+            with open(ENVIRONMENTS_FILE, 'r') as f:
+                data = json.load(f)
+        else:
+            data = {"environments": []}
+        
+        # Add new environment
+        if "environments" not in data:
+            data["environments"] = []
+        
+        data["environments"].append(new_env)
+        
+        # Save
+        with open(ENVIRONMENTS_FILE, 'w') as f:
+            json.dump(data, f, indent=2)
+        
+        print()
+        print_success(f"Environment '{name}' added successfully!")
+        print_info(f"Saved to: {ENVIRONMENTS_FILE}")
+        
+    except Exception as e:
+        print_error(f"Failed to save environment: {e}")
+    
+    print()
+    input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
 
 # ============================================================================
 # SCRIPT EXECUTION
@@ -689,6 +907,10 @@ def main() -> None:
             if site_filter:
                 args.extend(["--site", site_filter])
             run_script("cleanup.py", args)
+            
+        elif choice == 'c':
+            # Edit Configuration
+            edit_configuration_menu()
             
         elif choice == 'h':
             print_help()
