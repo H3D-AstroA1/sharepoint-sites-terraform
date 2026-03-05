@@ -76,6 +76,7 @@ This opens an interactive menu that guides you through all operations:
   [4] 📋 List SharePoint Sites
   [5] 📁 List Files in Sites
 
+  [C] ⚙️  Edit Configuration             ← NEW!
   [H] ❓ Help & Documentation
   [Q] 🚪 Quit
 ```
@@ -432,6 +433,16 @@ Edit `config/environments.json` and replace the placeholder values:
 }
 ```
 
+### Automatic Environment Detection
+
+All scripts (`deploy.py`, `populate_files.py`, `cleanup.py`) automatically detect and use your configured environments:
+
+| Scenario | Behavior |
+|----------|----------|
+| **1 environment configured** | Automatically uses it (no prompts) |
+| **Multiple environments** | Prompts you to select which one |
+| **No environments configured** | Falls back to current Azure CLI login |
+
 ### Using Environments
 
 ```bash
@@ -446,6 +457,37 @@ python deploy.py --environment Default --random 10 --auto-approve
 ```
 
 > 💡 **Tip**: To add more environments (e.g., Production, Development), copy the environment block in the JSON file and modify the values. The file includes an example showing how to do this.
+
+### Edit Configuration from Menu
+
+Press `[C]` in the main menu to access the configuration editor:
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║   Edit Configuration                                         ║
+╚══════════════════════════════════════════════════════════════╝
+
+  [1] 📝 Edit environments.json (in VS Code)
+  [2] 📝 Edit sites.json (in VS Code)
+  [3] 👁️  View environments.json
+  [4] 👁️  View sites.json
+  [5] ➕ Add new environment (wizard)
+
+  [B] ← Back to main menu
+```
+
+| Option | Description |
+|--------|-------------|
+| **Edit in VS Code** | Opens the file in VS Code (or system default editor) |
+| **View** | Displays the file contents in the terminal |
+| **Add new environment** | Interactive wizard to add a new environment |
+
+The wizard prompts for:
+- Environment name (e.g., "Production", "Development")
+- Azure Tenant ID
+- Azure Subscription ID
+- Resource Group name
+- M365 Domain (e.g., "contoso.onmicrosoft.com")
 
 ---
 
