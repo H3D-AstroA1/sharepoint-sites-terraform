@@ -286,6 +286,97 @@ def print_progress(current: int, total: int, message: str) -> None:
     print(f"\r  {Colors.CYAN}[{bar}]{Colors.NC} {percentage:5.1f}% - {message:<40}", end='', flush=True)
 
 # ============================================================================
+# ENVIRONMENT CONFIGURATION
+# ============================================================================
+
+def load_environments() -> Dict:
+    """Load pre-configured environments from environments.json."""
+    if not ENVIRONMENTS_FILE.exists():
+        return {"environments": []}
+    
+    try:
+        with open(ENVIRONMENTS_FILE, 'r') as f:
+            data = json.load(f)
+            return data
+    except Exception as e:
+        print_warning(f"Could not load environments.json: {e}")
+        return {"environments": []}
+
+def get_environment_tenant(env: Dict) -> Optional[str]:
+    """Get the tenant ID from an environment configuration."""
+    azure_config = env.get("azure", {})
+    return azure_config.get("tenant_id")
+
+def select_environment() -> Optional[Dict]:
+    """Auto-select or prompt for environment selection."""
+    env_data = load_environments()
+    environments = env_data.get("environments", [])
+    
+    if not environments:
+        # No environments configured, use current Azure CLI login
+        return None
+    
+    if len(environments) == 1:
+        # Only one environment, use it automatically
+        env = environments[0]
+        print_info(f"Using environment: {env.get('name', 'Default')}")
+        return env
+    
+    # Multiple environments, prompt user to select
+    print()
+    print(f"  {Colors.WHITE}Available Environments:{Colors.NC}")
+    print()
+    for i, env in enumerate(environments, 1):
+        name = env.get("name", f"Environment {i}")
+        tenant = get_environment_tenant(env) or "Not configured"
+        print(f"    [{i}] {name}")
+        print(f"        Tenant: {tenant[:20]}..." if len(tenant) > 20 else f"        Tenant: {tenant}")
+    print()
+    
+    while True:
+        try:
+            choice = input(f"  {Colors.YELLOW}Select environment (1-{len(environments)}):{Colors.NC} ").strip()
+            idx = int(choice) - 1
+            if 0 <= idx < len(environments):
+                env = environments[idx]
+                print_success(f"Selected: {env.get('name', 'Environment')}")
+                return env
+        except ValueError:
+            pass
+        print_error("Invalid selection")
+
+def switch_to_tenant(tenant_id: str) -> bool:
+    """Switch Azure CLI to the specified tenant."""
+    if not tenant_id:
+        return True
+    
+    try:
+        # Check if already logged into this tenant
+        result = subprocess.run(
+            ["az", "account", "show", "--query", "tenantId", "-o", "tsv"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        current_tenant = result.stdout.strip()
+        
+        if current_tenant == tenant_id:
+            print_info(f"Already logged into tenant: {tenant_id[:20]}...")
+            return True
+        
+        # Need to switch tenant
+        print_info(f"Switching to tenant: {tenant_id[:20]}...")
+        subprocess.run(
+            ["az", "login", "--tenant", tenant_id],
+            check=True
+        )
+        return True
+        
+    except subprocess.CalledProcessError:
+        print_error(f"Failed to switch to tenant: {tenant_id}")
+        return False
+
+# ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
 
@@ -713,8 +804,22 @@ Examples:
     print(f"  {Colors.WHITE}to simulate an actual organization's document structure.{Colors.NC}")
     print()
     
-    # Step 1: Check Azure login
-    print_step(1, "Check Azure Authentication")
+    # Step 1: Select Environment (auto-detect from environments.json)
+    print_step(1, "Select Environment")
+    
+    selected_env = select_environment()
+    
+    if selected_env:
+        tenant_id = get_environment_tenant(selected_env)
+        if tenant_id:
+            if not switch_to_tenant(tenant_id):
+                print_error("Failed to switch to configured tenant")
+                sys.exit(1)
+    else:
+        print_info("No environment configured, using current Azure CLI login")
+    
+    # Step 2: Check Azure login
+    print_step(2, "Check Azure Authentication")
     
     if not check_azure_login():
         print_warning("Not logged into Azure CLI")
@@ -724,8 +829,8 @@ Examples:
     
     print_success("Azure CLI authenticated")
     
-    # Step 2: Get access token
-    print_step(2, "Get Microsoft Graph Access Token")
+    # Step 3: Get access token
+    print_step(3, "Get Microsoft Graph Access Token")
     
     access_token = get_access_token()
     if not access_token:
@@ -737,8 +842,8 @@ Examples:
     
     print_success("Access token obtained")
     
-    # Step 3: Get SharePoint sites
-    print_step(3, "Discover SharePoint Sites")
+    # Step 4: Get SharePoint sites
+    print_step(4, "Discover SharePoint Sites")
     
     sites = get_sharepoint_sites(access_token)
     
@@ -771,8 +876,8 @@ Examples:
         print()
         sys.exit(0)
     
-    # Step 4: Get file count
-    print_step(4, "Configure File Generation")
+    # Step 5: Get file count
+    print_step(5, "Configure File Generation")
     
     num_files = args.files
     if num_files <= 0:
@@ -796,8 +901,8 @@ Examples:
     
     print_success(f"Will create {num_files} files across {len(sites)} sites")
     
-    # Step 5: Confirm
-    print_step(5, "Confirm File Generation")
+    # Step 6: Confirm
+    print_step(6, "Confirm File Generation")
     
     print()
     print(f"  {Colors.WHITE}Summary:{Colors.NC}")
