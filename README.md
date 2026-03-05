@@ -64,14 +64,30 @@ This opens an interactive menu that guides you through all operations:
 ║   SharePoint Sites Management Tool                           ║
 ╚══════════════════════════════════════════════════════════════╝
 
+  [0] ✓ Check & Install Prerequisites    ← START HERE!
+      Azure CLI, Terraform, Azure Login
+
+  ────────────────────────────────────────────────────────────
   [1] 🏗️  Create SharePoint Sites
   [2] 📄 Populate Sites with Files
   [3] 🗑️  Delete Files or Sites
+
+  ────────────────────────────────────────────────────────────
   [4] 📋 List SharePoint Sites
   [5] 📁 List Files in Sites
+
   [H] ❓ Help & Documentation
   [Q] 🚪 Quit
 ```
+
+### Workflow Steps
+
+| Step | Description | Menu Option |
+|------|-------------|-------------|
+| **Step 0** | Check & install prerequisites (Azure CLI, Terraform, login) | `[0]` |
+| **Step 1** | Create SharePoint sites using Terraform | `[1]` |
+| **Step 2** | Populate sites with realistic files | `[2]` |
+| **Step 3** | Delete files or sites when done | `[3]` |
 
 ---
 

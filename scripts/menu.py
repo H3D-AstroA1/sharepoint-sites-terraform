@@ -3,6 +3,7 @@
 SharePoint Sites Management - Main Menu
 
 A unified interface for managing SharePoint sites:
+  - Step 0: Check & Install Prerequisites
   - Step 1: Create SharePoint sites (deploy.py)
   - Step 2: Populate sites with files (populate_files.py)
   - Step 3: Delete files/sites (cleanup.py)
@@ -17,9 +18,12 @@ Requirements:
 """
 
 import os
+import platform
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Tuple, Optional
 
 # ============================================================================
 # CONFIGURATION
@@ -76,11 +80,324 @@ def print_logo() -> None:
     print(f"  {Colors.CYAN}╚══════════════════════════════════════════════════════════════╝{Colors.NC}")
     print()
 
-def print_menu() -> None:
+def print_success(message: str) -> None:
+    print(f"  {Colors.GREEN}✓{Colors.NC} {message}")
+
+def print_error(message: str) -> None:
+    print(f"  {Colors.RED}✗{Colors.NC} {message}")
+
+def print_warning(message: str) -> None:
+    print(f"  {Colors.YELLOW}⚠{Colors.NC} {message}")
+
+def print_info(message: str) -> None:
+    print(f"  {Colors.BLUE}ℹ{Colors.NC} {message}")
+
+# ============================================================================
+# PREREQUISITES CHECK & INSTALL
+# ============================================================================
+
+def get_os_info() -> Tuple[str, str]:
+    """Get operating system information."""
+    system = platform.system().lower()
+    if system == "darwin":
+        return "macos", platform.machine()
+    elif system == "windows":
+        return "windows", platform.machine()
+    else:
+        return "linux", platform.machine()
+
+def command_exists(command: str) -> bool:
+    """Check if a command exists in the system PATH."""
+    return shutil.which(command) is not None
+
+def get_command_version(command: str) -> Optional[str]:
+    """Get the version of a command."""
+    try:
+        result = subprocess.run(
+            [command, "--version"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return result.stdout.strip().split('\n')[0]
+    except Exception:
+        return None
+
+def check_azure_login() -> bool:
+    """Check if user is logged into Azure CLI."""
+    try:
+        result = subprocess.run(
+            ["az", "account", "show"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return True
+    except Exception:
+        return False
+
+def install_azure_cli() -> bool:
+    """Install Azure CLI based on the operating system."""
+    os_type, _ = get_os_info()
+    print_info("Installing Azure CLI...")
+    
+    try:
+        if os_type == "windows":
+            # Try winget first
+            if command_exists("winget"):
+                print_info("Using winget to install Azure CLI...")
+                subprocess.run(
+                    ["winget", "install", "-e", "--id", "Microsoft.AzureCLI"],
+                    check=True
+                )
+                return True
+            # Try chocolatey
+            elif command_exists("choco"):
+                print_info("Using Chocolatey to install Azure CLI...")
+                subprocess.run(["choco", "install", "azure-cli", "-y"], check=True)
+                return True
+            else:
+                print_error("Please install Azure CLI manually from:")
+                print_info("https://docs.microsoft.com/en-us/cli/azure/install-azure-cli-windows")
+                return False
+                
+        elif os_type == "macos":
+            if command_exists("brew"):
+                print_info("Using Homebrew to install Azure CLI...")
+                subprocess.run(["brew", "install", "azure-cli"], check=True)
+                return True
+            else:
+                print_error("Please install Homebrew first, then run: brew install azure-cli")
+                return False
+                
+        else:  # Linux
+            print_info("Installing Azure CLI on Linux...")
+            subprocess.run(
+                ["curl", "-sL", "https://aka.ms/InstallAzureCLIDeb", "-o", "/tmp/install_az.sh"],
+                check=True
+            )
+            subprocess.run(["sudo", "bash", "/tmp/install_az.sh"], check=True)
+            return True
+            
+    except Exception as e:
+        print_error(f"Failed to install Azure CLI: {e}")
+        return False
+
+def install_terraform() -> bool:
+    """Install Terraform based on the operating system."""
+    os_type, arch = get_os_info()
+    print_info("Installing Terraform...")
+    
+    try:
+        if os_type == "windows":
+            if command_exists("winget"):
+                print_info("Using winget to install Terraform...")
+                subprocess.run(
+                    ["winget", "install", "-e", "--id", "Hashicorp.Terraform"],
+                    check=True
+                )
+                return True
+            elif command_exists("choco"):
+                print_info("Using Chocolatey to install Terraform...")
+                subprocess.run(["choco", "install", "terraform", "-y"], check=True)
+                return True
+            else:
+                print_error("Please install Terraform manually from:")
+                print_info("https://www.terraform.io/downloads")
+                return False
+                
+        elif os_type == "macos":
+            if command_exists("brew"):
+                print_info("Using Homebrew to install Terraform...")
+                subprocess.run(["brew", "tap", "hashicorp/tap"], check=True)
+                subprocess.run(["brew", "install", "hashicorp/tap/terraform"], check=True)
+                return True
+            else:
+                print_error("Please install Homebrew first, then run: brew install terraform")
+                return False
+                
+        else:  # Linux
+            print_info("Installing Terraform on Linux...")
+            subprocess.run([
+                "sudo", "apt-get", "update"
+            ], check=True)
+            subprocess.run([
+                "sudo", "apt-get", "install", "-y", "gnupg", "software-properties-common"
+            ], check=True)
+            subprocess.run([
+                "wget", "-O-", "https://apt.releases.hashicorp.com/gpg",
+                "|", "sudo", "gpg", "--dearmor", "-o",
+                "/usr/share/keyrings/hashicorp-archive-keyring.gpg"
+            ], shell=True, check=True)
+            subprocess.run([
+                "sudo", "apt-get", "update"
+            ], check=True)
+            subprocess.run([
+                "sudo", "apt-get", "install", "-y", "terraform"
+            ], check=True)
+            return True
+            
+    except Exception as e:
+        print_error(f"Failed to install Terraform: {e}")
+        return False
+
+def check_prerequisites(auto_install: bool = False) -> dict:
+    """Check all prerequisites and optionally install missing ones."""
+    results = {
+        "python": {"installed": True, "version": f"Python {sys.version.split()[0]}"},
+        "azure_cli": {"installed": False, "version": None},
+        "terraform": {"installed": False, "version": None},
+        "azure_login": {"logged_in": False}
+    }
+    
+    # Check Azure CLI
+    if command_exists("az"):
+        results["azure_cli"]["installed"] = True
+        results["azure_cli"]["version"] = get_command_version("az")
+        # Check Azure login
+        results["azure_login"]["logged_in"] = check_azure_login()
+    elif auto_install:
+        if install_azure_cli():
+            results["azure_cli"]["installed"] = True
+            results["azure_cli"]["version"] = get_command_version("az")
+    
+    # Check Terraform
+    if command_exists("terraform"):
+        results["terraform"]["installed"] = True
+        results["terraform"]["version"] = get_command_version("terraform")
+    elif auto_install:
+        if install_terraform():
+            results["terraform"]["installed"] = True
+            results["terraform"]["version"] = get_command_version("terraform")
+    
+    return results
+
+def display_prerequisites_status(results: dict) -> None:
+    """Display the prerequisites check results."""
+    print()
+    print(f"  {Colors.WHITE}{Colors.BOLD}Prerequisites Status:{Colors.NC}")
+    print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
+    print()
+    
+    # Python
+    print(f"  {Colors.GREEN}✓{Colors.NC} Python: {results['python']['version']}")
+    
+    # Azure CLI
+    if results["azure_cli"]["installed"]:
+        print(f"  {Colors.GREEN}✓{Colors.NC} Azure CLI: {results['azure_cli']['version']}")
+    else:
+        print(f"  {Colors.RED}✗{Colors.NC} Azure CLI: Not installed")
+    
+    # Terraform
+    if results["terraform"]["installed"]:
+        print(f"  {Colors.GREEN}✓{Colors.NC} Terraform: {results['terraform']['version']}")
+    else:
+        print(f"  {Colors.RED}✗{Colors.NC} Terraform: Not installed")
+    
+    # Azure Login
+    if results["azure_cli"]["installed"]:
+        if results["azure_login"]["logged_in"]:
+            print(f"  {Colors.GREEN}✓{Colors.NC} Azure Login: Authenticated")
+        else:
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} Azure Login: Not logged in")
+    
+    print()
+    
+    # Summary
+    all_installed = (
+        results["azure_cli"]["installed"] and 
+        results["terraform"]["installed"]
+    )
+    
+    if all_installed and results["azure_login"]["logged_in"]:
+        print(f"  {Colors.GREEN}{Colors.BOLD}✓ All prerequisites met! Ready to proceed.{Colors.NC}")
+    elif all_installed:
+        print(f"  {Colors.YELLOW}{Colors.BOLD}⚠ Tools installed but not logged into Azure.{Colors.NC}")
+        print(f"  {Colors.DIM}  Run 'az login' to authenticate.{Colors.NC}")
+    else:
+        print(f"  {Colors.RED}{Colors.BOLD}✗ Some prerequisites are missing.{Colors.NC}")
+        print(f"  {Colors.DIM}  Select option [0] to install missing tools.{Colors.NC}")
+    
+    print()
+
+def run_prerequisites_check_menu() -> None:
+    """Run the prerequisites check and install menu."""
+    clear_screen()
+    print()
+    print(f"  {Colors.CYAN}{'=' * 60}{Colors.NC}")
+    print(f"  {Colors.WHITE}{Colors.BOLD}Step 0: Check & Install Prerequisites{Colors.NC}")
+    print(f"  {Colors.CYAN}{'=' * 60}{Colors.NC}")
+    
+    print()
+    print_info("Checking prerequisites...")
+    print()
+    
+    results = check_prerequisites(auto_install=False)
+    display_prerequisites_status(results)
+    
+    all_installed = (
+        results["azure_cli"]["installed"] and 
+        results["terraform"]["installed"]
+    )
+    
+    if not all_installed:
+        print(f"  {Colors.WHITE}Would you like to install missing tools?{Colors.NC}")
+        print()
+        print(f"    {Colors.GREEN}[Y]{Colors.NC} Yes, install missing tools automatically")
+        print(f"    {Colors.RED}[N]{Colors.NC} No, I'll install them manually")
+        print()
+        
+        choice = input(f"  {Colors.YELLOW}Choice:{Colors.NC} ").strip().lower()
+        
+        if choice == 'y':
+            print()
+            results = check_prerequisites(auto_install=True)
+            display_prerequisites_status(results)
+    
+    if not results["azure_login"]["logged_in"] and results["azure_cli"]["installed"]:
+        print(f"  {Colors.WHITE}Would you like to log in to Azure now?{Colors.NC}")
+        print()
+        print(f"    {Colors.GREEN}[Y]{Colors.NC} Yes, open browser for Azure login")
+        print(f"    {Colors.RED}[N]{Colors.NC} No, I'll log in later")
+        print()
+        
+        choice = input(f"  {Colors.YELLOW}Choice:{Colors.NC} ").strip().lower()
+        
+        if choice == 'y':
+            print()
+            print_info("Opening browser for Azure login...")
+            try:
+                subprocess.run(["az", "login"], check=True)
+                print()
+                print_success("Azure login successful!")
+            except Exception as e:
+                print_error(f"Azure login failed: {e}")
+    
+    print()
+    input(f"  {Colors.YELLOW}Press Enter to return to menu...{Colors.NC}")
+
+# ============================================================================
+# MENU DISPLAY
+# ============================================================================
+
+def print_menu(prereq_status: dict) -> None:
     """Print the main menu options."""
+    # Determine status indicators
+    prereq_ok = (
+        prereq_status["azure_cli"]["installed"] and 
+        prereq_status["terraform"]["installed"] and
+        prereq_status["azure_login"]["logged_in"]
+    )
+    prereq_icon = f"{Colors.GREEN}✓{Colors.NC}" if prereq_ok else f"{Colors.YELLOW}⚠{Colors.NC}"
+    
     print(f"  {Colors.WHITE}{Colors.BOLD}What would you like to do?{Colors.NC}")
     print()
     print(f"  {Colors.CYAN}╭──────────────────────────────────────────────────────────────╮{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.WHITE}[0]{Colors.NC} {prereq_icon} {Colors.WHITE}Check & Install Prerequisites{Colors.NC}                    {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Azure CLI, Terraform, Azure Login{Colors.NC}                     {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}├──────────────────────────────────────────────────────────────┤{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.GREEN}[1]{Colors.NC} {Colors.WHITE}🏗️  Create SharePoint Sites{Colors.NC}                           {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Deploy new sites using Terraform{Colors.NC}                      {Colors.CYAN}│{Colors.NC}")
@@ -115,6 +432,13 @@ def print_help() -> None:
     print(f"  {Colors.WHITE}{Colors.BOLD}SharePoint Sites Management - Help{Colors.NC}")
     print(f"  {Colors.CYAN}{'=' * 60}{Colors.NC}")
     print()
+    print(f"  {Colors.WHITE}{Colors.BOLD}Step 0: Check & Install Prerequisites{Colors.NC}")
+    print(f"  {Colors.DIM}─────────────────────────────────────{Colors.NC}")
+    print(f"  Verify and install required tools:")
+    print(f"    • {Colors.CYAN}Azure CLI{Colors.NC} - For Azure authentication")
+    print(f"    • {Colors.CYAN}Terraform{Colors.NC} - For infrastructure deployment")
+    print(f"    • {Colors.CYAN}Azure Login{Colors.NC} - Authenticate to your tenant")
+    print()
     print(f"  {Colors.GREEN}{Colors.BOLD}Step 1: Create SharePoint Sites{Colors.NC}")
     print(f"  {Colors.DIM}─────────────────────────────────{Colors.NC}")
     print(f"  Use this option to deploy new SharePoint sites using Terraform.")
@@ -148,6 +472,10 @@ def print_help() -> None:
     print(f"    • {Colors.BLUE}docs/TROUBLESHOOTING.md{Colors.NC} - Common issues")
     print()
     input(f"  {Colors.YELLOW}Press Enter to return to menu...{Colors.NC}")
+
+# ============================================================================
+# SCRIPT EXECUTION
+# ============================================================================
 
 def run_script(script_name: str, args: list = None) -> None:  # type: ignore
     """Run a Python script with optional arguments."""
@@ -190,20 +518,33 @@ def get_site_filter() -> str:
     filter_input = input(f"  {Colors.YELLOW}Site filter:{Colors.NC} ").strip()
     return filter_input
 
+# ============================================================================
+# MAIN FUNCTION
+# ============================================================================
+
 def main() -> None:
     """Main entry point."""
+    # Initial prerequisites check (silent)
+    prereq_status = check_prerequisites(auto_install=False)
+    
     while True:
         clear_screen()
         print_logo()
-        print_menu()
+        print_menu(prereq_status)
         
         choice = input(f"  {Colors.YELLOW}Enter your choice:{Colors.NC} ").strip().lower()
         
-        if choice == '1':
+        if choice == '0':
+            # Check & Install Prerequisites
+            run_prerequisites_check_menu()
+            # Refresh status after check
+            prereq_status = check_prerequisites(auto_install=False)
+            
+        elif choice == '1':
             # Create SharePoint Sites
             clear_screen()
             print()
-            print(f"  {Colors.GREEN}{Colors.BOLD}🏗️  Create SharePoint Sites{Colors.NC}")
+            print(f"  {Colors.GREEN}{Colors.BOLD}🏗️  Step 1: Create SharePoint Sites{Colors.NC}")
             print(f"  {Colors.CYAN}{'─' * 40}{Colors.NC}")
             print()
             print(f"  {Colors.WHITE}How would you like to create sites?{Colors.NC}")
@@ -240,7 +581,7 @@ def main() -> None:
             # Populate Sites with Files
             clear_screen()
             print()
-            print(f"  {Colors.BLUE}{Colors.BOLD}📄 Populate Sites with Files{Colors.NC}")
+            print(f"  {Colors.BLUE}{Colors.BOLD}📄 Step 2: Populate Sites with Files{Colors.NC}")
             print(f"  {Colors.CYAN}{'─' * 40}{Colors.NC}")
             print()
             print(f"  {Colors.WHITE}How many files would you like to create?{Colors.NC}")
@@ -293,7 +634,7 @@ def main() -> None:
             # Delete Files or Sites
             clear_screen()
             print()
-            print(f"  {Colors.RED}{Colors.BOLD}🗑️  Delete Files or Sites{Colors.NC}")
+            print(f"  {Colors.RED}{Colors.BOLD}🗑️  Step 3: Delete Files or Sites{Colors.NC}")
             print(f"  {Colors.CYAN}{'─' * 40}{Colors.NC}")
             print()
             print(f"  {Colors.YELLOW}⚠ WARNING: These operations are DESTRUCTIVE!{Colors.NC}")
