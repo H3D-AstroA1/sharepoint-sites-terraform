@@ -37,9 +37,10 @@ sharepoint-sites-terraform/
 │   └── terraform.tfvars.example # Example variable values
 │
 ├── scripts/                     # Automation scripts
-│   ├── deploy.py                # ⭐ MAIN DEPLOYMENT SCRIPT
-│   ├── populate_files.py        # ⭐ FILE POPULATION SCRIPT
-│   └── cleanup.py               # ⚠️ CLEANUP/DELETE SCRIPT
+│   ├── menu.py                  # ⭐ MAIN MENU (START HERE!)
+│   ├── deploy.py                # Step 1: Create SharePoint sites
+│   ├── populate_files.py        # Step 2: Populate sites with files
+│   └── cleanup.py               # Step 3: Delete files/sites
 │
 └── docs/                        # Additional documentation
     └── TROUBLESHOOTING.md       # Common issues and solutions
@@ -48,6 +49,33 @@ sharepoint-sites-terraform/
 ---
 
 ## 🚀 Quick Start Guide
+
+### Easiest Way: Use the Main Menu
+
+```bash
+cd sharepoint-sites-terraform/scripts
+python menu.py
+```
+
+This opens an interactive menu that guides you through all operations:
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║   SharePoint Sites Management Tool                           ║
+╚══════════════════════════════════════════════════════════════╝
+
+  [1] 🏗️  Create SharePoint Sites
+  [2] 📄 Populate Sites with Files
+  [3] 🗑️  Delete Files or Sites
+  [4] 📋 List SharePoint Sites
+  [5] 📁 List Files in Sites
+  [H] ❓ Help & Documentation
+  [Q] 🚪 Quit
+```
+
+---
+
+### Alternative: Run Scripts Directly
 
 ### Step 1: Prerequisites
 
