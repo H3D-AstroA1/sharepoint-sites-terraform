@@ -420,7 +420,7 @@ Edit `config/environments.json` and replace the placeholder values:
         "subscription_id": "YOUR-AZURE-SUBSCRIPTION-ID",
         "subscription_name": "Your Subscription",
         "resource_group": "rg-sharepoint-sites",
-        "location": "uksouth"
+        "location": "westus2"
       },
       "m365": {
         "tenant_name": "your-tenant",

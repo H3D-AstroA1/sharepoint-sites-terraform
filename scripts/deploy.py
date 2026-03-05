@@ -811,7 +811,7 @@ def use_environment_config(env: Dict) -> Tuple[str, str, str, str, str, str]:
     tenant_id = azure.get('tenant_id', '')
     subscription_id = azure.get('subscription_id', '')
     resource_group = azure.get('resource_group', '')
-    location = azure.get('location', 'uksouth')
+    location = azure.get('location', 'westus2')
     m365_tenant = m365.get('tenant_name', '')
     admin_email = m365.get('admin_email', '')
     

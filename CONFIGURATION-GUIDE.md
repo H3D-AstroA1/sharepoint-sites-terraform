@@ -223,7 +223,7 @@ Examples:
 ```bash
 az group create \
   --name "rg-sharepoint-automation" \
-  --location "uksouth" \
+  --location "westus2" \
   --tags Environment=Production Project=SharePoint-Automation
 ```
 
@@ -412,7 +412,7 @@ Here's a complete `terraform.tfvars` example:
 azure_tenant_id       = "12345678-1234-1234-1234-123456789abc"
 azure_subscription_id = "87654321-4321-4321-4321-cba987654321"
 resource_group_name   = "rg-sharepoint-automation"
-location              = "uksouth"
+location              = "westus2"
 
 # ============================================
 # MICROSOFT 365 CONFIGURATION

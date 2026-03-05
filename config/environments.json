@@ -18,7 +18,7 @@
         "subscription_id": "<<CHANGE THIS: Your Azure Subscription ID, e.g., 87654321-4321-4321-4321-cba987654321>>",
         "subscription_name": "<<CHANGE THIS: Your subscription name, e.g., Production>>",
         "resource_group": "<<CHANGE THIS: Resource group name, e.g., rg-sharepoint-sites>>",
-        "location": "<<CHANGE THIS: Azure region, e.g., uksouth, westeurope, eastus>>"
+        "location": "<<CHANGE THIS: Azure region, e.g., westus2, westeurope, eastus>>"
       },
       
       "m365": {

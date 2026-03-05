@@ -100,7 +100,7 @@ variable "location" {
     
     TIP: Choose a region close to your users for better performance.
   EOT
-  default     = "uksouth"
+  default     = "westus2"
 
   validation {
     condition = contains([

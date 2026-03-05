@@ -55,7 +55,7 @@ resource_group_name = "rg-sharepoint-automation"
 
 # Azure region for resources
 # Common options: uksouth, ukwest, northeurope, westeurope, eastus, westus2
-location = "uksouth"
+location = "westus2"
 
 
 # ============================================================================
