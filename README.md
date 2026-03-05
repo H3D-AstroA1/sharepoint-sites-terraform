@@ -38,7 +38,8 @@ sharepoint-sites-terraform/
 │
 ├── scripts/                     # Automation scripts
 │   ├── deploy.py                # ⭐ MAIN DEPLOYMENT SCRIPT
-│   └── populate_files.py        # ⭐ FILE POPULATION SCRIPT
+│   ├── populate_files.py        # ⭐ FILE POPULATION SCRIPT
+│   └── cleanup.py               # ⚠️ CLEANUP/DELETE SCRIPT
 │
 └── docs/                        # Additional documentation
     └── TROUBLESHOOTING.md       # Common issues and solutions
@@ -235,6 +236,68 @@ Options:
   -s, --site FILTER    Filter sites by name (e.g., "hr", "finance")
   -l, --list-sites     List available SharePoint sites and exit
 ```
+
+---
+
+## 🗑️ Cleanup Script (Optional)
+
+When you need to reset your environment or remove test data, use the cleanup script.
+
+> ⚠️ **WARNING**: This script performs DESTRUCTIVE operations. Deleted files and sites may not be recoverable!
+
+### Quick Start
+
+```bash
+cd sharepoint-sites-terraform/scripts
+
+# Interactive mode (safest)
+python cleanup.py
+
+# Delete all files from all sites (keeps sites)
+python cleanup.py --delete-files
+
+# Delete files from specific sites only
+python cleanup.py --delete-files --site hr
+
+# Delete SharePoint sites (requires admin permissions)
+python cleanup.py --delete-sites
+
+# Delete everything (files and sites)
+python cleanup.py --delete-all
+
+# List sites without deleting
+python cleanup.py --list-sites
+```
+
+### Command Line Options
+
+```bash
+python cleanup.py --help
+
+Options:
+  --delete-files       Delete all files from SharePoint sites
+  --delete-sites       Delete SharePoint sites (requires admin permissions)
+  --delete-all         Delete both files and sites
+  -s, --site FILTER    Filter sites by name (e.g., "hr", "finance")
+  -l, --list-sites     List available SharePoint sites and exit
+  -y, --yes            Skip confirmation prompts (use with caution!)
+```
+
+### Safety Features
+
+| Feature | Description |
+|---------|-------------|
+| **Double confirmation** | Site deletion requires typing "DELETE" and "YES" |
+| **Site filtering** | Only affect specific sites with `--site` flag |
+| **List mode** | Preview sites before deleting with `--list-sites` |
+| **Recycle bin** | Deleted sites go to SharePoint recycle bin for 93 days |
+
+### Permissions Required
+
+| Operation | Required Permission |
+|-----------|---------------------|
+| Delete files | Sites.ReadWrite.All, Files.ReadWrite.All |
+| Delete sites | Sites.FullControl.All (SharePoint Admin) |
 
 ---
 
