@@ -11,6 +11,11 @@ Usage:
     python cleanup.py --delete-sites            # Delete SharePoint sites
     python cleanup.py --delete-all              # Delete both files and sites
     python cleanup.py --site hr --delete-files  # Delete files from HR sites only
+    python cleanup.py --select-sites            # Interactively select specific sites
+    python cleanup.py --select-files            # Interactively select specific files
+    python cleanup.py --list-sites              # List available sites
+    python cleanup.py --list-files              # List files in all sites
+    python cleanup.py --list-files --site hr    # List files in a SPECIFIC site
     python cleanup.py --help                    # Show help
 
 Requirements:
@@ -31,7 +36,7 @@ import urllib.error
 import urllib.parse
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Set
 
 # ============================================================================
 # CONFIGURATION
@@ -150,6 +155,34 @@ def get_access_token() -> Optional[str]:
         print_error(f"Failed to get access token: {e}")
     return None
 
+def parse_selection(selection: str, max_value: int) -> Set[int]:
+    """Parse a selection string like '1,3,5-7' into a set of integers."""
+    selected = set()
+    parts = selection.replace(' ', '').split(',')
+    
+    for part in parts:
+        if not part:
+            continue
+        if '-' in part:
+            try:
+                start, end = part.split('-', 1)
+                start_num = int(start)
+                end_num = int(end)
+                if 1 <= start_num <= max_value and 1 <= end_num <= max_value:
+                    for i in range(min(start_num, end_num), max(start_num, end_num) + 1):
+                        selected.add(i)
+            except ValueError:
+                continue
+        else:
+            try:
+                num = int(part)
+                if 1 <= num <= max_value:
+                    selected.add(num)
+            except ValueError:
+                continue
+    
+    return selected
+
 # ============================================================================
 # SHAREPOINT OPERATIONS
 # ============================================================================
@@ -228,6 +261,40 @@ def get_folder_files(site_id: str, folder_id: str, access_token: str) -> List[Di
         pass
     
     return files
+
+def get_all_site_items(site_id: str, access_token: str, include_folders: bool = True) -> List[Dict[str, Any]]:
+    """Get all items (files and optionally folders) from a site with full path info."""
+    items = []
+    
+    def get_items_recursive(folder_id: Optional[str] = None, path: str = "") -> None:
+        if folder_id:
+            url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/items/{folder_id}/children"
+        else:
+            url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root/children"
+        
+        try:
+            req = urllib.request.Request(url)
+            req.add_header("Authorization", f"Bearer {access_token}")
+            req.add_header("Content-Type", "application/json")
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                data = json.loads(response.read().decode())
+                for item in data.get("value", []):
+                    item_name = item.get("name", "")
+                    item_path = f"{path}/{item_name}" if path else item_name
+                    item["_full_path"] = item_path
+                    
+                    if "folder" in item:
+                        if include_folders:
+                            items.append(item)
+                        get_items_recursive(item["id"], item_path)
+                    else:
+                        items.append(item)
+        except Exception:
+            pass
+    
+    get_items_recursive()
+    return items
 
 def delete_file(site_id: str, item_id: str, access_token: str) -> bool:
     """Delete a file from SharePoint."""
@@ -358,8 +425,172 @@ def delete_all_files_from_site(site: Dict[str, Any], access_token: str) -> Tuple
     return success_count, fail_count
 
 # ============================================================================
+# INTERACTIVE SELECTION FUNCTIONS
+# ============================================================================
+
+def display_sites_for_selection(sites: List[Dict[str, Any]]) -> None:
+    """Display sites in a numbered list for selection."""
+    print()
+    print(f"  {Colors.WHITE}Available SharePoint Sites:{Colors.NC}")
+    print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+    print()
+    
+    for i, site in enumerate(sites, 1):
+        name = site.get("displayName", site.get("name", "Unknown"))
+        web_url = site.get("webUrl", "")
+        print(f"    {Colors.YELLOW}[{i:3}]{Colors.NC} {name}")
+        print(f"          {Colors.BLUE}{web_url}{Colors.NC}")
+    
+    print()
+    print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+
+def display_files_for_selection(files: List[Dict[str, Any]], site_name: str) -> None:
+    """Display files in a numbered list for selection."""
+    print()
+    print(f"  {Colors.WHITE}Files in {site_name}:{Colors.NC}")
+    print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+    print()
+    
+    for i, file in enumerate(files, 1):
+        name = file.get("name", "Unknown")
+        path = file.get("_full_path", name)
+        size = file.get("size", 0)
+        is_folder = "folder" in file
+        
+        # Format size
+        if size < 1024:
+            size_str = f"{size} B"
+        elif size < 1024 * 1024:
+            size_str = f"{size / 1024:.1f} KB"
+        else:
+            size_str = f"{size / (1024 * 1024):.1f} MB"
+        
+        if is_folder:
+            print(f"    {Colors.YELLOW}[{i:3}]{Colors.NC} {Colors.CYAN}📁 {path}/{Colors.NC}")
+        else:
+            print(f"    {Colors.YELLOW}[{i:3}]{Colors.NC} 📄 {path} ({size_str})")
+    
+    print()
+    print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+
+def interactive_select_sites(sites: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Interactively select specific sites from a list."""
+    display_sites_for_selection(sites)
+    
+    print(f"  {Colors.WHITE}Enter site numbers to select:{Colors.NC}")
+    print(f"  {Colors.BLUE}  - Single: 1{Colors.NC}")
+    print(f"  {Colors.BLUE}  - Multiple: 1,3,5{Colors.NC}")
+    print(f"  {Colors.BLUE}  - Range: 1-5{Colors.NC}")
+    print(f"  {Colors.BLUE}  - Combined: 1,3,5-10{Colors.NC}")
+    print(f"  {Colors.BLUE}  - All: *{Colors.NC}")
+    print()
+    
+    selection = input(f"  {Colors.YELLOW}Selection:{Colors.NC} ").strip()
+    
+    if selection == '*':
+        return sites
+    
+    selected_indices = parse_selection(selection, len(sites))
+    
+    if not selected_indices:
+        print_warning("No valid selection made")
+        return []
+    
+    selected_sites = [sites[i - 1] for i in sorted(selected_indices)]
+    
+    print()
+    print_success(f"Selected {len(selected_sites)} site(s):")
+    for site in selected_sites:
+        name = site.get("displayName", site.get("name", "Unknown"))
+        print(f"    - {name}")
+    
+    return selected_sites
+
+def interactive_select_files(site: Dict[str, Any], access_token: str) -> List[Dict[str, Any]]:
+    """Interactively select specific files from a site."""
+    site_id = site.get("id", "")
+    site_name = site.get("displayName", site.get("name", "Unknown"))
+    
+    print_info(f"Loading files from {site_name}...")
+    files = get_all_site_items(site_id, access_token, include_folders=True)
+    
+    if not files:
+        print_warning(f"No files found in {site_name}")
+        return []
+    
+    display_files_for_selection(files, site_name)
+    
+    print(f"  {Colors.WHITE}Enter file numbers to select:{Colors.NC}")
+    print(f"  {Colors.BLUE}  - Single: 1{Colors.NC}")
+    print(f"  {Colors.BLUE}  - Multiple: 1,3,5{Colors.NC}")
+    print(f"  {Colors.BLUE}  - Range: 1-5{Colors.NC}")
+    print(f"  {Colors.BLUE}  - Combined: 1,3,5-10{Colors.NC}")
+    print(f"  {Colors.BLUE}  - All: *{Colors.NC}")
+    print()
+    
+    selection = input(f"  {Colors.YELLOW}Selection:{Colors.NC} ").strip()
+    
+    if selection == '*':
+        return files
+    
+    selected_indices = parse_selection(selection, len(files))
+    
+    if not selected_indices:
+        print_warning("No valid selection made")
+        return []
+    
+    selected_files = [files[i - 1] for i in sorted(selected_indices)]
+    
+    print()
+    print_success(f"Selected {len(selected_files)} file(s):")
+    for f in selected_files[:10]:
+        name = f.get("_full_path", f.get("name", "Unknown"))
+        print(f"    - {name}")
+    if len(selected_files) > 10:
+        print(f"    ... and {len(selected_files) - 10} more")
+    
+    return selected_files
+
+# ============================================================================
 # MAIN FUNCTIONS
 # ============================================================================
+
+def list_files_mode(sites: List[Dict[str, Any]], access_token: str) -> None:
+    """List all files in the selected sites."""
+    print_step(4, "List Files in Sites")
+    
+    for site in sites:
+        site_id = site.get("id", "")
+        site_name = site.get("displayName", site.get("name", "Unknown"))
+        
+        print()
+        print(f"  {Colors.WHITE}📁 {site_name}{Colors.NC}")
+        print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
+        
+        files = get_all_site_items(site_id, access_token, include_folders=True)
+        
+        if not files:
+            print(f"    {Colors.YELLOW}(No files){Colors.NC}")
+            continue
+        
+        for f in files:
+            path = f.get("_full_path", f.get("name", "Unknown"))
+            size = f.get("size", 0)
+            is_folder = "folder" in f
+            
+            if size < 1024:
+                size_str = f"{size} B"
+            elif size < 1024 * 1024:
+                size_str = f"{size / 1024:.1f} KB"
+            else:
+                size_str = f"{size / (1024 * 1024):.1f} MB"
+            
+            if is_folder:
+                print(f"    {Colors.CYAN}📁 {path}/{Colors.NC}")
+            else:
+                print(f"    📄 {path} ({size_str})")
+        
+        print(f"    {Colors.GREEN}Total: {len(files)} items{Colors.NC}")
 
 def delete_files_mode(sites: List[Dict[str, Any]], access_token: str) -> None:
     """Delete all files from selected sites."""
@@ -376,6 +607,60 @@ def delete_files_mode(sites: List[Dict[str, Any]], access_token: str) -> None:
         success, fail = delete_all_files_from_site(site, access_token)
         total_success += success
         total_fail += fail
+    
+    print()
+    print_success(f"Deleted {total_success} items successfully")
+    if total_fail > 0:
+        print_warning(f"Failed to delete {total_fail} items")
+
+def delete_selected_files_mode(sites: List[Dict[str, Any]], access_token: str) -> None:
+    """Interactively select and delete specific files from sites."""
+    print_step(4, "Select and Delete Specific Files")
+    
+    total_success = 0
+    total_fail = 0
+    
+    for site in sites:
+        site_id = site.get("id", "")
+        site_name = site.get("displayName", site.get("name", "Unknown"))
+        
+        print()
+        print(f"  {Colors.WHITE}Processing: {site_name}{Colors.NC}")
+        
+        # Let user select files from this site
+        selected_files = interactive_select_files(site, access_token)
+        
+        if not selected_files:
+            continue
+        
+        # Confirm deletion
+        print()
+        print_warning(f"About to delete {len(selected_files)} file(s) from {site_name}")
+        confirm = input(f"  {Colors.YELLOW}Continue? (y/n):{Colors.NC} ").strip().lower()
+        
+        if confirm != 'y':
+            print_warning("Skipped")
+            continue
+        
+        # Delete selected files
+        for i, f in enumerate(selected_files):
+            item_id = f.get("id", "")
+            item_name = f.get("name", "Unknown")
+            is_folder = "folder" in f
+            
+            if is_folder:
+                success = delete_folder(site_id, item_id, access_token)
+            else:
+                success = delete_file(site_id, item_id, access_token)
+            
+            if success:
+                total_success += 1
+            else:
+                total_fail += 1
+            
+            print_progress(i + 1, len(selected_files), f"Deleting: {item_name[:30]}...")
+        
+        print()  # New line after progress
     
     print()
     print_success(f"Deleted {total_success} items successfully")
@@ -446,7 +731,18 @@ Examples:
     python cleanup.py --delete-sites            # Delete SharePoint sites
     python cleanup.py --delete-all              # Delete both files and sites
     python cleanup.py --site hr --delete-files  # Delete files from HR sites only
+    python cleanup.py --select-sites            # Interactively select specific sites
+    python cleanup.py --select-files            # Interactively select specific files to delete
     python cleanup.py --list-sites              # List available sites
+    python cleanup.py --list-files              # List files in all sites
+    python cleanup.py --list-files --site hr    # List files in a SPECIFIC site
+
+Selection Syntax (for --select-sites and --select-files):
+    - Single item:    1
+    - Multiple items: 1,3,5
+    - Range:          1-5
+    - Combined:       1,3,5-10
+    - All items:      *
         """
     )
     
@@ -475,6 +771,21 @@ Examples:
         '-l', '--list-sites',
         action='store_true',
         help='List available SharePoint sites and exit'
+    )
+    parser.add_argument(
+        '--list-files',
+        action='store_true',
+        help='List files in SharePoint sites'
+    )
+    parser.add_argument(
+        '--select-sites',
+        action='store_true',
+        help='Interactively select specific sites from a numbered list'
+    )
+    parser.add_argument(
+        '--select-files',
+        action='store_true',
+        help='Interactively select specific files to delete'
     )
     parser.add_argument(
         '-y', '--yes',
@@ -530,12 +841,19 @@ Examples:
     # Filter sites if specified
     if args.site:
         filter_term = args.site.lower()
-        sites = [s for s in sites if filter_term in s.get("name", "").lower() 
+        sites = [s for s in sites if filter_term in s.get("name", "").lower()
                  or filter_term in s.get("displayName", "").lower()]
         if not sites:
             print_error(f"No sites found matching '{args.site}'")
             sys.exit(1)
         print_info(f"Filtered to {len(sites)} sites matching '{args.site}'")
+    
+    # Interactive site selection mode
+    if args.select_sites:
+        sites = interactive_select_sites(sites)
+        if not sites:
+            print_warning("No sites selected")
+            sys.exit(0)
     
     # List sites mode
     if args.list_sites:
@@ -550,6 +868,16 @@ Examples:
         print()
         sys.exit(0)
     
+    # List files mode
+    if args.list_files:
+        list_files_mode(sites, access_token)
+        sys.exit(0)
+    
+    # Interactive file selection mode
+    if args.select_files:
+        delete_selected_files_mode(sites, access_token)
+        sys.exit(0)
+    
     # Determine operation mode
     delete_files = args.delete_files or args.delete_all
     delete_sites = args.delete_sites or args.delete_all
@@ -562,10 +890,13 @@ Examples:
         print("    [1] Delete all FILES from sites (keeps sites)")
         print("    [2] Delete SITES (and all their content)")
         print("    [3] Delete BOTH files and sites")
-        print("    [4] Cancel")
+        print("    [4] Select SPECIFIC sites to work with")
+        print("    [5] Select SPECIFIC files to delete")
+        print("    [6] List files in sites")
+        print("    [7] Cancel")
         print()
         
-        choice = input("  Enter your choice (1-4): ").strip()
+        choice = input("  Enter your choice (1-7): ").strip()
         
         if choice == "1":
             delete_files = True
@@ -574,6 +905,37 @@ Examples:
         elif choice == "3":
             delete_files = True
             delete_sites = True
+        elif choice == "4":
+            sites = interactive_select_sites(sites)
+            if not sites:
+                print_warning("No sites selected")
+                sys.exit(0)
+            # Ask what to do with selected sites
+            print()
+            print(f"  {Colors.WHITE}What would you like to do with selected sites?{Colors.NC}")
+            print()
+            print("    [1] Delete all FILES from these sites")
+            print("    [2] Delete these SITES")
+            print("    [3] Select specific FILES to delete")
+            print("    [4] Cancel")
+            print()
+            sub_choice = input("  Enter your choice (1-4): ").strip()
+            if sub_choice == "1":
+                delete_files = True
+            elif sub_choice == "2":
+                delete_sites = True
+            elif sub_choice == "3":
+                delete_selected_files_mode(sites, access_token)
+                sys.exit(0)
+            else:
+                print_warning("Operation cancelled")
+                sys.exit(0)
+        elif choice == "5":
+            delete_selected_files_mode(sites, access_token)
+            sys.exit(0)
+        elif choice == "6":
+            list_files_mode(sites, access_token)
+            sys.exit(0)
         else:
             print_warning("Operation cancelled")
             sys.exit(0)

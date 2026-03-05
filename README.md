@@ -250,7 +250,7 @@ When you need to reset your environment or remove test data, use the cleanup scr
 ```bash
 cd sharepoint-sites-terraform/scripts
 
-# Interactive mode (safest)
+# Interactive mode (safest - shows menu with all options)
 python cleanup.py
 
 # Delete all files from all sites (keeps sites)
@@ -267,6 +267,57 @@ python cleanup.py --delete-all
 
 # List sites without deleting
 python cleanup.py --list-sites
+
+# List files in all sites
+python cleanup.py --list-files
+
+# List files in a SPECIFIC site (combine --list-files with --site)
+python cleanup.py --list-files --site hr
+python cleanup.py --list-files --site finance
+python cleanup.py --list-files --site "executive"
+```
+
+### Interactive Selection (NEW!)
+
+The cleanup script now supports **interactive selection** of specific sites and files:
+
+```bash
+# Interactively select specific sites from a numbered list
+python cleanup.py --select-sites
+
+# Interactively select specific files to delete
+python cleanup.py --select-files
+
+# Combine with site filter
+python cleanup.py --select-files --site hr
+```
+
+#### Selection Syntax
+
+When prompted to select items, you can use:
+
+| Syntax | Example | Description |
+|--------|---------|-------------|
+| Single | `1` | Select item 1 |
+| Multiple | `1,3,5` | Select items 1, 3, and 5 |
+| Range | `1-5` | Select items 1 through 5 |
+| Combined | `1,3,5-10` | Select 1, 3, and 5 through 10 |
+| All | `*` | Select all items |
+
+#### Interactive Mode Menu
+
+When you run `python cleanup.py` without flags, you'll see:
+
+```
+What would you like to do?
+
+  [1] Delete all FILES from sites (keeps sites)
+  [2] Delete SITES (and all their content)
+  [3] Delete BOTH files and sites
+  [4] Select SPECIFIC sites to work with
+  [5] Select SPECIFIC files to delete
+  [6] List files in sites
+  [7] Cancel
 ```
 
 ### Command Line Options
@@ -280,6 +331,9 @@ Options:
   --delete-all         Delete both files and sites
   -s, --site FILTER    Filter sites by name (e.g., "hr", "finance")
   -l, --list-sites     List available SharePoint sites and exit
+  --list-files         List files in SharePoint sites
+  --select-sites       Interactively select specific sites from a numbered list
+  --select-files       Interactively select specific files to delete
   -y, --yes            Skip confirmation prompts (use with caution!)
 ```
 
@@ -289,7 +343,8 @@ Options:
 |---------|-------------|
 | **Double confirmation** | Site deletion requires typing "DELETE" and "YES" |
 | **Site filtering** | Only affect specific sites with `--site` flag |
-| **List mode** | Preview sites before deleting with `--list-sites` |
+| **Interactive selection** | Choose exactly which sites/files to delete |
+| **List mode** | Preview sites/files before deleting |
 | **Recycle bin** | Deleted sites go to SharePoint recycle bin for 93 days |
 
 ### Permissions Required
