@@ -1,0 +1,204 @@
+# ============================================================================
+# TERRAFORM VARIABLES FILE - EXAMPLE
+# ============================================================================
+# 
+# ⚠️  IMPORTANT: COPY THIS FILE BEFORE EDITING!
+# 
+# 1. Copy this file to 'terraform.tfvars':
+#    - Windows: copy terraform.tfvars.example terraform.tfvars
+#    - Linux/Mac: cp terraform.tfvars.example terraform.tfvars
+#
+# 2. Edit 'terraform.tfvars' with your actual values
+#
+# 3. NEVER commit terraform.tfvars to source control (it's in .gitignore)
+#
+# ============================================================================
+# 
+# HOW TO FIND YOUR VALUES:
+# 
+# AZURE TENANT ID:
+#   1. Go to https://portal.azure.com
+#   2. Search for "Microsoft Entra ID" (or "Azure Active Directory")
+#   3. On the Overview page, find "Tenant ID"
+#
+# AZURE SUBSCRIPTION ID:
+#   1. Go to https://portal.azure.com
+#   2. Search for "Subscriptions"
+#   3. Click on your subscription
+#   4. Copy the "Subscription ID"
+#
+# M365 TENANT NAME:
+#   1. Go to https://admin.microsoft.com
+#   2. Look at your domain (e.g., contoso.onmicrosoft.com)
+#   3. The tenant name is the part before .onmicrosoft.com (e.g., "contoso")
+#
+# ============================================================================
+
+
+# ============================================================================
+# REQUIRED: AZURE CONFIGURATION
+# ============================================================================
+# You MUST update these values with your actual Azure tenant and subscription.
+# ============================================================================
+
+# Your Azure Tenant ID (Directory ID)
+# Format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+azure_tenant_id = "00000000-0000-0000-0000-000000000000"
+
+# Your Azure Subscription ID
+# Format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+azure_subscription_id = "00000000-0000-0000-0000-000000000000"
+
+# Name for the Resource Group (will be created if it doesn't exist)
+# Recommendation: Use a descriptive name with "rg-" prefix
+resource_group_name = "rg-sharepoint-automation"
+
+# Azure region for resources
+# Common options: uksouth, ukwest, northeurope, westeurope, eastus, westus2
+location = "uksouth"
+
+
+# ============================================================================
+# REQUIRED: MICROSOFT 365 / SHAREPOINT CONFIGURATION
+# ============================================================================
+# You MUST update these values with your Microsoft 365 tenant information.
+# ============================================================================
+
+# Your Microsoft 365 tenant name (without .onmicrosoft.com)
+# Example: If your domain is "contoso.onmicrosoft.com", enter "contoso"
+m365_tenant_name = "yourtenant"
+
+# Email of the SharePoint administrator (must have SharePoint Admin role)
+# This user will be the primary owner of all created sites
+sharepoint_admin_email = "admin@yourtenant.onmicrosoft.com"
+
+
+# ============================================================================
+# OPTIONAL: SHAREPOINT SITES CONFIGURATION
+# ============================================================================
+# Customize the SharePoint sites to be created.
+# The default configuration creates 4 sites as specified.
+# You can modify display names, descriptions, and add owners/members.
+# ============================================================================
+
+sharepoint_sites = {
+  # Site 1: Executive Confidential
+  "executive-confidential" = {
+    display_name = "Executive Confidential"
+    description  = "Confidential documents and communications for executive leadership team. Access restricted to C-level executives and their direct reports."
+    template     = "STS#3"      # Team site without M365 Group
+    visibility   = "Private"    # Only members can access
+    owners       = [
+      # Add additional owners here (besides the admin)
+      # "ceo@yourtenant.onmicrosoft.com",
+      # "cfo@yourtenant.onmicrosoft.com"
+    ]
+    members      = [
+      # Add members here
+      # "executive.assistant@yourtenant.onmicrosoft.com"
+    ]
+  }
+
+  # Site 2: Finance Internal
+  "finance-internal" = {
+    display_name = "Finance Internal"
+    description  = "Internal finance team documents, reports, budgets, and collaboration space. For finance department use only."
+    template     = "STS#3"
+    visibility   = "Private"
+    owners       = [
+      # "finance.director@yourtenant.onmicrosoft.com"
+    ]
+    members      = [
+      # "finance.team@yourtenant.onmicrosoft.com"
+    ]
+  }
+
+  # Site 3: Claims Operations
+  "claims-operations" = {
+    display_name = "Claims Operations"
+    description  = "Claims operations team workspace for processing documentation, procedures, and team collaboration."
+    template     = "STS#3"
+    visibility   = "Private"
+    owners       = [
+      # "claims.manager@yourtenant.onmicrosoft.com"
+    ]
+    members      = [
+      # "claims.team@yourtenant.onmicrosoft.com"
+    ]
+  }
+
+  # Site 4: IT Infrastructure
+  "it-infra" = {
+    display_name = "IT Infrastructure"
+    description  = "IT infrastructure documentation, runbooks, architecture diagrams, and technical resources for the IT team."
+    template     = "STS#3"
+    visibility   = "Private"
+    owners       = [
+      # "it.manager@yourtenant.onmicrosoft.com"
+    ]
+    members      = [
+      # "it.team@yourtenant.onmicrosoft.com"
+    ]
+  }
+}
+
+
+# ============================================================================
+# OPTIONAL: SERVICE PRINCIPAL AUTHENTICATION
+# ============================================================================
+# Use these settings if you want to authenticate with a Service Principal
+# instead of Azure CLI. This is recommended for CI/CD pipelines.
+# ============================================================================
+
+# Set to true to use Service Principal authentication
+use_service_principal = false
+
+# Service Principal credentials (only needed if use_service_principal = true)
+# ⚠️ SECURITY: Consider using environment variables instead:
+#    - ARM_CLIENT_ID
+#    - ARM_CLIENT_SECRET
+# azure_client_id     = ""
+# azure_client_secret = ""
+
+
+# ============================================================================
+# OPTIONAL: KEY VAULT CONFIGURATION
+# ============================================================================
+# Azure Key Vault is used to securely store secrets and site information.
+# ============================================================================
+
+# Whether to create a Key Vault (recommended for production)
+create_key_vault = true
+
+# Custom Key Vault name (leave empty for auto-generated name)
+# Must be globally unique, 3-24 characters, letters/numbers/hyphens only
+key_vault_name = ""
+
+# Enable soft delete protection (recommended for production)
+enable_soft_delete_protection = true
+
+
+# ============================================================================
+# OPTIONAL: RESOURCE TAGS
+# ============================================================================
+# Tags help organize and track Azure resources for billing and management.
+# ============================================================================
+
+tags = {
+  Environment  = "Production"
+  Project      = "SharePoint-Sites-Automation"
+  Department   = "IT"
+  Owner        = "IT-Team"
+  CostCenter   = "IT-001"
+  ManagedBy    = "Terraform"
+  CreatedBy    = "SharePoint-Automation-Script"
+}
+
+
+# ============================================================================
+# OPTIONAL: DEPLOYMENT SETTINGS
+# ============================================================================
+
+# Maximum time to wait for SharePoint site creation (in minutes)
+# Increase if you experience timeout errors
+deployment_timeout_minutes = 30

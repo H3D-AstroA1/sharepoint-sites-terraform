@@ -1,0 +1,58 @@
+{
+  "_README": "=== ENVIRONMENT CONFIGURATION FILE ===",
+  "_INSTRUCTIONS": [
+    "This file contains your Azure and Microsoft 365 settings.",
+    "Replace ALL values marked with <<CHANGE THIS>> with your actual values.",
+    "To find your Tenant ID: Azure Portal > Microsoft Entra ID > Overview",
+    "To find your Subscription ID: Azure Portal > Subscriptions"
+  ],
+
+  "environments": [
+    {
+      "name": "Default",
+      "description": "My organization's Azure environment",
+      
+      "azure": {
+        "tenant_id": "<<CHANGE THIS: Your Azure Tenant ID, e.g., 12345678-1234-1234-1234-123456789abc>>",
+        "tenant_name": "<<CHANGE THIS: Your organization name, e.g., Contoso>>",
+        "subscription_id": "<<CHANGE THIS: Your Azure Subscription ID, e.g., 87654321-4321-4321-4321-cba987654321>>",
+        "subscription_name": "<<CHANGE THIS: Your subscription name, e.g., Production>>",
+        "resource_group": "<<CHANGE THIS: Resource group name, e.g., rg-sharepoint-sites>>",
+        "location": "<<CHANGE THIS: Azure region, e.g., uksouth, westeurope, eastus>>"
+      },
+      
+      "m365": {
+        "tenant_name": "<<CHANGE THIS: Your M365 tenant name (the part before .onmicrosoft.com), e.g., contoso>>",
+        "admin_email": "<<CHANGE THIS: SharePoint admin email, e.g., admin@contoso.onmicrosoft.com>>"
+      }
+    }
+  ],
+
+  "default_environment": "Default",
+
+  "_HOW_TO_ADD_MORE_ENVIRONMENTS": [
+    "=== ADDING MORE ENVIRONMENTS (OPTIONAL) ===",
+    "To add another environment (e.g., Production, Development, Staging):",
+    "",
+    "1. Copy the entire block from { 'name': 'Default' ... } to its closing }",
+    "2. Paste it AFTER the closing } but BEFORE the ] of the environments array",
+    "3. Add a comma after the first environment's closing }",
+    "4. Change the 'name' to something unique (e.g., 'Production')",
+    "5. Update all the values for the new environment",
+    "",
+    "Example with two environments:",
+    "",
+    "  'environments': [",
+    "    {",
+    "      'name': 'Development',",
+    "      'azure': { ... },",
+    "      'm365': { ... }",
+    "    },                          <-- Note the comma here!",
+    "    {",
+    "      'name': 'Production',",
+    "      'azure': { ... },",
+    "      'm365': { ... }",
+    "    }                           <-- No comma on the last one",
+    "  ]"
+  ]
+}

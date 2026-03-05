@@ -1,0 +1,203 @@
+{
+  "_comment": "SharePoint Sites Configuration File",
+  "_instructions": [
+    "This file defines the SharePoint sites to be created.",
+    "Add, remove, or modify sites as needed.",
+    "Each site requires: name, display_name, description",
+    "Optional: template, visibility, owners, members"
+  ],
+  
+  "sites": [
+    {
+      "name": "executive-leadership",
+      "display_name": "Executive Leadership",
+      "description": "Executive team communications, board materials, and strategic planning documents",
+      "template": "STS#3",
+      "visibility": "Private",
+      "owners": [],
+      "members": []
+    },
+    {
+      "name": "human-resources",
+      "display_name": "Human Resources",
+      "description": "HR policies, employee handbook, benefits information, and recruitment materials",
+      "template": "STS#3",
+      "visibility": "Private",
+      "owners": [],
+      "members": []
+    },
+    {
+      "name": "finance-department",
+      "display_name": "Finance Department",
+      "description": "Financial reports, budgets, forecasts, and accounting documentation",
+      "template": "STS#3",
+      "visibility": "Private",
+      "owners": [],
+      "members": []
+    },
+    {
+      "name": "it-department",
+      "display_name": "IT Department",
+      "description": "IT policies, system documentation, and technology resources",
+      "template": "STS#3",
+      "visibility": "Private",
+      "owners": [],
+      "members": []
+    },
+    {
+      "name": "legal-compliance",
+      "display_name": "Legal & Compliance",
+      "description": "Legal documents, contracts, regulatory compliance, and policy documentation",
+      "template": "STS#3",
+      "visibility": "Private",
+      "owners": [],
+      "members": []
+    },
+    {
+      "name": "marketing-department",
+      "display_name": "Marketing Department",
+      "description": "Marketing campaigns, brand assets, and promotional materials",
+      "template": "STS#3",
+      "visibility": "Private",
+      "owners": [],
+      "members": []
+    },
+    {
+      "name": "sales-department",
+      "display_name": "Sales Department",
+      "description": "Sales resources, client information, and sales documentation",
+      "template": "STS#3",
+      "visibility": "Private",
+      "owners": [],
+      "members": []
+    },
+    {
+      "name": "operations-department",
+      "display_name": "Operations Department",
+      "description": "Operational procedures, process documentation, and efficiency initiatives",
+      "template": "STS#3",
+      "visibility": "Private",
+      "owners": [],
+      "members": []
+    },
+    {
+      "name": "customer-service",
+      "display_name": "Customer Service",
+      "description": "Customer support resources, service documentation, and support tools",
+      "template": "STS#3",
+      "visibility": "Private",
+      "owners": [],
+      "members": []
+    },
+    {
+      "name": "company-announcements",
+      "display_name": "Company Announcements",
+      "description": "Company-wide news, announcements, and organizational updates",
+      "template": "SITEPAGEPUBLISHING#0",
+      "visibility": "Public",
+      "owners": [],
+      "members": []
+    },
+    {
+      "name": "employee-intranet",
+      "display_name": "Employee Intranet",
+      "description": "Central hub for all employees - news, resources, and company information",
+      "template": "SITEPAGEPUBLISHING#0",
+      "visibility": "Public",
+      "owners": [],
+      "members": []
+    },
+    {
+      "name": "training-development",
+      "display_name": "Training & Development",
+      "description": "Employee training materials, learning resources, and professional development",
+      "template": "STS#3",
+      "visibility": "Public",
+      "owners": [],
+      "members": []
+    },
+    {
+      "name": "health-safety",
+      "display_name": "Health & Safety",
+      "description": "Health and safety policies, procedures, and compliance documentation",
+      "template": "STS#3",
+      "visibility": "Public",
+      "owners": [],
+      "members": []
+    },
+    {
+      "name": "project-management-office",
+      "display_name": "Project Management Office",
+      "description": "PMO resources, project templates, and methodology documentation",
+      "template": "STS#3",
+      "visibility": "Private",
+      "owners": [],
+      "members": []
+    },
+    {
+      "name": "research-development",
+      "display_name": "Research & Development",
+      "description": "R&D projects, innovation initiatives, and product development documentation",
+      "template": "STS#3",
+      "visibility": "Private",
+      "owners": [],
+      "members": []
+    },
+    {
+      "name": "quality-assurance",
+      "display_name": "Quality Assurance",
+      "description": "QA processes, testing documentation, and quality standards",
+      "template": "STS#3",
+      "visibility": "Private",
+      "owners": [],
+      "members": []
+    },
+    {
+      "name": "facilities-management",
+      "display_name": "Facilities Management",
+      "description": "Building management, maintenance schedules, and facility resources",
+      "template": "STS#3",
+      "visibility": "Public",
+      "owners": [],
+      "members": []
+    },
+    {
+      "name": "corporate-communications",
+      "display_name": "Corporate Communications",
+      "description": "Internal and external communications, press releases, and media resources",
+      "template": "SITEPAGEPUBLISHING#0",
+      "visibility": "Public",
+      "owners": [],
+      "members": []
+    },
+    {
+      "name": "employee-recognition",
+      "display_name": "Employee Recognition",
+      "description": "Employee awards, achievements, and recognition programs",
+      "template": "SITEPAGEPUBLISHING#0",
+      "visibility": "Public",
+      "owners": [],
+      "members": []
+    },
+    {
+      "name": "social-committee",
+      "display_name": "Social Committee",
+      "description": "Company events, social activities, and team building initiatives",
+      "template": "STS#3",
+      "visibility": "Public",
+      "owners": [],
+      "members": []
+    }
+  ],
+
+  "defaults": {
+    "template": "STS#3",
+    "visibility": "Private",
+    "_template_options": {
+      "STS#3": "Team site (no Microsoft 365 Group)",
+      "GROUP#0": "Team site (with Microsoft 365 Group)",
+      "SITEPAGEPUBLISHING#0": "Communication site"
+    },
+    "_visibility_options": ["Private", "Public"]
+  }
+}

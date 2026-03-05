@@ -1,0 +1,32 @@
+# SharePoint Sites Terraform Deployment - Python Requirements
+# ============================================================
+# 
+# This file lists the Python packages required for the deployment scripts.
+# 
+# Installation:
+#   pip install -r requirements.txt
+#
+# Note: The deployment script uses only Python standard library modules,
+# so no additional packages are strictly required. However, these optional
+# packages can enhance the experience.
+# ============================================================
+
+# No external dependencies required!
+# The deploy.py script uses only Python standard library modules:
+# - argparse (CLI argument parsing)
+# - json (JSON file handling)
+# - os (OS operations)
+# - pathlib (Path handling)
+# - random (Random name generation)
+# - re (Regular expressions)
+# - subprocess (Running external commands)
+# - sys (System operations)
+
+# Optional: For enhanced terminal colors on Windows
+# colorama>=0.4.6
+
+# Optional: For YAML config file support (if you prefer YAML over JSON)
+# pyyaml>=6.0
+
+# Optional: For rich terminal output with progress bars
+# rich>=13.0.0

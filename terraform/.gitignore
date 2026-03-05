@@ -1,0 +1,106 @@
+# ============================================================================
+# TERRAFORM GITIGNORE
+# ============================================================================
+# This file tells Git which files to ignore (not track in version control).
+# This is important for security and to avoid committing unnecessary files.
+# ============================================================================
+
+# ============================================================================
+# SENSITIVE FILES - NEVER COMMIT THESE!
+# ============================================================================
+
+# Terraform variables file with actual values (contains secrets)
+terraform.tfvars
+*.tfvars
+!terraform.tfvars.example
+
+# Any files containing secrets
+*.secret
+*.secrets
+*secret*
+*password*
+*credential*
+
+# ============================================================================
+# TERRAFORM STATE FILES
+# ============================================================================
+# State files contain sensitive information about your infrastructure.
+# In production, use remote state storage (Azure Storage, Terraform Cloud).
+
+# Local state files
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Crash log files
+crash.log
+crash.*.log
+
+# ============================================================================
+# TERRAFORM WORKING DIRECTORIES
+# ============================================================================
+
+# Terraform plugin/provider cache
+.terraform/
+.terraform.lock.hcl
+
+# Terraform plan output files
+*.tfplan
+*.plan
+tfplan
+plan.out
+
+# ============================================================================
+# IDE AND EDITOR FILES
+# ============================================================================
+
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# JetBrains IDEs (IntelliJ, PyCharm, etc.)
+.idea/
+*.iml
+
+# Vim
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ============================================================================
+# LOGS AND TEMPORARY FILES
+# ============================================================================
+
+# Log files
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Backup files
+*.bak
+*.backup
+
+# ============================================================================
+# OVERRIDE FILES
+# ============================================================================
+# Override files are used for local customization and should not be committed.
+
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
