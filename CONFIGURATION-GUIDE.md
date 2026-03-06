@@ -203,9 +203,31 @@ Examples:
 - rg-sp-automation-eastus
 ```
 
+### Using an Existing Resource Group
+
+The deployment script supports using an existing resource group. When you run the script, you'll be prompted:
+
+```
+Would you like to:
+  [1] Create a new Resource Group
+  [2] Use an existing Resource Group
+```
+
+**When to use an existing resource group:**
+- You already have a resource group set up for this project
+- You're re-running the deployment after a previous attempt
+- Your organization requires using pre-created resource groups
+- You want to deploy into a shared resource group
+
+If you select option 2, the script will:
+1. List all existing resource groups in your subscription
+2. Let you select one from the list
+3. Set `use_existing_resource_group = true` in the Terraform configuration
+
 ### Creating a New Resource Group
 
 **Option 1: Let the Script Create It**
+- Select option 1 when prompted
 - The deployment script will create the resource group automatically
 - Just provide the name and location when prompted
 
@@ -218,6 +240,7 @@ Examples:
    - Resource group: Enter your name (e.g., `rg-sharepoint-automation`)
    - Region: Select your region (e.g., `UK South`)
 5. Click "Review + create" then "Create"
+6. When running the deployment, select "Use an existing Resource Group"
 
 **Option 3: Create via Azure CLI**
 ```bash
@@ -225,6 +248,23 @@ az group create \
   --name "rg-sharepoint-automation" \
   --location "westus2" \
   --tags Environment=Production Project=SharePoint-Automation
+```
+Then select "Use an existing Resource Group" when running the deployment.
+
+### Manual Configuration in terraform.tfvars
+
+If you're manually editing `terraform.tfvars`, set:
+
+```hcl
+# For a new resource group (Terraform will create it)
+resource_group_name         = "rg-sharepoint-automation"
+location                    = "westus2"
+use_existing_resource_group = false
+
+# For an existing resource group (Terraform will use it)
+resource_group_name         = "my-existing-rg"
+location                    = "westus2"  # Must match the existing RG's location
+use_existing_resource_group = true
 ```
 
 ---

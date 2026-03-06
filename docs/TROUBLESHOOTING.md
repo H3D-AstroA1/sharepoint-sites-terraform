@@ -284,18 +284,36 @@ Error: A resource with the ID "/subscriptions/.../resourceGroups/rg-sharepoint-a
 
 **Solutions:**
 
-**Option 1: Import existing resource group:**
+**Option 1: Use the existing resource group (RECOMMENDED)**
+
+When running `deploy.py`, select "Use an existing Resource Group" when prompted:
+```
+Would you like to:
+  [1] Create a new Resource Group
+  [2] Use an existing Resource Group
+
+Enter your choice: 2
+```
+
+Or manually set in `terraform.tfvars`:
+```hcl
+resource_group_name         = "rg-sharepoint-automation"
+use_existing_resource_group = true
+```
+
+**Option 2: Import existing resource group:**
 ```bash
 terraform import azurerm_resource_group.main /subscriptions/YOUR-SUB-ID/resourceGroups/rg-sharepoint-automation
 ```
 
-**Option 2: Use a different resource group name:**
+**Option 3: Use a different resource group name:**
 Edit `terraform.tfvars`:
 ```hcl
 resource_group_name = "rg-sharepoint-automation-new"
+use_existing_resource_group = false
 ```
 
-**Option 3: Delete existing resource group (if empty):**
+**Option 4: Delete existing resource group (if empty):**
 ```bash
 az group delete --name rg-sharepoint-automation --yes
 ```
