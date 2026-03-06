@@ -582,6 +582,11 @@ def azure_login() -> bool:
     try:
         subprocess.run(["az", "login"], check=True)
         return True
+    except FileNotFoundError:
+        print_error("Azure CLI is not installed or not in PATH.")
+        print_info("Please install Azure CLI: https://docs.microsoft.com/en-us/cli/azure/install-azure-cli")
+        print_info("Or run the main menu (menu.py) and use option [0] to install prerequisites.")
+        return False
     except subprocess.CalledProcessError:
         return False
 
