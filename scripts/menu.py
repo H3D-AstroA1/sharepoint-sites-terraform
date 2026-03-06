@@ -108,16 +108,31 @@ def get_os_info() -> Tuple[str, str]:
         return "linux", platform.machine()
 
 def command_exists(command: str) -> bool:
-    """Check if a command exists in the system PATH."""
-    if shutil.which(command) is not None:
+    """Check if a command exists and actually works."""
+    # First check if the command is in PATH
+    if shutil.which(command) is None:
+        # On Windows, also check for .cmd and .exe extensions
+        if platform.system().lower() == "windows":
+            if shutil.which(f"{command}.cmd") is None and shutil.which(f"{command}.exe") is None:
+                return False
+        else:
+            return False
+    
+    # Actually try to run the command to verify it works
+    try:
+        subprocess.run(
+            [command, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
         return True
-    # On Windows, also check for .cmd and .exe extensions
-    if platform.system().lower() == "windows":
-        if shutil.which(f"{command}.cmd") is not None:
-            return True
-        if shutil.which(f"{command}.exe") is not None:
-            return True
-    return False
+    except FileNotFoundError:
+        return False
+    except subprocess.TimeoutExpired:
+        return True  # Command exists but took too long
+    except Exception:
+        return False
 
 def get_command_version(command: str) -> Optional[str]:
     """Get the version of a command."""
