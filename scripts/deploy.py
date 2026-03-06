@@ -31,7 +31,7 @@ import urllib.request
 import zipfile
 import shutil
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 # ============================================================================
 # CONFIGURATION
@@ -193,8 +193,38 @@ def print_error(message: str) -> None:
 # UTILITY FUNCTIONS
 # ============================================================================
 
+# Default Azure CLI installation paths on Windows
+AZURE_CLI_PATHS = [
+    r"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd",
+    r"C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin\az.cmd",
+]
+
+def find_azure_cli_path() -> str:
+    """Find Azure CLI path, checking default installation locations on Windows."""
+    # First check if 'az' is in PATH
+    az_path = shutil.which("az")
+    if az_path:
+        return az_path
+    
+    # On Windows, check .cmd extension
+    if platform.system().lower() == "windows":
+        az_cmd_path = shutil.which("az.cmd")
+        if az_cmd_path:
+            return az_cmd_path
+        
+        # Check default installation paths
+        for path in AZURE_CLI_PATHS:
+            if os.path.exists(path):
+                return path
+    
+    return "az"  # Return 'az' as fallback
+
 def run_command(command: List[str], capture_output: bool = True, check: bool = True) -> subprocess.CompletedProcess:
     """Run a shell command and return the result."""
+    # Resolve Azure CLI path if command starts with 'az'
+    if command and command[0] == 'az':
+        command = [find_azure_cli_path()] + command[1:]
+    
     try:
         result = subprocess.run(
             command,
@@ -213,6 +243,18 @@ def run_command(command: List[str], capture_output: bool = True, check: bool = T
 
 def command_exists(command: str) -> bool:
     """Check if a command exists in the system PATH."""
+    # Special handling for Azure CLI
+    if command == "az":
+        az_path = find_azure_cli_path()
+        if az_path and az_path != "az":
+            # Verify it actually works
+            try:
+                subprocess.run([az_path, "--version"], capture_output=True, text=True, timeout=10)
+                return True
+            except Exception:
+                pass
+        # Fall through to standard check
+    
     try:
         if sys.platform == "win32":
             result = subprocess.run(["where", command], capture_output=True, text=True)
@@ -624,8 +666,9 @@ def check_azure_login() -> bool:
 def azure_login() -> bool:
     """Perform Azure CLI login."""
     print_info("Opening browser for Azure login...")
+    az_path = find_azure_cli_path()
     try:
-        subprocess.run(['az', 'login'], check=True)
+        subprocess.run([az_path, 'login'], check=True)
         return True
     except FileNotFoundError:
         print_error("Azure CLI is not installed or not in PATH.")
@@ -721,7 +764,7 @@ def terraform_output() -> None:
 # ENVIRONMENT CONFIGURATION FUNCTIONS
 # ============================================================================
 
-def load_environments() -> Dict:
+def load_environments() -> Optional[Dict]:
     """Load pre-configured environments from environments.json."""
     if not ENVIRONMENTS_FILE.exists():
         return None
@@ -750,7 +793,7 @@ def load_environments() -> Dict:
         return None
 
 
-def select_environment() -> Dict:
+def select_environment() -> Optional[Dict]:
     """Let user select from pre-configured environments or manual configuration."""
     env_data = load_environments()
     
@@ -823,7 +866,7 @@ def use_environment_config(env: Dict) -> Tuple[str, str, str, str, str, str]:
     return tenant_id, subscription_id, resource_group, location, m365_tenant, admin_email
 
 
-def get_environment_by_name(name: str) -> Dict:
+def get_environment_by_name(name: str) -> Optional[Dict]:
     """Get a specific environment by name from environments.json."""
     env_data = load_environments()
     

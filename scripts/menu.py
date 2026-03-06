@@ -107,8 +107,50 @@ def get_os_info() -> Tuple[str, str]:
     else:
         return "linux", platform.machine()
 
+# Default Azure CLI installation paths on Windows
+AZURE_CLI_PATHS = [
+    r"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd",
+    r"C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin\az.cmd",
+]
+
+def find_azure_cli_path() -> Optional[str]:
+    """Find Azure CLI path, checking default installation locations on Windows."""
+    # First check if 'az' is in PATH
+    az_path = shutil.which("az")
+    if az_path:
+        return az_path
+    
+    # On Windows, check .cmd extension
+    if platform.system().lower() == "windows":
+        az_cmd_path = shutil.which("az.cmd")
+        if az_cmd_path:
+            return az_cmd_path
+        
+        # Check default installation paths
+        for path in AZURE_CLI_PATHS:
+            if os.path.exists(path):
+                return path
+    
+    return None
+
 def command_exists(command: str) -> bool:
     """Check if a command exists and actually works."""
+    # Special handling for Azure CLI
+    if command == "az":
+        az_path = find_azure_cli_path()
+        if az_path:
+            try:
+                subprocess.run(
+                    [az_path, "--version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                return True
+            except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+                pass
+        return False
+    
     # First check if the command is in PATH
     if shutil.which(command) is None:
         # On Windows, also check for .cmd and .exe extensions
@@ -136,6 +178,22 @@ def command_exists(command: str) -> bool:
 
 def get_command_version(command: str) -> Optional[str]:
     """Get the version of a command."""
+    # Special handling for Azure CLI
+    if command == "az":
+        az_path = find_azure_cli_path()
+        if az_path:
+            try:
+                result = subprocess.run(
+                    [az_path, "--version"],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                return result.stdout.strip().split('\n')[0]
+            except Exception:
+                return None
+        return None
+    
     try:
         result = subprocess.run(
             [command, "--version"],
@@ -149,9 +207,12 @@ def get_command_version(command: str) -> Optional[str]:
 
 def check_azure_login() -> bool:
     """Check if user is logged into Azure CLI."""
+    az_path = find_azure_cli_path()
+    if not az_path:
+        return False
     try:
         result = subprocess.run(
-            ["az", "account", "show"],
+            [az_path, "account", "show"],
             capture_output=True,
             text=True,
             check=True
@@ -390,18 +451,20 @@ def run_prerequisites_check_menu() -> None:
         if choice == 'y':
             print()
             print_info("Opening browser for Azure login...")
-            try:
-                subprocess.run(["az", "login"], check=True)
-                print()
-                print_success("Azure login successful!")
-            except FileNotFoundError:
+            az_path = find_azure_cli_path()
+            if not az_path:
                 print_error("Azure CLI is not installed or not in PATH.")
                 print_info("Please install Azure CLI: https://docs.microsoft.com/en-us/cli/azure/install-azure-cli")
                 print_info("After installation, restart your terminal and try again.")
-            except subprocess.CalledProcessError as e:
-                print_error(f"Azure login failed: {e}")
-            except Exception as e:
-                print_error(f"Azure login failed: {e}")
+            else:
+                try:
+                    subprocess.run([az_path, "login"], check=True)
+                    print()
+                    print_success("Azure login successful!")
+                except subprocess.CalledProcessError as e:
+                    print_error(f"Azure login failed: {e}")
+                except Exception as e:
+                    print_error(f"Azure login failed: {e}")
     
     print()
     input(f"  {Colors.YELLOW}Press Enter to return to menu...{Colors.NC}")

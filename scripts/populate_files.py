@@ -21,7 +21,9 @@ Requirements:
 import argparse
 import json
 import os
+import platform
 import random
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -44,6 +46,32 @@ ENVIRONMENTS_FILE = CONFIG_DIR / "environments.json"
 
 # Maximum files that can be created in one run
 MAX_FILES = 1000
+
+# Default Azure CLI installation paths on Windows
+AZURE_CLI_PATHS = [
+    r"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd",
+    r"C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin\az.cmd",
+]
+
+def find_azure_cli_path() -> str:
+    """Find Azure CLI path, checking default installation locations on Windows."""
+    # First check if 'az' is in PATH
+    az_path = shutil.which("az")
+    if az_path:
+        return az_path
+    
+    # On Windows, check .cmd extension
+    if platform.system().lower() == "windows":
+        az_cmd_path = shutil.which("az.cmd")
+        if az_cmd_path:
+            return az_cmd_path
+        
+        # Check default installation paths
+        for path in AZURE_CLI_PATHS:
+            if os.path.exists(path):
+                return path
+    
+    return "az"  # Return 'az' as fallback
 
 # ============================================================================
 # REALISTIC FILE TEMPLATES BY DEPARTMENT
@@ -350,10 +378,11 @@ def switch_to_tenant(tenant_id: str) -> bool:
     if not tenant_id:
         return True
     
+    az_path = find_azure_cli_path()
     try:
         # Check if already logged into this tenant
         result = subprocess.run(
-            ["az", "account", "show", "--query", "tenantId", "-o", "tsv"],
+            [az_path, "account", "show", "--query", "tenantId", "-o", "tsv"],
             capture_output=True,
             text=True,
             check=True
@@ -367,7 +396,7 @@ def switch_to_tenant(tenant_id: str) -> bool:
         # Need to switch tenant
         print_info(f"Switching to tenant: {tenant_id[:20]}...")
         subprocess.run(
-            ["az", "login", "--tenant", tenant_id],
+            [az_path, "login", "--tenant", tenant_id],
             check=True
         )
         return True
@@ -382,6 +411,10 @@ def switch_to_tenant(tenant_id: str) -> bool:
 
 def run_command(command: List[str], capture_output: bool = True) -> Optional[subprocess.CompletedProcess]:
     """Run a shell command and return the result."""
+    # Resolve Azure CLI path if command starts with 'az'
+    if command and command[0] == 'az':
+        command = [find_azure_cli_path()] + command[1:]
+    
     try:
         result = subprocess.run(
             command,
@@ -579,8 +612,9 @@ def check_azure_login() -> bool:
 def azure_login() -> bool:
     """Perform Azure CLI login."""
     print_info("Opening browser for Azure login...")
+    az_path = find_azure_cli_path()
     try:
-        subprocess.run(["az", "login"], check=True)
+        subprocess.run([az_path, "login"], check=True)
         return True
     except FileNotFoundError:
         print_error("Azure CLI is not installed or not in PATH.")
