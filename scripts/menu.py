@@ -371,6 +371,12 @@ def run_prerequisites_check_menu() -> None:
                 subprocess.run(["az", "login"], check=True)
                 print()
                 print_success("Azure login successful!")
+            except FileNotFoundError:
+                print_error("Azure CLI is not installed or not in PATH.")
+                print_info("Please install Azure CLI: https://docs.microsoft.com/en-us/cli/azure/install-azure-cli")
+                print_info("After installation, restart your terminal and try again.")
+            except subprocess.CalledProcessError as e:
+                print_error(f"Azure login failed: {e}")
             except Exception as e:
                 print_error(f"Azure login failed: {e}")
     
