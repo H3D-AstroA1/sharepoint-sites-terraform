@@ -1148,10 +1148,11 @@ def generate_terraform_config(
     admin_email: str,
     sites: List[Dict],
     mode: str,
-    use_existing_rg: bool = False
+    use_existing_rg: bool = False,
+    step_num: int = 5
 ) -> None:
     """Generate the terraform.tfvars file."""
-    print_step(9, "Generating Terraform Configuration")
+    print_step(step_num, "Generating Terraform Configuration")
     
     sites_block = format_terraform_sites_block(sites)
     
@@ -1389,7 +1390,7 @@ Examples:
     # Generate Terraform configuration
     generate_terraform_config(
         tenant_id, subscription_id, rg_name, location,
-        m365_tenant, admin_email, sites, mode, use_existing_rg
+        m365_tenant, admin_email, sites, mode, use_existing_rg, current_step
     )
     
     current_step += 1
