@@ -82,6 +82,11 @@ provider "azurerm" {
   subscription_id = var.azure_subscription_id
   tenant_id       = var.azure_tenant_id
 
+  # Skip automatic resource provider registration
+  # This prevents errors when the user doesn't have permission to register providers
+  # or when certain providers (like Microsoft.TimeSeriesInsights) are deprecated
+  skip_provider_registration = true
+
   # Optional: Use Service Principal authentication
   # Uncomment these lines if using Service Principal instead of Azure CLI
   # client_id       = var.azure_client_id

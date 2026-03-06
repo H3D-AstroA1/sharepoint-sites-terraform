@@ -642,6 +642,49 @@ Remove-PnPTenantSite -Url "https://yourtenant.sharepoint.com/sites/site-name" -F
 
 ---
 
+### Issue 17: Resource Provider Registration Error
+
+**Error Message:**
+```
+Error: Error ensuring Resource Providers are registered.
+Terraform automatically attempts to register the Resource Providers it supports to ensure it's able to provision resources.
+If you don't have permission to register Resource Providers you may wish to use the "skip_provider_registration" flag in the Provider block to disable this functionality.
+
+Original Error: Cannot register providers: Microsoft.TimeSeriesInsights, Microsoft.Media, Microsoft.MixedReality.
+```
+
+**Cause:**
+The Azure subscription has deprecated or unavailable resource providers that Terraform tries to register automatically. Some providers like `Microsoft.TimeSeriesInsights`, `Microsoft.Media`, and `Microsoft.MixedReality` may be deprecated or not available in your subscription.
+
+**Solution:**
+
+This project's `providers.tf` already includes the fix:
+```hcl
+provider "azurerm" {
+  features { ... }
+  
+  # Skip automatic resource provider registration
+  skip_provider_registration = true
+}
+```
+
+If you're seeing this error, ensure your `providers.tf` has `skip_provider_registration = true` in the azurerm provider block.
+
+**Alternative: Register Required Providers Manually**
+
+If you prefer to register providers manually:
+```bash
+# Register only the providers you need
+az provider register --namespace Microsoft.Storage
+az provider register --namespace Microsoft.KeyVault
+az provider register --namespace Microsoft.Resources
+
+# Check registration status
+az provider show --namespace Microsoft.Storage --query "registrationState"
+```
+
+---
+
 ## ✅ Prevention Tips
 
 1. **Always run `terraform plan` before `terraform apply`**
