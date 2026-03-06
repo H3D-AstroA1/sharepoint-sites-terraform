@@ -221,6 +221,23 @@ def check_azure_login() -> bool:
     except Exception:
         return False
 
+
+def get_azure_account_info() -> Optional[Dict]:
+    """Get the current Azure account information."""
+    az_path = find_azure_cli_path()
+    if not az_path:
+        return None
+    try:
+        result = subprocess.run(
+            [az_path, "account", "show", "--output", "json"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return json.loads(result.stdout)
+    except Exception:
+        return None
+
 def install_azure_cli() -> bool:
     """Install Azure CLI based on the operating system."""
     os_type, _ = get_os_info()
@@ -332,15 +349,17 @@ def check_prerequisites(auto_install: bool = False) -> dict:
         "python": {"installed": True, "version": f"Python {sys.version.split()[0]}"},
         "azure_cli": {"installed": False, "version": None},
         "terraform": {"installed": False, "version": None},
-        "azure_login": {"logged_in": False}
+        "azure_login": {"logged_in": False, "account_info": None}
     }
     
     # Check Azure CLI
     if command_exists("az"):
         results["azure_cli"]["installed"] = True
         results["azure_cli"]["version"] = get_command_version("az")
-        # Check Azure login
+        # Check Azure login and get account info
         results["azure_login"]["logged_in"] = check_azure_login()
+        if results["azure_login"]["logged_in"]:
+            results["azure_login"]["account_info"] = get_azure_account_info()
     elif auto_install:
         if install_azure_cli():
             results["azure_cli"]["installed"] = True
@@ -383,6 +402,17 @@ def display_prerequisites_status(results: dict) -> None:
     if results["azure_cli"]["installed"]:
         if results["azure_login"]["logged_in"]:
             print(f"  {Colors.GREEN}✓{Colors.NC} Azure Login: Authenticated")
+            # Show account details if available
+            account_info = results["azure_login"].get("account_info")
+            if account_info:
+                user_name = account_info.get('user', {}).get('name', 'Unknown')
+                subscription_name = account_info.get('name', 'Unknown')
+                subscription_id = account_info.get('id', 'Unknown')
+                tenant_id = account_info.get('tenantId', 'Unknown')
+                print(f"    {Colors.CYAN}├─ User:{Colors.NC} {user_name}")
+                print(f"    {Colors.CYAN}├─ Subscription:{Colors.NC} {subscription_name}")
+                print(f"    {Colors.CYAN}├─ Subscription ID:{Colors.NC} {subscription_id}")
+                print(f"    {Colors.CYAN}└─ Tenant ID:{Colors.NC} {tenant_id}")
         else:
             print(f"  {Colors.YELLOW}⚠{Colors.NC} Azure Login: Not logged in")
     

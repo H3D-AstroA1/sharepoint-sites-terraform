@@ -496,6 +496,7 @@ def check_and_install_prerequisites() -> bool:
     
     all_met = True
     missing = []
+    azure_logged_in = False
     
     # Check Python version
     python_version = sys.version_info
@@ -510,6 +511,26 @@ def check_and_install_prerequisites() -> bool:
     if command_exists('az'):
         version = get_command_version('az')
         print_success(f"Azure CLI - OK ({version})")
+        
+        # Check Azure login status and show account info
+        if check_azure_login():
+            azure_logged_in = True
+            account_info = get_azure_account_info()
+            if account_info:
+                user_name = account_info.get('user', {}).get('name', 'Unknown')
+                subscription_name = account_info.get('name', 'Unknown')
+                subscription_id = account_info.get('id', 'Unknown')
+                tenant_id = account_info.get('tenantId', 'Unknown')
+                print_success(f"Azure Login - Authenticated")
+                print(f"  {Colors.CYAN}├─ User:{Colors.NC} {user_name}")
+                print(f"  {Colors.CYAN}├─ Subscription:{Colors.NC} {subscription_name}")
+                print(f"  {Colors.CYAN}├─ Subscription ID:{Colors.NC} {subscription_id}")
+                print(f"  {Colors.CYAN}└─ Tenant ID:{Colors.NC} {tenant_id}")
+            else:
+                print_success(f"Azure Login - Authenticated")
+        else:
+            print_warning("Azure Login - NOT LOGGED IN")
+            print_info("  You will be prompted to login later in the deployment process.")
     else:
         print_warning("Azure CLI - NOT INSTALLED")
         missing.append('az')
@@ -661,6 +682,17 @@ def check_azure_login() -> bool:
         return result.returncode == 0
     except Exception:
         return False
+
+
+def get_azure_account_info() -> Optional[Dict]:
+    """Get the current Azure account information."""
+    try:
+        result = run_command(['az', 'account', 'show', '--output', 'json'], check=False)
+        if result.returncode == 0:
+            return json.loads(result.stdout)
+        return None
+    except Exception:
+        return None
 
 
 def azure_login() -> bool:
