@@ -718,11 +718,25 @@ def get_resource_groups() -> List[Dict]:
 # TERRAFORM FUNCTIONS
 # ============================================================================
 
+def get_terraform_env() -> dict:
+    """Get environment variables for Terraform with Azure CLI path included."""
+    env = os.environ.copy()
+    
+    # Find Azure CLI path and add its directory to PATH
+    az_path = find_azure_cli_path()
+    if az_path and az_path != "az":
+        az_dir = os.path.dirname(az_path)
+        current_path = env.get('PATH', '')
+        if az_dir not in current_path:
+            env['PATH'] = az_dir + os.pathsep + current_path
+    
+    return env
+
 def terraform_init() -> bool:
     """Initialize Terraform."""
     print_info("Running terraform init...")
     try:
-        subprocess.run(['terraform', 'init'], cwd=TERRAFORM_DIR, check=True)
+        subprocess.run(['terraform', 'init'], cwd=TERRAFORM_DIR, check=True, env=get_terraform_env())
         return True
     except subprocess.CalledProcessError:
         return False
@@ -732,7 +746,7 @@ def terraform_plan() -> bool:
     """Run Terraform plan."""
     print_info("Running terraform plan...")
     try:
-        subprocess.run(['terraform', 'plan', '-out=tfplan'], cwd=TERRAFORM_DIR, check=True)
+        subprocess.run(['terraform', 'plan', '-out=tfplan'], cwd=TERRAFORM_DIR, check=True, env=get_terraform_env())
         return True
     except subprocess.CalledProcessError:
         return False
@@ -746,7 +760,7 @@ def terraform_apply(auto_approve: bool = False) -> bool:
         if auto_approve:
             cmd.append('-auto-approve')
         cmd.append('tfplan')
-        subprocess.run(cmd, cwd=TERRAFORM_DIR, check=True)
+        subprocess.run(cmd, cwd=TERRAFORM_DIR, check=True, env=get_terraform_env())
         return True
     except subprocess.CalledProcessError:
         return False
@@ -755,7 +769,7 @@ def terraform_apply(auto_approve: bool = False) -> bool:
 def terraform_output() -> None:
     """Display Terraform outputs."""
     try:
-        subprocess.run(['terraform', 'output', 'deployment_summary'], cwd=TERRAFORM_DIR, check=False)
+        subprocess.run(['terraform', 'output', 'deployment_summary'], cwd=TERRAFORM_DIR, check=False, env=get_terraform_env())
     except Exception:
         pass
 

@@ -787,6 +787,20 @@ def add_environment_wizard() -> None:
 # SCRIPT EXECUTION
 # ============================================================================
 
+def get_script_env() -> dict:
+    """Get environment variables for running scripts with Azure CLI path included."""
+    env = os.environ.copy()
+    
+    # Find Azure CLI path and add its directory to PATH
+    az_path = find_azure_cli_path()
+    if az_path and az_path != "az":
+        az_dir = os.path.dirname(az_path)
+        current_path = env.get('PATH', '')
+        if az_dir not in current_path:
+            env['PATH'] = az_dir + os.pathsep + current_path
+    
+    return env
+
 def run_script(script_name: str, args: list = None) -> None:  # type: ignore
     """Run a Python script with optional arguments."""
     script_path = SCRIPT_DIR / script_name
@@ -809,7 +823,7 @@ def run_script(script_name: str, args: list = None) -> None:  # type: ignore
     print()
     
     try:
-        subprocess.run(cmd, cwd=SCRIPT_DIR)
+        subprocess.run(cmd, cwd=SCRIPT_DIR, env=get_script_env())
     except KeyboardInterrupt:
         print()
         print(f"  {Colors.YELLOW}⚠{Colors.NC} Operation cancelled")

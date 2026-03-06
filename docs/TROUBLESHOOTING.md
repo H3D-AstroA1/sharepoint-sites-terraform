@@ -54,7 +54,47 @@ az account show
 
 ---
 
-### Issue 2: Terraform Init Fails
+### Issue 2: Azure CLI Not Found in PATH (Windows)
+
+**Error Message:**
+```
+Error: unable to build authorizer for Resource Manager API: could not configure AzureCli Authorizer: could not parse Azure CLI version: launching Azure CLI: exec: "az": executable file not found in %PATH%
+```
+
+**Cause:**
+Azure CLI was installed (e.g., via winget) but the installation path was not added to the system PATH environment variable.
+
+**Solution:**
+
+The Python scripts in this project automatically detect Azure CLI in its default installation locations:
+- `C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd`
+- `C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin\az.cmd`
+
+**If you're running scripts directly:**
+1. Use the main menu (`python scripts/menu.py`) which handles PATH automatically
+2. Or add Azure CLI to your PATH manually:
+
+```powershell
+# PowerShell - Add to current session
+$env:PATH = "C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin;" + $env:PATH
+
+# PowerShell - Add permanently (requires admin)
+[Environment]::SetEnvironmentVariable("PATH", "C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin;" + [Environment]::GetEnvironmentVariable("PATH", "Machine"), "Machine")
+```
+
+```cmd
+# Command Prompt - Add to current session
+set PATH=C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin;%PATH%
+```
+
+**Verify Azure CLI is accessible:**
+```bash
+az --version
+```
+
+---
+
+### Issue 3: Terraform Init Fails
 
 **Error Message:**
 ```
@@ -95,7 +135,7 @@ terraform init
 
 ---
 
-### Issue 3: Invalid Tenant ID or Subscription ID
+### Issue 4: Invalid Tenant ID or Subscription ID
 
 **Error Message:**
 ```
@@ -120,7 +160,7 @@ az account list --query "[].{Name:name, Id:id}" -o table
 
 ---
 
-### Issue 4: Environment Not Detected from environments.json
+### Issue 5: Environment Not Detected from environments.json
 
 **Symptom:**
 The script doesn't offer your pre-configured environment and goes straight to manual configuration.
@@ -154,7 +194,7 @@ az account tenant list --query "[].{Name:displayName, TenantId:tenantId}" -o tab
 
 ---
 
-### Issue 5: Invalid JSON in Configuration Files
+### Issue 6: Invalid JSON in Configuration Files
 
 **Error Message:**
 ```
@@ -206,7 +246,7 @@ python -c "import json; json.load(open('config/sites.json')); print('Valid!')"
 
 ---
 
-### Issue 6: Insufficient Permissions
+### Issue 7: Insufficient Permissions
 
 **Error Message:**
 ```
@@ -235,7 +275,7 @@ az ad sp create-for-rbac \
 
 ---
 
-### Issue 5: Resource Group Already Exists
+### Issue 8: Resource Group Already Exists
 
 **Error Message:**
 ```
@@ -262,7 +302,7 @@ az group delete --name rg-sharepoint-automation --yes
 
 ---
 
-### Issue 6: Key Vault Name Already Taken
+### Issue 9: Key Vault Name Already Taken
 
 **Error Message:**
 ```
@@ -285,7 +325,7 @@ create_key_vault = false
 
 ---
 
-### Issue 7: SharePoint Site Creation Fails
+### Issue 10: SharePoint Site Creation Fails
 
 **Error Message:**
 ```
@@ -322,7 +362,7 @@ Get-PnPTenantSite | Where-Object { $_.Url -like "*executive*" }
 
 ---
 
-### Issue 8: PnP PowerShell Connection Issues
+### Issue 11: PnP PowerShell Connection Issues
 
 **Error Message:**
 ```
@@ -342,7 +382,7 @@ Register-PnPManagementShellAccess
 
 ---
 
-### Issue 9: Terraform State Lock
+### Issue 12: Terraform State Lock
 
 **Error Message:**
 ```
@@ -365,7 +405,7 @@ rm .terraform.tfstate.lock.info
 
 ---
 
-### Issue 10: Module Not Found
+### Issue 13: Module Not Found
 
 **Error Message:**
 ```
@@ -521,7 +561,7 @@ $diagnostics | ConvertTo-Json | Out-File "diagnostics.json"
 
 ## 🔄 Random Site Generation Issues
 
-### Issue 11: Terraform Wants to Destroy Sites After Re-running Random Mode
+### Issue 14: Terraform Wants to Destroy Sites After Re-running Random Mode
 
 **Symptom:**
 After running `--random 10` twice, Terraform shows it wants to destroy some sites and create others.
@@ -554,7 +594,7 @@ terraform apply
 
 ---
 
-### Issue 12: Requested More Than 39 Random Sites
+### Issue 15: Requested More Than 39 Random Sites
 
 **Error Message:**
 ```
@@ -574,7 +614,7 @@ python deploy.py --config config/sites.json
 
 ---
 
-### Issue 13: SharePoint Sites Still Exist After Terraform Destroy
+### Issue 16: SharePoint Sites Still Exist After Terraform Destroy
 
 **Symptom:**
 After running `terraform destroy`, the SharePoint sites still exist in your tenant.
