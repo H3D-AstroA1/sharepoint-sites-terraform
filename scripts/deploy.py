@@ -843,9 +843,9 @@ def get_environment_by_name(name: str) -> Dict:
 # MAIN DEPLOYMENT LOGIC
 # ============================================================================
 
-def select_site_mode(args) -> Tuple[str, List[Dict]]:
+def select_site_mode(args, step_num: int = 1) -> Tuple[str, List[Dict]]:
     """Select site generation mode and return sites."""
-    print_step(2, "Select Site Generation Mode")
+    print_step(step_num, "Select Site Generation Mode")
     
     sites = []
     mode = ""
@@ -1190,19 +1190,8 @@ Examples:
     
     print(f"  {Colors.WHITE}Welcome to the SharePoint Sites Deployment Script!{Colors.NC}")
     print()
-    print(f"  {Colors.WHITE}This script supports two modes for defining SharePoint sites:{Colors.NC}")
-    print()
-    print(f"    {Colors.CYAN}[1] Configuration File Mode{Colors.NC}")
-    print("        Use a JSON file to define custom site names and settings")
-    print("        Default: config/sites.json")
-    print()
-    print(f"    {Colors.CYAN}[2] Random Generation Mode{Colors.NC}")
-    print("        Automatically generate sites with random names")
-    print(f"        Specify the number of sites to create (1-{len(DEPARTMENT_SITES)})")
-    print()
-    input("  Press Enter to continue or Ctrl+C to exit...")
     
-    # Step 1: Check prerequisites
+    # Step 1: Check prerequisites (if not skipped)
     if not args.skip_prerequisites:
         if not check_and_install_prerequisites():
             print()
@@ -1212,11 +1201,15 @@ Examples:
         print()
         print_success("All prerequisites validated!")
     
-    # Step 2: Select site generation mode
-    mode, sites = select_site_mode(args)
+    # Track step numbers dynamically
+    current_step = 1 if args.skip_prerequisites else 2
     
-    # Step 3: Azure authentication
-    print_step(3, "Azure Authentication")
+    # Select site generation mode
+    mode, sites = select_site_mode(args, current_step)
+    current_step += 1
+    
+    # Azure authentication
+    print_step(current_step, "Azure Authentication")
     print_info("Checking Azure CLI authentication status...")
     
     if not check_azure_login():
@@ -1226,9 +1219,10 @@ Examples:
             sys.exit(1)
     
     print_success("Azure CLI authentication successful!")
+    current_step += 1
     
-    # Step 4: Select environment or manual configuration
-    print_step(4, "Select Environment")
+    # Select environment or manual configuration
+    print_step(current_step, "Select Environment")
     
     # Check if environment was specified via command line
     selected_env = None
@@ -1260,25 +1254,31 @@ Examples:
     else:
         # Manual configuration
         print_info("Using manual configuration mode...")
+        current_step += 1
         
-        # Step 4a: Select tenant
-        print_step(4, "Select Azure Tenant (Manual)")
+        # Select tenant
+        print_step(current_step, "Select Azure Tenant (Manual)")
         tenant_id = select_azure_tenant()
+        current_step += 1
         
-        # Step 5: Select subscription
-        print_step(5, "Select Azure Subscription")
+        # Select subscription
+        print_step(current_step, "Select Azure Subscription")
         subscription_id = select_azure_subscription(tenant_id)
+        current_step += 1
         
-        # Step 6: Configure resource group
-        print_step(6, "Configure Resource Group")
+        # Configure resource group
+        print_step(current_step, "Configure Resource Group")
         rg_name, location = configure_resource_group()
+        current_step += 1
         
-        # Step 7: Configure M365 settings
-        print_step(7, "Configure Microsoft 365 Settings")
+        # Configure M365 settings
+        print_step(current_step, "Configure Microsoft 365 Settings")
         m365_tenant, admin_email = configure_m365_settings()
     
-    # Step 8: Review configuration
-    print_step(8, "Review Configuration")
+    current_step += 1
+    
+    # Review configuration
+    print_step(current_step, "Review Configuration")
     
     print()
     print(f"  {Colors.WHITE}Please review your configuration:{Colors.NC}")
@@ -1309,14 +1309,18 @@ Examples:
         print_warning("Deployment cancelled. Please run the script again.")
         sys.exit(0)
     
-    # Step 9: Generate Terraform configuration
+    current_step += 1
+    
+    # Generate Terraform configuration
     generate_terraform_config(
         tenant_id, subscription_id, rg_name, location,
         m365_tenant, admin_email, sites, mode
     )
     
-    # Step 10: Initialize Terraform
-    print_step(10, "Initializing Terraform")
+    current_step += 1
+    
+    # Initialize Terraform
+    print_step(current_step, "Initializing Terraform")
     
     if not terraform_init():
         print_error("Terraform init failed!")
@@ -1324,8 +1328,10 @@ Examples:
     
     print_success("Terraform initialized successfully!")
     
-    # Step 11: Terraform plan
-    print_step(11, "Planning Deployment")
+    current_step += 1
+    
+    # Terraform plan
+    print_step(current_step, "Planning Deployment")
     
     if not terraform_plan():
         print_error("Terraform plan failed!")
@@ -1333,8 +1339,10 @@ Examples:
     
     print_success("Terraform plan completed!")
     
-    # Step 12: Terraform apply
-    print_step(12, "Deploying Resources")
+    current_step += 1
+    
+    # Terraform apply
+    print_step(current_step, "Deploying Resources")
     
     if not args.auto_approve:
         print()
@@ -1348,8 +1356,10 @@ Examples:
     
     print_success("Terraform apply completed successfully!")
     
-    # Step 13: Display results
-    print_step(13, "Deployment Complete")
+    current_step += 1
+    
+    # Display results
+    print_step(current_step, "Deployment Complete")
     
     print()
     terraform_output()

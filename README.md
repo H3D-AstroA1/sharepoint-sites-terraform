@@ -175,6 +175,8 @@ The script will guide you through:
 7. ✅ Configuration review
 8. ✅ Terraform deployment
 
+> 💡 **Tip**: You can press `Q` to quit or `Ctrl+C` to cancel at any interactive prompt.
+
 ---
 
 ## 🔧 Command Line Options
