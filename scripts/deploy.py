@@ -870,8 +870,21 @@ def select_site_mode(args) -> Tuple[str, List[Dict]]:
         print(f"        - Specify how many sites to create (1-{len(DEPARTMENT_SITES)})")
         print("        - Sites will have realistic department names with mixed visibility")
         print()
+        print(f"    {Colors.RED}[Q] Quit{Colors.NC}")
+        print()
         
-        choice = prompt_selection("Enter your choice", 2)
+        while True:
+            choice_input = input(f"  Enter your choice (1-2, Q to quit): ").strip().lower()
+            if choice_input == 'q':
+                print_warning("Deployment cancelled.")
+                sys.exit(0)
+            try:
+                choice = int(choice_input)
+                if 1 <= choice <= 2:
+                    break
+                print_warning("Please enter 1, 2, or Q to quit.")
+            except ValueError:
+                print_warning("Please enter 1, 2, or Q to quit.")
         mode = "config" if choice == 1 else "random"
     
     # Process based on mode

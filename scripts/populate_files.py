@@ -889,15 +889,20 @@ Examples:
         print()
         print(f"  {Colors.WHITE}How many files would you like to create?{Colors.NC}")
         print(f"  (Files will be distributed across {len(sites)} sites)")
+        print(f"  {Colors.CYAN}(Enter Q to quit){Colors.NC}")
         print()
         while True:
+            user_input = input(f"  Enter number of files (1-{MAX_FILES}, Q to quit): ").strip()
+            if user_input.lower() == 'q':
+                print_warning("Operation cancelled.")
+                sys.exit(0)
             try:
-                num_files = int(input(f"  Enter number of files (1-{MAX_FILES}): ").strip())
+                num_files = int(user_input)
                 if 1 <= num_files <= MAX_FILES:
                     break
                 print_warning(f"Please enter a number between 1 and {MAX_FILES}")
             except ValueError:
-                print_warning("Please enter a valid number")
+                print_warning("Please enter a valid number or Q to quit")
     
     # Validate file count
     if num_files < 1 or num_files > MAX_FILES:
