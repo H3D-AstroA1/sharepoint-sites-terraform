@@ -109,7 +109,15 @@ def get_os_info() -> Tuple[str, str]:
 
 def command_exists(command: str) -> bool:
     """Check if a command exists in the system PATH."""
-    return shutil.which(command) is not None
+    if shutil.which(command) is not None:
+        return True
+    # On Windows, also check for .cmd and .exe extensions
+    if platform.system().lower() == "windows":
+        if shutil.which(f"{command}.cmd") is not None:
+            return True
+        if shutil.which(f"{command}.exe") is not None:
+            return True
+    return False
 
 def get_command_version(command: str) -> Optional[str]:
     """Get the version of a command."""
