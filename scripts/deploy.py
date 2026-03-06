@@ -1422,7 +1422,18 @@ Examples:
     
     if not args.auto_approve:
         print()
-        if not confirm("Do you want to apply this plan and create the resources?"):
+        print(f"  {Colors.CYAN}╔══════════════════════════════════════════════════════════════════════════════╗{Colors.NC}")
+        print(f"  {Colors.CYAN}║                         READY TO CREATE RESOURCES                           ║{Colors.NC}")
+        print(f"  {Colors.CYAN}╠══════════════════════════════════════════════════════════════════════════════╣{Colors.NC}")
+        print(f"  {Colors.CYAN}║{Colors.NC}                                                                              {Colors.CYAN}║{Colors.NC}")
+        print(f"  {Colors.CYAN}║{Colors.NC}  The plan above shows what will be created in Azure and SharePoint.         {Colors.CYAN}║{Colors.NC}")
+        print(f"  {Colors.CYAN}║{Colors.NC}                                                                              {Colors.CYAN}║{Colors.NC}")
+        print(f"  {Colors.CYAN}║{Colors.NC}  {Colors.GREEN}Type 'y' and press Enter{Colors.NC} - to CREATE the SharePoint sites             {Colors.CYAN}║{Colors.NC}")
+        print(f"  {Colors.CYAN}║{Colors.NC}  {Colors.RED}Type 'n' and press Enter{Colors.NC} - to CANCEL and exit without changes         {Colors.CYAN}║{Colors.NC}")
+        print(f"  {Colors.CYAN}║{Colors.NC}                                                                              {Colors.CYAN}║{Colors.NC}")
+        print(f"  {Colors.CYAN}╚══════════════════════════════════════════════════════════════════════════════╝{Colors.NC}")
+        print()
+        if not confirm("Proceed with deployment?"):
             print_warning("Deployment cancelled by user.")
             sys.exit(0)
     
