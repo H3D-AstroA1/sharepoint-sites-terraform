@@ -83,6 +83,25 @@ variable "resource_group_name" {
   }
 }
 
+variable "use_existing_resource_group" {
+  type        = bool
+  description = <<-EOT
+    Whether to use an existing resource group instead of creating a new one.
+    
+    SET TO TRUE IF:
+    - The resource group already exists in Azure
+    - You want to deploy into an existing resource group
+    - You're re-running the deployment after a previous attempt
+    
+    SET TO FALSE IF:
+    - You want Terraform to create a new resource group
+    - This is a fresh deployment
+    
+    NOTE: If true, the resource group specified in resource_group_name must exist.
+  EOT
+  default     = false
+}
+
 variable "location" {
   type        = string
   description = <<-EOT

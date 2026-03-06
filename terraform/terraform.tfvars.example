@@ -49,13 +49,17 @@ azure_tenant_id = "00000000-0000-0000-0000-000000000000"
 # Format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 azure_subscription_id = "00000000-0000-0000-0000-000000000000"
 
-# Name for the Resource Group (will be created if it doesn't exist)
+# Name for the Resource Group
 # Recommendation: Use a descriptive name with "rg-" prefix
 resource_group_name = "rg-sharepoint-automation"
 
 # Azure region for resources
 # Common options: uksouth, ukwest, northeurope, westeurope, eastus, westus2
 location = "westus2"
+
+# Set to true if the resource group already exists in Azure
+# Set to false to create a new resource group
+use_existing_resource_group = false
 
 
 # ============================================================================

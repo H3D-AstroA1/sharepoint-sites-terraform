@@ -71,17 +71,34 @@ data "azurerm_client_config" "current" {}
 # Get current Azure AD client configuration
 data "azuread_client_config" "current" {}
 
+# Get existing resource group (if use_existing_resource_group is true)
+data "azurerm_resource_group" "existing" {
+  count = var.use_existing_resource_group ? 1 : 0
+  name  = var.resource_group_name
+}
+
 # ============================================================================
 # RESOURCE GROUP
 # ============================================================================
 # The Resource Group is a container for all Azure resources.
 # All resources in this deployment will be placed in this group.
+#
+# If use_existing_resource_group is true, we use the existing resource group.
+# If false, we create a new one.
 # ============================================================================
 
 resource "azurerm_resource_group" "main" {
+  count    = var.use_existing_resource_group ? 0 : 1
   name     = var.resource_group_name
   location = var.location
   tags     = local.common_tags
+}
+
+# Local values for resource group reference (works for both new and existing)
+locals {
+  resource_group_name     = var.use_existing_resource_group ? data.azurerm_resource_group.existing[0].name : azurerm_resource_group.main[0].name
+  resource_group_location = var.use_existing_resource_group ? data.azurerm_resource_group.existing[0].location : azurerm_resource_group.main[0].location
+  resource_group_id       = var.use_existing_resource_group ? data.azurerm_resource_group.existing[0].id : azurerm_resource_group.main[0].id
 }
 
 # ============================================================================
@@ -95,8 +112,8 @@ resource "azurerm_key_vault" "main" {
   count = var.create_key_vault ? 1 : 0
 
   name                = local.key_vault_name
-  location            = azurerm_resource_group.main.location
-  resource_group_name = azurerm_resource_group.main.name
+  location            = local.resource_group_location
+  resource_group_name = local.resource_group_name
   tenant_id           = data.azurerm_client_config.current.tenant_id
   sku_name            = "standard"
 
@@ -115,6 +132,12 @@ resource "azurerm_key_vault" "main" {
   }
 
   tags = local.common_tags
+
+  # Depend on resource group (either new or existing)
+  depends_on = [
+    azurerm_resource_group.main,
+    data.azurerm_resource_group.existing
+  ]
 }
 
 # ============================================================================
@@ -175,8 +198,10 @@ resource "null_resource" "sharepoint_sites" {
     interpreter = ["powershell", "-Command"]
   }
 
+  # Depend on resource group (either new or existing)
   depends_on = [
-    azurerm_resource_group.main
+    azurerm_resource_group.main,
+    data.azurerm_resource_group.existing
   ]
 }
 
