@@ -778,21 +778,21 @@ def main() -> None:
             sub_choice = input(f"  {Colors.YELLOW}Enter your choice:{Colors.NC} ").strip().lower()
             
             if sub_choice == '1':
-                run_script("deploy.py")
+                run_script("deploy.py", ["--skip-prerequisites"])
             elif sub_choice == '2':
-                run_script("deploy.py", ["--random", "5", "--auto-approve"])
+                run_script("deploy.py", ["--skip-prerequisites", "--random", "5", "--auto-approve"])
             elif sub_choice == '3':
-                run_script("deploy.py", ["--random", "10", "--auto-approve"])
+                run_script("deploy.py", ["--skip-prerequisites", "--random", "10", "--auto-approve"])
             elif sub_choice == '4':
                 print()
                 count = input(f"  {Colors.YELLOW}Number of sites (1-39):{Colors.NC} ").strip()
                 if count.isdigit() and 1 <= int(count) <= 39:
-                    run_script("deploy.py", ["--random", count])
+                    run_script("deploy.py", ["--skip-prerequisites", "--random", count])
                 else:
                     print(f"  {Colors.RED}✗{Colors.NC} Invalid number. Must be between 1 and 39.")
                     input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
             elif sub_choice == '5':
-                run_script("deploy.py", ["--config", str(SCRIPT_DIR.parent / "config" / "sites.json")])
+                run_script("deploy.py", ["--skip-prerequisites", "--config", str(SCRIPT_DIR.parent / "config" / "sites.json")])
             # else: back to menu
             
         elif choice == '2':
