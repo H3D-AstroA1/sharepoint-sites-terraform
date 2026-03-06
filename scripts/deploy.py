@@ -1488,9 +1488,25 @@ Examples:
     print()
     print(f"  {Colors.GREEN}Your SharePoint sites have been created!{Colors.NC}")
     print()
-    print(f"  {Colors.WHITE}Site URLs:{Colors.NC}")
-    for site in sites:
-        print(f"    {Colors.CYAN}- https://{m365_tenant}.sharepoint.com/sites/{site['name']}{Colors.NC}")
+    
+    # Separate sites by visibility
+    private_sites = [s for s in sites if s.get('visibility', 'Private').lower() == 'private']
+    public_sites = [s for s in sites if s.get('visibility', 'Private').lower() == 'public']
+    
+    if private_sites:
+        print(f"  {Colors.WHITE}{Colors.BOLD}Private Sites:{Colors.NC}")
+        for site in private_sites:
+            print(f"    {Colors.YELLOW}🔒{Colors.NC} {Colors.CYAN}https://{m365_tenant}.sharepoint.com/sites/{site['name']}{Colors.NC}")
+        print()
+    
+    if public_sites:
+        print(f"  {Colors.WHITE}{Colors.BOLD}Public Sites:{Colors.NC}")
+        for site in public_sites:
+            print(f"    {Colors.GREEN}🌐{Colors.NC} {Colors.CYAN}https://{m365_tenant}.sharepoint.com/sites/{site['name']}{Colors.NC}")
+        print()
+    
+    print(f"  {Colors.WHITE}{Colors.BOLD}SharePoint Admin Center:{Colors.NC}")
+    print(f"    {Colors.CYAN}https://{m365_tenant}-admin.sharepoint.com{Colors.NC}")
     print()
 
 

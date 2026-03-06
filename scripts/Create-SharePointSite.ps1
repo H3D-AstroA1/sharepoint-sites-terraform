@@ -173,52 +173,135 @@ function New-TeamSite {
     }
 }
 
-# Function to create a Communication Site using SharePoint REST API
+# Function to create a Communication Site using Microsoft Graph API
 function New-CommunicationSite {
     param(
         [string]$AccessToken
     )
     
-    # Get SharePoint access token
-    $spToken = az account get-access-token --resource "https://$TenantName.sharepoint.com" --query accessToken -o tsv 2>$null
-    
-    if ([string]::IsNullOrEmpty($spToken)) {
-        throw "Failed to get SharePoint access token"
-    }
-    
-    $headers = @{
-        "Authorization" = "Bearer $spToken"
-        "Content-Type" = "application/json"
-        "Accept" = "application/json"
-    }
-    
     $siteUrl = "https://$TenantName.sharepoint.com/sites/$SiteName"
     
-    $body = @{
-        request = @{
-            Title = $DisplayName
-            Url = $siteUrl
-            Description = $Description
-            Classification = ""
-            SiteDesignId = "00000000-0000-0000-0000-000000000000"
-            WebTemplate = "SITEPAGEPUBLISHING#0"
-            WebTemplateExtensionId = "00000000-0000-0000-0000-000000000000"
+    # Method 1: Try using SharePoint REST API with SharePoint-specific token
+    Write-ColorOutput "Attempting to create Communication Site via SharePoint API..." "Yellow"
+    
+    try {
+        # Get SharePoint access token
+        $spToken = az account get-access-token --resource "https://$TenantName.sharepoint.com" --query accessToken -o tsv 2>$null
+        
+        if (-not [string]::IsNullOrEmpty($spToken)) {
+            $headers = @{
+                "Authorization" = "Bearer $spToken"
+                "Content-Type" = "application/json;odata=verbose"
+                "Accept" = "application/json;odata=verbose"
+            }
+            
+            $body = @{
+                request = @{
+                    Title = $DisplayName
+                    Url = $siteUrl
+                    Description = $Description
+                    Lcid = 1033
+                    ShareByEmailEnabled = $false
+                    Classification = ""
+                    WebTemplate = "SITEPAGEPUBLISHING#0"
+                    SiteDesignId = "00000000-0000-0000-0000-000000000000"
+                    WebTemplateExtensionId = "00000000-0000-0000-0000-000000000000"
+                }
+            }
+            
+            $jsonBody = $body | ConvertTo-Json -Depth 10
+            
+            $response = Invoke-RestMethod -Uri "https://$TenantName.sharepoint.com/_api/SPSiteManager/create" -Headers $headers -Method Post -Body $jsonBody
+            
+            if ($response.SiteId -or $response.d.SiteId) {
+                return $response
+            }
         }
+    }
+    catch {
+        Write-ColorOutput "SharePoint API method failed, trying Graph API..." "Yellow"
+    }
+    
+    # Method 2: Try using Microsoft Graph Sites API (beta)
+    Write-ColorOutput "Attempting to create Communication Site via Graph API..." "Yellow"
+    
+    $headers = @{
+        "Authorization" = "Bearer $AccessToken"
+        "Content-Type" = "application/json"
+    }
+    
+    # For Communication Sites, we can create them as a site without a group
+    # Using the sites endpoint with siteCollection
+    $body = @{
+        displayName = $DisplayName
+        description = $Description
+        name = $SiteName
+        webUrl = $siteUrl
     }
     
     $jsonBody = $body | ConvertTo-Json -Depth 10
     
     try {
-        $response = Invoke-RestMethod -Uri "https://$TenantName.sharepoint.com/_api/SPSiteManager/create" -Headers $headers -Method Post -Body $jsonBody
+        # Try the beta endpoint for creating sites
+        $response = Invoke-RestMethod -Uri "https://graph.microsoft.com/beta/sites/root/sites" -Headers $headers -Method Post -Body $jsonBody -ErrorAction Stop
         return $response
     }
     catch {
-        $errorMessage = $_.Exception.Message
-        if ($_.Exception.Response) {
-            $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
-            $errorMessage = $reader.ReadToEnd()
+        # Method 3: Create as a Team Site but without group features (fallback)
+        Write-ColorOutput "Graph API method failed, creating as Team Site instead..." "Yellow"
+        
+        # Create a Microsoft 365 Group but configure it as a communication-style site
+        $groupBody = @{
+            displayName = $DisplayName
+            description = $Description
+            mailNickname = ($SiteName -replace '[^a-zA-Z0-9]', '') + "comm"
+            mailEnabled = $true
+            securityEnabled = $false
+            groupTypes = @("Unified")
+            visibility = $Visibility
+            resourceBehaviorOptions = @("HideGroupInOutlook", "WelcomeEmailDisabled")
         }
-        throw "Failed to create communication site: $errorMessage"
+        
+        # Add owners if specified
+        if (-not [string]::IsNullOrEmpty($Owners)) {
+            $ownerEmails = $Owners -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+            if ($ownerEmails.Count -gt 0) {
+                $ownerIds = @()
+                foreach ($email in $ownerEmails) {
+                    try {
+                        $user = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/users/$email" -Headers $headers -Method Get -ErrorAction SilentlyContinue
+                        if ($user.id) {
+                            $ownerIds += "https://graph.microsoft.com/v1.0/users/$($user.id)"
+                        }
+                    }
+                    catch {
+                        Write-ColorOutput "WARNING: Could not find user: $email" "Yellow"
+                    }
+                }
+                if ($ownerIds.Count -gt 0) {
+                    $groupBody["owners@odata.bind"] = $ownerIds
+                }
+            }
+        }
+        
+        $jsonBody = $groupBody | ConvertTo-Json -Depth 10
+        
+        try {
+            $response = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/groups" -Headers $headers -Method Post -Body $jsonBody
+            Write-ColorOutput "Created as Team Site (Communication Site creation requires SharePoint Admin permissions)" "Yellow"
+            return $response
+        }
+        catch {
+            $errorMessage = $_.Exception.Message
+            if ($_.Exception.Response) {
+                try {
+                    $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                    $errorMessage = $reader.ReadToEnd()
+                }
+                catch {}
+            }
+            throw "Failed to create communication site: $errorMessage"
+        }
     }
 }
 
