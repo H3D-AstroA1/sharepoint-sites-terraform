@@ -16,6 +16,10 @@ Usage:
     python cleanup.py --list-sites              # List available sites
     python cleanup.py --list-files              # List files in all sites
     python cleanup.py --list-files --site hr    # List files in a SPECIFIC site
+    python cleanup.py --list-groups             # List Microsoft 365 Groups
+    python cleanup.py --delete-groups           # Delete Microsoft 365 Groups
+    python cleanup.py --list-deleted            # List deleted groups in recycle bin
+    python cleanup.py --purge-deleted           # Permanently delete from recycle bin
     python cleanup.py --help                    # Show help
 
 Requirements:
@@ -408,6 +412,162 @@ def delete_m365_group(group_id: str, access_token: str) -> bool:
     except Exception as e:
         print_error(f"Error deleting group: {e}")
         return False
+
+
+def get_deleted_m365_groups(access_token: str) -> List[Dict[str, Any]]:
+    """Get list of deleted Microsoft 365 Groups from the recycle bin."""
+    groups = []
+    
+    # Use the directory/deletedItems endpoint to get deleted groups
+    filter_param = urllib.parse.quote("groupTypes/any(c:c eq 'Unified')")
+    select_param = "id,displayName,description,mail,deletedDateTime"
+    url = f"https://graph.microsoft.com/v1.0/directory/deletedItems/microsoft.graph.group?$filter={filter_param}&$select={select_param}"
+    
+    try:
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {access_token}")
+        req.add_header("Content-Type", "application/json")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode())
+            groups = data.get("value", [])
+            
+            # Handle pagination
+            while "@odata.nextLink" in data:
+                next_url = data["@odata.nextLink"]
+                req = urllib.request.Request(next_url)
+                req.add_header("Authorization", f"Bearer {access_token}")
+                req.add_header("Content-Type", "application/json")
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    data = json.loads(response.read().decode())
+                    groups.extend(data.get("value", []))
+                    
+    except urllib.error.HTTPError as e:
+        print_error(f"Failed to get deleted groups: {e.code} - {e.reason}")
+        if e.code == 403:
+            print_info("You may need Directory.Read.All permission to list deleted groups")
+    except Exception as e:
+        print_error(f"Error getting deleted groups: {e}")
+    
+    return groups
+
+
+def permanently_delete_m365_group(group_id: str, access_token: str) -> bool:
+    """Permanently delete a Microsoft 365 Group from the recycle bin."""
+    url = f"https://graph.microsoft.com/v1.0/directory/deletedItems/{group_id}"
+    
+    try:
+        req = urllib.request.Request(url, method="DELETE")
+        req.add_header("Authorization", f"Bearer {access_token}")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            return True
+    except urllib.error.HTTPError as e:
+        if e.code == 204:
+            return True  # 204 No Content is success for DELETE
+        print_error(f"Failed to permanently delete group: {e.code} - {e.reason}")
+        if e.code == 403:
+            print_info("You may need Directory.ReadWrite.All permission to permanently delete groups")
+        return False
+    except Exception as e:
+        print_error(f"Error permanently deleting group: {e}")
+        return False
+
+
+def display_deleted_groups_for_selection(groups: List[Dict[str, Any]]) -> None:
+    """Display deleted groups in a numbered list for selection."""
+    print()
+    print(f"  {Colors.WHITE}{Colors.BOLD}Deleted Microsoft 365 Groups (Recycle Bin):{Colors.NC}")
+    print(f"  {Colors.CYAN}{'─' * 70}{Colors.NC}")
+    print()
+    
+    for i, group in enumerate(groups, 1):
+        name = group.get("displayName", "Unknown")
+        deleted_date = group.get("deletedDateTime", "Unknown")
+        if deleted_date and deleted_date != "Unknown":
+            # Parse and format the date
+            try:
+                dt = datetime.fromisoformat(deleted_date.replace('Z', '+00:00'))
+                deleted_date = dt.strftime("%Y-%m-%d %H:%M")
+            except:
+                pass
+        
+        print(f"  [{Colors.YELLOW}{i:2d}{Colors.NC}] 🗑️  {Colors.WHITE}{name}{Colors.NC}")
+        print(f"       Deleted: {deleted_date}")
+        print()
+
+
+def interactive_select_deleted_groups(groups: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Allow user to select deleted groups from a numbered list."""
+    display_deleted_groups_for_selection(groups)
+    
+    print(f"  Enter group numbers to select (e.g., 1,3,5 or 1-5 or * for all):")
+    selection = input(f"  > ").strip()
+    
+    if not selection:
+        return []
+    
+    selected_indices = parse_selection(selection, len(groups))
+    
+    if not selected_indices:
+        print_warning("No valid selection made")
+        return []
+    
+    selected_groups = [groups[i-1] for i in sorted(selected_indices) if 1 <= i <= len(groups)]
+    print_info(f"Selected {len(selected_groups)} group(s)")
+    
+    return selected_groups
+
+
+def purge_deleted_groups_mode(groups: List[Dict[str, Any]], access_token: str, auto_confirm: bool = False) -> None:
+    """Permanently delete selected groups from the recycle bin."""
+    if not groups:
+        print_warning("No deleted groups to purge")
+        return
+    
+    selected_groups = interactive_select_deleted_groups(groups)
+    
+    if not selected_groups:
+        print_info("No groups selected for permanent deletion")
+        return
+    
+    # Show confirmation
+    print()
+    print_danger("WARNING: Permanently deleting groups cannot be undone!")
+    print_danger("This will free up the site URLs for reuse.")
+    print()
+    print(f"  {Colors.WHITE}Groups to be permanently deleted:{Colors.NC}")
+    for group in selected_groups:
+        print(f"    {Colors.RED}✗{Colors.NC} {group.get('displayName', 'Unknown')}")
+    print()
+    
+    if not auto_confirm:
+        confirm = input(f"  Type 'PURGE' to confirm permanent deletion: ").strip()
+        if confirm != "PURGE":
+            print_info("Permanent deletion cancelled")
+            return
+    
+    # Delete the groups
+    print()
+    total = len(selected_groups)
+    success_count = 0
+    
+    for i, group in enumerate(selected_groups, 1):
+        name = group.get("displayName", "Unknown")
+        group_id = group.get("id", "")
+        
+        print_progress(i, total, f"Purging {name}...")
+        
+        if permanently_delete_m365_group(group_id, access_token):
+            print_success(f"Permanently deleted: {name}")
+            success_count += 1
+        else:
+            print_error(f"Failed to permanently delete: {name}")
+    
+    print()
+    print_info(f"Permanently deleted {success_count} of {total} groups")
+    if success_count > 0:
+        print_info("The site URLs are now available for reuse")
 
 
 def display_groups_for_selection(groups: List[Dict[str, Any]]) -> None:
@@ -1104,6 +1264,16 @@ Selection Syntax (for --select-sites and --select-files):
         action='store_true',
         help='Delete Microsoft 365 Groups (and their SharePoint sites)'
     )
+    parser.add_argument(
+        '--list-deleted',
+        action='store_true',
+        help='List deleted Microsoft 365 Groups in the recycle bin'
+    )
+    parser.add_argument(
+        '--purge-deleted',
+        action='store_true',
+        help='Permanently delete groups from the recycle bin (frees up URLs)'
+    )
     
     args = parser.parse_args()
     
@@ -1184,6 +1354,39 @@ Selection Syntax (for --select-sites and --select-files):
             selected_groups = interactive_select_groups(groups)
             if selected_groups:
                 delete_groups_mode(selected_groups, access_token, args.yes)
+            sys.exit(0)
+    
+    # Handle deleted groups (recycle bin) mode
+    if args.list_deleted or args.purge_deleted:
+        print_step(4, "Discover Deleted Microsoft 365 Groups (Recycle Bin)")
+        
+        deleted_groups = get_deleted_m365_groups(access_token)
+        
+        if not deleted_groups:
+            print_warning("No deleted Microsoft 365 Groups found in recycle bin")
+            print_info("The recycle bin is empty - all URLs are available for reuse")
+            sys.exit(0)
+        
+        print_success(f"Found {len(deleted_groups)} deleted groups in recycle bin")
+        
+        # Filter groups if specified
+        if args.site:
+            filter_term = args.site.lower()
+            deleted_groups = [g for g in deleted_groups if filter_term in g.get("displayName", "").lower()]
+            if not deleted_groups:
+                print_error(f"No deleted groups found matching '{args.site}'")
+                sys.exit(1)
+            print_info(f"Filtered to {len(deleted_groups)} deleted groups matching '{args.site}'")
+        
+        if args.list_deleted:
+            display_deleted_groups_for_selection(deleted_groups)
+            print()
+            print_info("To permanently delete these groups and free up URLs, run:")
+            print_info("  python cleanup.py --purge-deleted")
+            sys.exit(0)
+        
+        if args.purge_deleted:
+            purge_deleted_groups_mode(deleted_groups, access_token, args.yes)
             sys.exit(0)
     
     # Step 4: Get SharePoint sites (or fall back to Groups if Sites API fails)
