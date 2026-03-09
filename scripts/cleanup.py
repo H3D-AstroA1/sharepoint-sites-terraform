@@ -343,7 +343,10 @@ def get_m365_groups(access_token: str) -> List[Dict[str, Any]]:
     """Get list of Microsoft 365 Groups (Unified Groups) that have SharePoint sites."""
     groups = []
     # Filter for Unified groups (Microsoft 365 Groups) which have SharePoint sites
-    url = "https://graph.microsoft.com/v1.0/groups?$filter=groupTypes/any(c:c eq 'Unified')&$select=id,displayName,description,mail,createdDateTime,visibility"
+    # URL encode the filter parameter to avoid issues with special characters
+    filter_param = urllib.parse.quote("groupTypes/any(c:c eq 'Unified')")
+    select_param = "id,displayName,description,mail,createdDateTime,visibility"
+    url = f"https://graph.microsoft.com/v1.0/groups?$filter={filter_param}&$select={select_param}"
     
     try:
         req = urllib.request.Request(url)
