@@ -374,7 +374,24 @@ When you delete SharePoint sites, they go to **two separate recycle bins**:
 1. **Microsoft 365 Groups Recycle Bin** (Azure AD) - Where the M365 Group is soft-deleted
 2. **SharePoint Site Recycle Bin** (SharePoint Admin Center) - Where the site appears in "Deleted Sites"
 
-To permanently remove deleted items from these recycle bins:
+#### Automatic Purge After Deletion
+
+When you delete sites using option [5] or the `--delete-sites` flag, the script will **automatically offer to purge both recycle bins**:
+
+```
+Sites have been soft-deleted. They now exist in two recycle bins:
+    1. Microsoft 365 Groups recycle bin (Azure AD)
+    2. SharePoint site recycle bin (SharePoint Admin Center)
+
+Purge recycle bins now? (Y/n):
+```
+
+- Press **Enter** or **Y**: Proceeds to purge both recycle bins
+- Press **n**: Skips purge, sites remain in recycle bins for later cleanup
+
+#### Manual Purge Commands
+
+You can also manually purge the recycle bins at any time:
 
 ```bash
 # Purge M365 Groups from Azure AD recycle bin
@@ -384,6 +401,10 @@ python cleanup.py --purge-deleted
 # Replace 'contoso' with your tenant name (e.g., contoso.sharepoint.com)
 python cleanup.py --purge-spo-recycle --tenant contoso
 ```
+
+Or use the main menu:
+- Option **[6]**: Purge M365 Groups recycle bin (Azure AD)
+- Option **[7]**: Purge SharePoint site recycle bin
 
 > ⚠️ **Note**: The SharePoint site recycle bin purge requires the **SharePoint Online PowerShell module** (`Microsoft.Online.SharePoint.PowerShell`). The script will automatically install it if not present (Windows only).
 
@@ -416,7 +437,8 @@ Options:
 | **Interactive selection** | Choose exactly which sites/files to delete |
 | **List mode** | Preview sites/files before deleting |
 | **Recycle bin** | Deleted sites go to SharePoint recycle bin for 93 days |
-| **Recycle bin purge** | Permanently remove items from both recycle bins |
+| **Auto-purge prompt** | After deletion, prompts to purge recycle bins (can skip with 'n') |
+| **Manual purge** | Permanently remove items from both recycle bins on demand |
 
 ### Permissions Required
 
