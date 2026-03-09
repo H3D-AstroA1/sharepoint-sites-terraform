@@ -827,6 +827,69 @@ The module may be installed in a different PowerShell version's module path.
 
 ---
 
+### Issue 22: 403 Forbidden When Accessing SharePoint Sites
+
+**Error Message:**
+```
+✗ Failed to get sites: 403 - Forbidden
+✗ No SharePoint sites found
+```
+
+**Cause:**
+The Azure CLI's access token doesn't have the required Microsoft Graph permissions to access SharePoint sites. The Azure CLI uses a first-party app registration (`04b07795-8ddb-461a-bbee-02f9e1bf7b46`) which by default doesn't have SharePoint permissions.
+
+**Solution:**
+
+**Option 1: Grant Admin Consent (Recommended)**
+
+A tenant administrator must grant the Azure CLI app the required permissions:
+
+1. Go to **Azure Portal** > **Microsoft Entra ID** > **Enterprise Applications**
+2. Search for **"Azure CLI"** (App ID: `04b07795-8ddb-461a-bbee-02f9e1bf7b46`)
+3. Click on the Azure CLI application
+4. Go to **Permissions** > **Grant admin consent for [your tenant]**
+5. Grant these permissions:
+   - `Sites.Read.All`
+   - `Sites.ReadWrite.All`
+   - `Files.ReadWrite.All`
+   - `Group.Read.All`
+   - `Group.ReadWrite.All`
+
+**Option 2: Re-login with Correct Scope**
+
+Try logging in with the Microsoft Graph scope:
+```bash
+az login --scope https://graph.microsoft.com/.default
+```
+
+**Option 3: Use PowerShell with PnP**
+
+If you can't get admin consent, use PnP PowerShell instead:
+```powershell
+# Install PnP PowerShell
+Install-Module -Name PnP.PowerShell -Force
+
+# Connect to SharePoint
+Connect-PnPOnline -Url "https://yourtenant.sharepoint.com" -Interactive
+
+# List sites
+Get-PnPTenantSite
+```
+
+**Verification:**
+
+After granting consent, verify the token has the correct permissions:
+```bash
+# Get a new token
+az account get-access-token --resource https://graph.microsoft.com
+
+# Test the API (should return sites)
+curl -H "Authorization: Bearer $(az account get-access-token --resource https://graph.microsoft.com --query accessToken -o tsv)" \
+  "https://graph.microsoft.com/v1.0/sites?search=*"
+```
+
+---
+
 ## ✅ Prevention Tips
 
 1. **Always run `terraform plan` before `terraform apply`**
@@ -836,3 +899,4 @@ The module may be installed in a different PowerShell version's module path.
 5. **Test in a development environment first**
 6. **Document any manual changes made outside Terraform**
 7. **Purge recycle bins after deleting sites** to fully remove them
+8. **Grant Azure CLI admin consent** before using populate_files.py or cleanup.py
