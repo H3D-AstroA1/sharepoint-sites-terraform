@@ -338,6 +338,169 @@ def get_sharepoint_sites(access_token: str) -> List[Dict[str, Any]]:
     
     return sites
 
+
+def get_m365_groups(access_token: str) -> List[Dict[str, Any]]:
+    """Get list of Microsoft 365 Groups (Unified Groups) that have SharePoint sites."""
+    groups = []
+    # Filter for Unified groups (Microsoft 365 Groups) which have SharePoint sites
+    url = "https://graph.microsoft.com/v1.0/groups?$filter=groupTypes/any(c:c eq 'Unified')&$select=id,displayName,description,mail,createdDateTime,visibility"
+    
+    try:
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {access_token}")
+        req.add_header("Content-Type", "application/json")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode())
+            groups = data.get("value", [])
+            
+            # Get the SharePoint site URL for each group
+            for group in groups:
+                try:
+                    site_url = f"https://graph.microsoft.com/v1.0/groups/{group['id']}/sites/root"
+                    site_req = urllib.request.Request(site_url)
+                    site_req.add_header("Authorization", f"Bearer {access_token}")
+                    site_req.add_header("Content-Type", "application/json")
+                    
+                    with urllib.request.urlopen(site_req, timeout=30) as site_response:
+                        site_data = json.loads(site_response.read().decode())
+                        group["siteUrl"] = site_data.get("webUrl", "")
+                        group["siteId"] = site_data.get("id", "")
+                except Exception:
+                    group["siteUrl"] = ""
+                    group["siteId"] = ""
+                    
+    except urllib.error.HTTPError as e:
+        print_error(f"Failed to get groups: {e.code} - {e.reason}")
+        if e.code == 403:
+            print_info("You may need Group.Read.All permission to list groups")
+    except Exception as e:
+        print_error(f"Error getting groups: {e}")
+    
+    return groups
+
+
+def delete_m365_group(group_id: str, access_token: str) -> bool:
+    """Delete a Microsoft 365 Group (which also deletes its SharePoint site)."""
+    url = f"https://graph.microsoft.com/v1.0/groups/{group_id}"
+    
+    try:
+        req = urllib.request.Request(url, method="DELETE")
+        req.add_header("Authorization", f"Bearer {access_token}")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            return True
+    except urllib.error.HTTPError as e:
+        if e.code == 204:
+            return True  # 204 No Content is success for DELETE
+        print_error(f"Failed to delete group: {e.code} - {e.reason}")
+        if e.code == 403:
+            print_info("You may need Group.ReadWrite.All permission to delete groups")
+        return False
+    except Exception as e:
+        print_error(f"Error deleting group: {e}")
+        return False
+
+
+def display_groups_for_selection(groups: List[Dict[str, Any]]) -> None:
+    """Display groups in a numbered list for selection."""
+    print()
+    print(f"  {Colors.WHITE}{Colors.BOLD}Microsoft 365 Groups with SharePoint Sites:{Colors.NC}")
+    print(f"  {Colors.CYAN}{'─' * 70}{Colors.NC}")
+    print()
+    
+    for i, group in enumerate(groups, 1):
+        name = group.get("displayName", "Unknown")
+        site_url = group.get("siteUrl", "No site")
+        visibility = group.get("visibility", "Unknown")
+        created = group.get("createdDateTime", "")[:10] if group.get("createdDateTime") else ""
+        
+        visibility_icon = "🔒" if visibility == "Private" else "🌐"
+        
+        print(f"  [{i:2d}] {visibility_icon} {Colors.WHITE}{name}{Colors.NC}")
+        if site_url:
+            print(f"       {Colors.CYAN}{site_url}{Colors.NC}")
+        if created:
+            print(f"       {Colors.YELLOW}Created: {created}{Colors.NC}")
+        print()
+
+
+def interactive_select_groups(groups: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Allow user to interactively select groups from a numbered list."""
+    if not groups:
+        return []
+    
+    display_groups_for_selection(groups)
+    
+    print(f"  {Colors.WHITE}Enter group numbers to select (e.g., 1,3,5 or 1-5 or * for all):{Colors.NC}")
+    selection = input("  > ").strip()
+    
+    if not selection:
+        return []
+    
+    selected_indices = parse_selection(selection, len(groups))
+    
+    if not selected_indices:
+        print_warning("No valid selection made")
+        return []
+    
+    selected_groups = [groups[i-1] for i in sorted(selected_indices) if 0 < i <= len(groups)]
+    
+    print()
+    print_info(f"Selected {len(selected_groups)} group(s)")
+    
+    return selected_groups
+
+
+def delete_groups_mode(groups: List[Dict[str, Any]], access_token: str, auto_confirm: bool = False) -> None:
+    """Delete selected Microsoft 365 Groups (and their SharePoint sites)."""
+    if not groups:
+        print_warning("No groups to delete")
+        return
+    
+    print()
+    print_danger("WARNING: Deleting groups will also delete their SharePoint sites!")
+    print_danger("This action cannot be undone!")
+    print()
+    
+    print(f"  {Colors.WHITE}Groups to be deleted:{Colors.NC}")
+    for group in groups:
+        print(f"    {Colors.RED}✗{Colors.NC} {group.get('displayName', 'Unknown')}")
+        if group.get("siteUrl"):
+            print(f"      {Colors.CYAN}{group.get('siteUrl')}{Colors.NC}")
+    print()
+    
+    if not auto_confirm:
+        confirm = input(f"  {Colors.RED}Type 'DELETE' to confirm deletion: {Colors.NC}").strip()
+        if confirm != "DELETE":
+            print_warning("Deletion cancelled")
+            return
+    
+    print()
+    deleted = 0
+    failed = 0
+    
+    for group in groups:
+        name = group.get("displayName", "Unknown")
+        group_id = group.get("id")
+        
+        if not group_id:
+            print_error(f"No ID for group: {name}")
+            failed += 1
+            continue
+        
+        print_progress(deleted + failed + 1, len(groups), f"Deleting {name}...")
+        
+        if delete_m365_group(group_id, access_token):
+            print_success(f"Deleted: {name}")
+            deleted += 1
+        else:
+            print_error(f"Failed to delete: {name}")
+            failed += 1
+    
+    print()
+    print_info(f"Deleted: {deleted}, Failed: {failed}")
+
 def get_site_files(site_id: str, access_token: str) -> List[Dict[str, Any]]:
     """Get all files from a SharePoint site's document library."""
     files = []
@@ -923,6 +1086,16 @@ Selection Syntax (for --select-sites and --select-files):
         action='store_true',
         help='Skip confirmation prompts (use with caution!)'
     )
+    parser.add_argument(
+        '--list-groups',
+        action='store_true',
+        help='List Microsoft 365 Groups (which have SharePoint sites)'
+    )
+    parser.add_argument(
+        '--delete-groups',
+        action='store_true',
+        help='Delete Microsoft 365 Groups (and their SharePoint sites)'
+    )
     
     args = parser.parse_args()
     
@@ -972,6 +1145,39 @@ Selection Syntax (for --select-sites and --select-files):
     
     print_success("Access token obtained")
     
+    # Handle Microsoft 365 Groups mode (separate from SharePoint sites)
+    if args.list_groups or args.delete_groups:
+        print_step(4, "Discover Microsoft 365 Groups")
+        
+        groups = get_m365_groups(access_token)
+        
+        if not groups:
+            print_warning("No Microsoft 365 Groups found")
+            print_info("Note: Only groups with SharePoint sites are shown")
+            sys.exit(0)
+        
+        print_success(f"Found {len(groups)} Microsoft 365 Groups with SharePoint sites")
+        
+        # Filter groups if specified
+        if args.site:
+            filter_term = args.site.lower()
+            groups = [g for g in groups if filter_term in g.get("displayName", "").lower()
+                     or filter_term in g.get("mail", "").lower()]
+            if not groups:
+                print_error(f"No groups found matching '{args.site}'")
+                sys.exit(1)
+            print_info(f"Filtered to {len(groups)} groups matching '{args.site}'")
+        
+        if args.list_groups:
+            display_groups_for_selection(groups)
+            sys.exit(0)
+        
+        if args.delete_groups:
+            selected_groups = interactive_select_groups(groups)
+            if selected_groups:
+                delete_groups_mode(selected_groups, access_token, args.yes)
+            sys.exit(0)
+    
     # Step 4: Get SharePoint sites
     print_step(4, "Discover SharePoint Sites")
     
@@ -979,6 +1185,7 @@ Selection Syntax (for --select-sites and --select-files):
     
     if not sites:
         print_error("No SharePoint sites found")
+        print_info("Tip: Try using --list-groups or --delete-groups to manage Microsoft 365 Groups instead")
         sys.exit(1)
     
     print_success(f"Found {len(sites)} SharePoint sites")
