@@ -562,11 +562,12 @@ def create_custom_app() -> Optional[Dict[str, Any]]:
         print(f"  {Colors.DIM}Step 1/4: Creating app registration...{Colors.NC}")
         
         # Create app with a web redirect URI (required for admin consent)
+        # Using portal.azure.com as redirect - shows Azure Portal after consent (cleaner UX)
         create_result = subprocess.run(
             [az_path, "ad", "app", "create",
              "--display-name", CUSTOM_APP_NAME,
              "--sign-in-audience", "AzureADMyOrg",
-             "--web-redirect-uris", "https://login.microsoftonline.com/common/oauth2/nativeclient",
+             "--web-redirect-uris", "https://portal.azure.com",
              "-o", "json"],
             capture_output=True,
             text=True,
