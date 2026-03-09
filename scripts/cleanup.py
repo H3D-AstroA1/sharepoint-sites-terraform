@@ -609,24 +609,106 @@ def install_spo_module() -> bool:
     ps_exe = get_powershell_executable()
     print_info("Installing SharePoint Online PowerShell module...")
     print_info(f"Using: {ps_exe}")
+    
+    # First, try to repair/update PowerShellGet and PackageManagement
+    print_info("Updating PowerShellGet module...")
     try:
-        # Use Windows PowerShell for better compatibility
+        repair_script = '''
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$ErrorActionPreference = "SilentlyContinue"
+
+# Try to update NuGet provider
+Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
+
+# Try to update PowerShellGet
+Install-Module -Name PowerShellGet -Force -AllowClobber -Scope CurrentUser | Out-Null
+
+# Now install SPO module
+Install-Module -Name Microsoft.Online.SharePoint.PowerShell -Force -AllowClobber -Scope CurrentUser
+
+if (Get-Module -ListAvailable -Name Microsoft.Online.SharePoint.PowerShell) {
+    Write-Output "SUCCESS"
+} else {
+    Write-Error "Module not found after installation"
+    exit 1
+}
+'''
         result = subprocess.run(
-            [ps_exe, "-ExecutionPolicy", "Bypass", "-Command",
-             "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; "
-             "Install-Module -Name Microsoft.Online.SharePoint.PowerShell -Force -AllowClobber -Scope CurrentUser"],
+            [ps_exe, "-ExecutionPolicy", "Bypass", "-Command", repair_script],
             capture_output=True,
             text=True,
-            timeout=300
+            timeout=600  # 10 minutes for full installation
         )
-        if result.returncode == 0:
+        
+        if "SUCCESS" in result.stdout:
             print_success("SharePoint Online PowerShell module installed")
             return True
         else:
-            print_error(f"Failed to install module: {result.stderr}")
-            return False
+            # Try alternative method using direct download
+            print_warning("Standard installation failed, trying alternative method...")
+            return install_spo_module_alternative(ps_exe)
+            
+    except subprocess.TimeoutExpired:
+        print_error("Installation timed out")
+        return False
     except Exception as e:
         print_error(f"Error installing module: {e}")
+        return False
+
+
+def install_spo_module_alternative(ps_exe: str) -> bool:
+    """Alternative method to install SPO module using direct download."""
+    print_info("Attempting alternative installation method...")
+    
+    alt_script = '''
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$ErrorActionPreference = "Stop"
+
+try {
+    # Register PSGallery if not registered
+    if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
+        Register-PSRepository -Default -ErrorAction SilentlyContinue
+    }
+    
+    # Set PSGallery as trusted
+    Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
+    
+    # Install using Save-Module and manual copy
+    $modulePath = "$env:USERPROFILE\\Documents\\WindowsPowerShell\\Modules"
+    if (-not (Test-Path $modulePath)) {
+        New-Item -ItemType Directory -Path $modulePath -Force | Out-Null
+    }
+    
+    # Try direct installation one more time with verbose output
+    Install-Module -Name Microsoft.Online.SharePoint.PowerShell -Force -AllowClobber -Scope CurrentUser -Verbose
+    
+    if (Get-Module -ListAvailable -Name Microsoft.Online.SharePoint.PowerShell) {
+        Write-Output "SUCCESS"
+    } else {
+        throw "Module still not available"
+    }
+} catch {
+    Write-Error $_.Exception.Message
+    exit 1
+}
+'''
+    
+    try:
+        result = subprocess.run(
+            [ps_exe, "-ExecutionPolicy", "Bypass", "-Command", alt_script],
+            capture_output=True,
+            text=True,
+            timeout=600
+        )
+        
+        if "SUCCESS" in result.stdout:
+            print_success("SharePoint Online PowerShell module installed (alternative method)")
+            return True
+        else:
+            print_error(f"Alternative installation also failed: {result.stderr}")
+            return False
+    except Exception as e:
+        print_error(f"Error with alternative installation: {e}")
         return False
 
 
