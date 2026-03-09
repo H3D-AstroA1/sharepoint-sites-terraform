@@ -703,6 +703,130 @@ az provider show --namespace Microsoft.Storage --query "registrationState"
 
 ---
 
+### Issue 18: Deleted Sites Still Appear in SharePoint Admin Center
+
+**Symptom:**
+After deleting SharePoint sites (via cleanup.py or manually), the sites still appear in the SharePoint Admin Center under "Deleted Sites".
+
+**Cause:**
+When you delete a SharePoint site, it goes to **two separate recycle bins**:
+1. **Microsoft 365 Groups Recycle Bin** (Azure AD) - The M365 Group is soft-deleted
+2. **SharePoint Site Recycle Bin** (SharePoint Admin Center) - The site appears in "Deleted Sites"
+
+**Solution:**
+Use the cleanup script to purge both recycle bins:
+
+```bash
+cd sharepoint-sites-terraform/scripts
+
+# Step 1: Purge M365 Groups from Azure AD recycle bin
+python cleanup.py --purge-deleted
+
+# Step 2: Purge SharePoint sites from SharePoint Admin Center recycle bin
+# Replace 'contoso' with your tenant name (e.g., contoso.sharepoint.com)
+python cleanup.py --purge-spo-recycle --tenant contoso
+```
+
+Or use the main menu:
+```bash
+python menu.py
+# Select [3] Delete Files or Sites
+# Select [6] Purge M365 Groups recycle bin
+# Select [7] Purge SharePoint site recycle bin
+```
+
+---
+
+### Issue 19: SharePoint Online PowerShell Module Installation Fails
+
+**Error Message:**
+```
+ERROR: Failed to install SharePoint Online PowerShell module
+```
+
+**Cause:**
+The SharePoint Online PowerShell module requires Windows PowerShell (not PowerShell 7) and may need the NuGet provider.
+
+**Solution:**
+
+1. **Ensure you're using Windows PowerShell** (not PowerShell 7):
+   - The script automatically uses `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`
+
+2. **Install NuGet provider manually** (if automatic installation fails):
+   ```powershell
+   # Run in Windows PowerShell as Administrator
+   Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
+   ```
+
+3. **Install the SPO module manually**:
+   ```powershell
+   # Run in Windows PowerShell as Administrator
+   Install-Module -Name Microsoft.Online.SharePoint.PowerShell -Force -AllowClobber
+   ```
+
+4. **Verify installation**:
+   ```powershell
+   Get-Module -ListAvailable -Name Microsoft.Online.SharePoint.PowerShell
+   ```
+
+---
+
+### Issue 20: Re-authentication Required for Each Site Deletion
+
+**Symptom:**
+When purging the SharePoint site recycle bin, you're prompted to authenticate for each site.
+
+**Cause:**
+This was a bug in earlier versions where each site deletion created a new PowerShell session.
+
+**Solution:**
+Update to the latest version of cleanup.py which uses batch deletion (single authentication for all sites):
+
+```bash
+# Pull latest changes
+cd sharepoint-sites-terraform
+git pull
+
+# Run the purge command - now uses batch deletion
+python scripts/cleanup.py --purge-spo-recycle --tenant contoso
+```
+
+The batch deletion connects once and deletes all selected sites in a single session.
+
+---
+
+### Issue 21: SPO Module Not Found After Installation
+
+**Symptom:**
+```
+ERROR: SharePoint Online PowerShell module is not installed
+```
+Even though you just installed it.
+
+**Cause:**
+The module may be installed in a different PowerShell version's module path.
+
+**Solution:**
+
+1. **Check where the module is installed**:
+   ```powershell
+   # In Windows PowerShell
+   Get-Module -ListAvailable -Name Microsoft.Online.SharePoint.PowerShell | Select-Object Path
+   ```
+
+2. **Ensure you're using Windows PowerShell** (not PowerShell 7):
+   ```cmd
+   C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -Command "Get-Module -ListAvailable -Name Microsoft.Online.SharePoint.PowerShell"
+   ```
+
+3. **Reinstall in the correct PowerShell**:
+   ```powershell
+   # Run in Windows PowerShell (not PowerShell 7)
+   Install-Module -Name Microsoft.Online.SharePoint.PowerShell -Force -AllowClobber -Scope CurrentUser
+   ```
+
+---
+
 ## ✅ Prevention Tips
 
 1. **Always run `terraform plan` before `terraform apply`**
@@ -711,3 +835,4 @@ az provider show --namespace Microsoft.Storage --query "registrationState"
 4. **Never commit sensitive values (use `.gitignore`)**
 5. **Test in a development environment first**
 6. **Document any manual changes made outside Terraform**
+7. **Purge recycle bins after deleting sites** to fully remove them

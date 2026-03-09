@@ -367,6 +367,26 @@ What would you like to do?
   [7] Cancel
 ```
 
+### Recycle Bin Purge (NEW!)
+
+When you delete SharePoint sites, they go to **two separate recycle bins**:
+
+1. **Microsoft 365 Groups Recycle Bin** (Azure AD) - Where the M365 Group is soft-deleted
+2. **SharePoint Site Recycle Bin** (SharePoint Admin Center) - Where the site appears in "Deleted Sites"
+
+To permanently remove deleted items from these recycle bins:
+
+```bash
+# Purge M365 Groups from Azure AD recycle bin
+python cleanup.py --purge-deleted
+
+# Purge SharePoint sites from SharePoint Admin Center recycle bin
+# Replace 'contoso' with your tenant name (e.g., contoso.sharepoint.com)
+python cleanup.py --purge-spo-recycle --tenant contoso
+```
+
+> ⚠️ **Note**: The SharePoint site recycle bin purge requires the **SharePoint Online PowerShell module** (`Microsoft.Online.SharePoint.PowerShell`). The script will automatically install it if not present (Windows only).
+
 ### Command Line Options
 
 ```bash
@@ -381,6 +401,9 @@ Options:
   --list-files         List files in SharePoint sites
   --select-sites       Interactively select specific sites from a numbered list
   --select-files       Interactively select specific files to delete
+  --purge-deleted      Permanently delete M365 Groups from Azure AD recycle bin
+  --purge-spo-recycle  Permanently delete sites from SharePoint recycle bin
+  --tenant NAME        SharePoint tenant name (required with --purge-spo-recycle)
   -y, --yes            Skip confirmation prompts (use with caution!)
 ```
 
@@ -393,6 +416,7 @@ Options:
 | **Interactive selection** | Choose exactly which sites/files to delete |
 | **List mode** | Preview sites/files before deleting |
 | **Recycle bin** | Deleted sites go to SharePoint recycle bin for 93 days |
+| **Recycle bin purge** | Permanently remove items from both recycle bins |
 
 ### Permissions Required
 
