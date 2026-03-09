@@ -1052,7 +1052,7 @@ def display_prerequisites_status(results: dict) -> None:
         print(f"  {Colors.GREEN}{Colors.BOLD}✓ All prerequisites met! Ready to proceed.{Colors.NC}")
     elif all_installed and results["azure_login"]["logged_in"] and not graph_ok:
         print(f"  {Colors.YELLOW}{Colors.BOLD}⚠ Graph API permissions missing.{Colors.NC}")
-        print(f"  {Colors.DIM}  Select option [G] to grant admin consent for SharePoint access.{Colors.NC}")
+        print(f"  {Colors.DIM}  Setup will be offered below, or use [A] from main menu.{Colors.NC}")
     elif all_installed:
         print(f"  {Colors.YELLOW}{Colors.BOLD}⚠ Tools installed but not logged into Azure.{Colors.NC}")
         print(f"  {Colors.DIM}  Run 'az login' to authenticate.{Colors.NC}")
