@@ -1178,15 +1178,46 @@ Selection Syntax (for --select-sites and --select-files):
                 delete_groups_mode(selected_groups, access_token, args.yes)
             sys.exit(0)
     
-    # Step 4: Get SharePoint sites
+    # Step 4: Get SharePoint sites (or fall back to Groups if Sites API fails)
     print_step(4, "Discover SharePoint Sites")
     
     sites = get_sharepoint_sites(access_token)
     
     if not sites:
-        print_error("No SharePoint sites found")
-        print_info("Tip: Try using --list-groups or --delete-groups to manage Microsoft 365 Groups instead")
-        sys.exit(1)
+        print_warning("Could not list SharePoint sites (may require Sites.Read.All permission)")
+        print_info("Falling back to Microsoft 365 Groups API...")
+        print()
+        
+        # Fall back to Groups API
+        groups = get_m365_groups(access_token)
+        
+        if groups:
+            print_success(f"Found {len(groups)} Microsoft 365 Groups with SharePoint sites")
+            print()
+            print(f"  {Colors.YELLOW}Note: These are group-connected SharePoint sites.{Colors.NC}")
+            print(f"  {Colors.YELLOW}To delete them, you must delete the associated Microsoft 365 Group.{Colors.NC}")
+            print()
+            
+            # Convert groups to a sites-like format for display
+            display_groups_for_selection(groups)
+            
+            print()
+            print(f"  {Colors.WHITE}Would you like to delete any of these groups (and their SharePoint sites)?{Colors.NC}")
+            print()
+            confirm = input("  Enter 'yes' to select groups to delete, or press Enter to exit: ").strip().lower()
+            
+            if confirm == 'yes':
+                selected_groups = interactive_select_groups(groups)
+                if selected_groups:
+                    delete_groups_mode(selected_groups, access_token, args.yes)
+            
+            sys.exit(0)
+        else:
+            print_error("No SharePoint sites or Microsoft 365 Groups found")
+            print_info("This may be a permissions issue. Required permissions:")
+            print_info("  - Sites.Read.All (for SharePoint sites)")
+            print_info("  - Group.Read.All (for Microsoft 365 Groups)")
+            sys.exit(1)
     
     print_success(f"Found {len(sites)} SharePoint sites")
     
