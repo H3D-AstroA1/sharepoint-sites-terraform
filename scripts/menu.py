@@ -378,8 +378,54 @@ REQUIRED_GRAPH_PERMISSIONS = [
     "Group.ReadWrite.All"
 ]
 
+def get_graph_access_token_via_client_credentials(app_config: Dict[str, Any]) -> Optional[str]:
+    """Get Microsoft Graph access token using client credentials flow."""
+    import urllib.request
+    import urllib.parse
+    
+    app_id = app_config.get("app_id")
+    client_secret = app_config.get("client_secret")
+    tenant_id = app_config.get("tenant_id")
+    
+    if not all([app_id, client_secret, tenant_id]):
+        return None
+    
+    token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    
+    data = urllib.parse.urlencode({
+        "client_id": app_id,
+        "client_secret": client_secret,
+        "scope": "https://graph.microsoft.com/.default",
+        "grant_type": "client_credentials"
+    }).encode('utf-8')
+    
+    try:
+        req = urllib.request.Request(token_url, data=data)
+        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            if response.status == 200:
+                token_data = json.loads(response.read().decode('utf-8'))
+                return token_data.get("access_token")
+    except Exception:
+        pass
+    
+    return None
+
 def get_graph_access_token() -> Optional[str]:
-    """Get Microsoft Graph access token using Azure CLI."""
+    """Get Microsoft Graph access token.
+    
+    First tries to use custom app credentials if available,
+    then falls back to Azure CLI.
+    """
+    # Try custom app credentials first
+    app_config = load_app_config()
+    if app_config and app_config.get("client_secret"):
+        token = get_graph_access_token_via_client_credentials(app_config)
+        if token:
+            return token
+    
+    # Fall back to Azure CLI
     az_path = find_azure_cli_path()
     if not az_path:
         return None
@@ -577,12 +623,36 @@ def create_custom_app() -> Optional[Dict[str, Any]]:
             else:
                 print(f"  {Colors.YELLOW}⚠{Colors.NC} SP creation: {sp_result.stderr.strip()[:50]}")
         
-        # Save the app config
+        # Step 4: Create a client secret for the app
+        print(f"  {Colors.DIM}Step 4/4: Creating client secret...{Colors.NC}")
+        
+        secret_result = subprocess.run(
+            [az_path, "ad", "app", "credential", "reset",
+             "--id", app_id,
+             "--append",
+             "--display-name", "SharePoint-Tool-Secret",
+             "--years", "1",
+             "-o", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        client_secret = None
+        if secret_result.returncode == 0:
+            secret_data = json.loads(secret_result.stdout)
+            client_secret = secret_data.get("password")
+            print(f"  {Colors.GREEN}✓{Colors.NC} Client secret created")
+        else:
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} Could not create secret: {secret_result.stderr.strip()[:50]}")
+        
+        # Save the app config (including secret)
         config = {
             "app_id": app_id,
             "object_id": object_id,
             "display_name": CUSTOM_APP_NAME,
-            "tenant_id": get_tenant_id()
+            "tenant_id": get_tenant_id(),
+            "client_secret": client_secret
         }
         save_app_config(config)
         
