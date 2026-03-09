@@ -584,6 +584,8 @@ def print_help() -> None:
     print(f"    • All files from sites (keeps sites)")
     print(f"    • Specific files (interactive selection)")
     print(f"    • Entire SharePoint sites")
+    print(f"    • Purge M365 Groups recycle bin (Azure AD)")
+    print(f"    • Purge SharePoint site recycle bin")
     print()
     print(f"  {Colors.YELLOW}{Colors.BOLD}Quick Commands:{Colors.NC}")
     print(f"  {Colors.DIM}────────────────{Colors.NC}")
@@ -591,6 +593,10 @@ def print_help() -> None:
     print(f"    {Colors.CYAN}python populate_files.py --files 50{Colors.NC}  Add 50 files")
     print(f"    {Colors.CYAN}python cleanup.py --list-sites{Colors.NC}    List all sites")
     print(f"    {Colors.CYAN}python cleanup.py --select-files{Colors.NC}  Delete specific files")
+    print(f"    {Colors.CYAN}python cleanup.py --delete-sites{Colors.NC}  Delete SharePoint sites")
+    print(f"    {Colors.CYAN}python cleanup.py --purge-deleted{Colors.NC} Purge M365 Groups recycle bin")
+    print(f"    {Colors.CYAN}python cleanup.py --purge-spo-recycle --tenant NAME{Colors.NC}")
+    print(f"                                      Purge SharePoint site recycle bin")
     print()
     print(f"  {Colors.WHITE}For more information, see:{Colors.NC}")
     print(f"    • {Colors.BLUE}README.md{Colors.NC} - Main documentation")
@@ -998,6 +1004,12 @@ def main() -> None:
             print(f"    {Colors.YELLOW}[3]{Colors.NC} Select specific FILES to delete")
             print(f"    {Colors.MAGENTA}[4]{Colors.NC} Delete ALL files from sites (keeps sites)")
             print(f"    {Colors.RED}[5]{Colors.NC} Delete SharePoint SITES (requires admin)")
+            print()
+            print(f"  {Colors.CYAN}{'─' * 40}{Colors.NC}")
+            print(f"  {Colors.WHITE}{Colors.BOLD}Recycle Bin Operations:{Colors.NC}")
+            print()
+            print(f"    {Colors.CYAN}[6]{Colors.NC} Purge M365 Groups recycle bin (Azure AD)")
+            print(f"    {Colors.CYAN}[7]{Colors.NC} Purge SharePoint site recycle bin")
             print(f"    {Colors.WHITE}[B]{Colors.NC} Back to main menu")
             print()
             
@@ -1025,6 +1037,21 @@ def main() -> None:
                 if site_filter:
                     args.extend(["--site", site_filter])
                 run_script("cleanup.py", args)
+            elif sub_choice == '6':
+                # Purge M365 Groups recycle bin
+                run_script("cleanup.py", ["--purge-deleted"])
+            elif sub_choice == '7':
+                # Purge SharePoint site recycle bin
+                print()
+                print(f"  {Colors.WHITE}Enter your SharePoint tenant name{Colors.NC}")
+                print(f"  {Colors.DIM}(e.g., 'contoso' for contoso.sharepoint.com){Colors.NC}")
+                print()
+                tenant = input(f"  {Colors.YELLOW}Tenant name:{Colors.NC} ").strip()
+                if tenant:
+                    run_script("cleanup.py", ["--purge-spo-recycle", "--tenant", tenant])
+                else:
+                    print(f"  {Colors.RED}✗{Colors.NC} Tenant name is required")
+                    input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
             # else: back to menu
             
         elif choice == '4':
