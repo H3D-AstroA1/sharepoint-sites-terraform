@@ -287,8 +287,13 @@ def get_access_token() -> Optional[str]:
     return None
 
 def parse_selection(selection: str, max_value: int) -> Set[int]:
-    """Parse a selection string like '1,3,5-7' into a set of integers."""
+    """Parse a selection string like '1,3,5-7' or '*' for all into a set of integers."""
     selected = set()
+    
+    # Handle wildcard for all items
+    if selection.strip() == '*':
+        return set(range(1, max_value + 1))
+    
     parts = selection.replace(' ', '').split(',')
     
     for part in parts:
