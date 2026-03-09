@@ -429,6 +429,47 @@ def get_tenant_id() -> Optional[str]:
         return account_info.get("tenantId")
     return None
 
+def grant_admin_consent_via_cli() -> bool:
+    """Try to grant admin consent using Azure CLI (requires admin privileges)."""
+    az_path = find_azure_cli_path()
+    if not az_path:
+        return False
+    
+    print()
+    print(f"  {Colors.WHITE}Attempting to grant admin consent via Azure CLI...{Colors.NC}")
+    print(f"  {Colors.DIM}(This requires you to be logged in as a Global Administrator){Colors.NC}")
+    print()
+    
+    try:
+        # Try to grant admin consent for the Azure CLI app
+        result = subprocess.run(
+            [az_path, "ad", "app", "permission", "admin-consent",
+             "--id", AZURE_CLI_APP_ID],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        
+        if result.returncode == 0:
+            print(f"  {Colors.GREEN}✓{Colors.NC} Admin consent granted successfully!")
+            return True
+        else:
+            # Check if it's a permission error
+            if "Insufficient privileges" in result.stderr or "Authorization_RequestDenied" in result.stderr:
+                print(f"  {Colors.YELLOW}⚠{Colors.NC} You don't have admin privileges to grant consent.")
+                print(f"    {Colors.DIM}A Global Administrator must grant consent.{Colors.NC}")
+            else:
+                print(f"  {Colors.YELLOW}⚠{Colors.NC} Could not grant consent via CLI.")
+                if result.stderr:
+                    print(f"    {Colors.DIM}{result.stderr.strip()[:100]}{Colors.NC}")
+            return False
+    except subprocess.TimeoutExpired:
+        print(f"  {Colors.YELLOW}⚠{Colors.NC} Command timed out.")
+        return False
+    except Exception as e:
+        print(f"  {Colors.YELLOW}⚠{Colors.NC} CLI consent failed: {e}")
+        return False
+
 def open_admin_consent_url() -> bool:
     """Open the admin consent URL in the default browser."""
     import webbrowser
@@ -438,16 +479,6 @@ def open_admin_consent_url() -> bool:
         print_error("Could not determine tenant ID. Please log in first.")
         return False
     
-    # Construct the admin consent URL
-    # This URL will prompt an admin to grant consent for the Azure CLI app
-    permissions = " ".join([
-        "https://graph.microsoft.com/Sites.Read.All",
-        "https://graph.microsoft.com/Sites.ReadWrite.All",
-        "https://graph.microsoft.com/Files.ReadWrite.All",
-        "https://graph.microsoft.com/Group.Read.All",
-        "https://graph.microsoft.com/Group.ReadWrite.All"
-    ])
-    
     # Admin consent URL format
     consent_url = (
         f"https://login.microsoftonline.com/{tenant_id}/adminconsent"
@@ -456,26 +487,24 @@ def open_admin_consent_url() -> bool:
     
     print()
     print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
-    print(f"  {Colors.WHITE}{Colors.BOLD}Admin Consent Required{Colors.NC}")
+    print(f"  {Colors.WHITE}{Colors.BOLD}Opening Admin Consent Page{Colors.NC}")
     print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
     print()
-    print(f"  The Azure CLI app needs admin consent for SharePoint permissions.")
-    print()
-    print(f"  {Colors.YELLOW}Required Permissions:{Colors.NC}")
+    print(f"  {Colors.WHITE}Required Permissions:{Colors.NC}")
     for perm in REQUIRED_GRAPH_PERMISSIONS:
         print(f"    • {perm}")
     print()
-    print(f"  {Colors.WHITE}Opening admin consent page in your browser...{Colors.NC}")
-    print()
-    print(f"  {Colors.DIM}URL: {consent_url}{Colors.NC}")
+    print(f"  {Colors.WHITE}Opening browser...{Colors.NC}")
     print()
     
     try:
         webbrowser.open(consent_url)
-        print(f"  {Colors.GREEN}✓{Colors.NC} Browser opened. Please complete the consent process.")
+        print(f"  {Colors.GREEN}✓{Colors.NC} Browser opened!")
         print()
-        print(f"  {Colors.YELLOW}Note:{Colors.NC} You must be a Global Administrator or")
-        print(f"        Privileged Role Administrator to grant consent.")
+        print(f"  {Colors.YELLOW}In the browser:{Colors.NC}")
+        print(f"    1. Sign in as a Global Administrator")
+        print(f"    2. Review the permissions")
+        print(f"    3. Click 'Accept' to grant consent")
         print()
         return True
     except Exception as e:
@@ -484,6 +513,45 @@ def open_admin_consent_url() -> bool:
         print(f"  Please open this URL manually:")
         print(f"  {Colors.CYAN}{consent_url}{Colors.NC}")
         return False
+
+def auto_grant_admin_consent() -> bool:
+    """Automatically grant admin consent - tries CLI first, then browser."""
+    print()
+    print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+    print(f"  {Colors.WHITE}{Colors.BOLD}Granting Admin Consent for SharePoint Access{Colors.NC}")
+    print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+    
+    # First, try the CLI method (fastest if user is admin)
+    if grant_admin_consent_via_cli():
+        return True
+    
+    # If CLI fails, fall back to browser method
+    print()
+    print(f"  {Colors.WHITE}Falling back to browser-based consent...{Colors.NC}")
+    
+    if open_admin_consent_url():
+        print()
+        print(f"  {Colors.YELLOW}Waiting for you to complete consent in the browser...{Colors.NC}")
+        print()
+        
+        # Wait for user to complete consent
+        import time
+        for i in range(30):  # Wait up to 30 seconds, checking every second
+            time.sleep(2)
+            print(f"  Checking permissions... ({i*2+2}/60 seconds)", end='\r')
+            result = check_graph_permissions()
+            if result.get("has_permissions"):
+                print()
+                print(f"  {Colors.GREEN}✓{Colors.NC} Permissions granted successfully!")
+                return True
+        
+        print()
+        print(f"  {Colors.YELLOW}⚠{Colors.NC} Consent not detected yet.")
+        print(f"    It may take a few minutes for permissions to propagate.")
+        print(f"    Please try running the script again in a few minutes.")
+        return False
+    
+    return False
 
 def run_graph_permissions_check() -> None:
     """Run the Graph API permissions check and offer to grant consent."""
@@ -698,7 +766,7 @@ def run_prerequisites_check_menu() -> None:
                 except Exception as e:
                     print_error(f"Azure login failed: {e}")
     
-    # Check Graph API permissions and offer to grant consent
+    # Check Graph API permissions and automatically grant consent if needed
     if results["azure_login"]["logged_in"]:
         graph_perms = results.get("graph_permissions", {})
         if not graph_perms.get("has_permissions"):
@@ -712,25 +780,17 @@ def run_prerequisites_check_menu() -> None:
             print(f"  {Colors.WHITE}Would you like to grant admin consent now?{Colors.NC}")
             print(f"  {Colors.DIM}(Requires Global Administrator or Privileged Role Administrator){Colors.NC}")
             print()
-            print(f"    {Colors.GREEN}[Y]{Colors.NC} Yes, open admin consent page in browser")
+            print(f"    {Colors.GREEN}[Y]{Colors.NC} Yes, grant admin consent automatically")
             print(f"    {Colors.RED}[N]{Colors.NC} No, I'll do this later")
             print()
             
             choice = input(f"  {Colors.YELLOW}Choice:{Colors.NC} ").strip().lower()
             
             if choice == 'y':
-                open_admin_consent_url()
-                print()
-                input(f"  {Colors.YELLOW}Press Enter after granting consent to re-check...{Colors.NC}")
-                print()
-                # Re-check permissions
-                graph_result = check_graph_permissions()
-                if graph_result.get("has_permissions"):
-                    print(f"  {Colors.GREEN}✓{Colors.NC} Permissions granted successfully!")
-                else:
-                    print(f"  {Colors.YELLOW}⚠{Colors.NC} Permissions still not available.")
-                    print(f"    It may take a few minutes for consent to propagate.")
-                    print(f"    Try running the populate_files.py script again later.")
+                # Use the automated consent function
+                if auto_grant_admin_consent():
+                    # Re-check and update results
+                    results["graph_permissions"] = check_graph_permissions()
     
     print()
     input(f"  {Colors.YELLOW}Press Enter to return to menu...{Colors.NC}")
