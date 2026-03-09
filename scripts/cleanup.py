@@ -577,11 +577,24 @@ def purge_deleted_groups_mode(groups: List[Dict[str, Any]], access_token: str, a
 # SHAREPOINT ONLINE POWERSHELL FUNCTIONS (for SharePoint site recycle bin)
 # ============================================================================
 
+def get_powershell_executable() -> str:
+    """Get the appropriate PowerShell executable (prefer Windows PowerShell for SPO module)."""
+    # Windows PowerShell (powershell.exe) is more compatible with SPO module
+    # PowerShell 7 (pwsh) has issues with PowerShellGet
+    if platform.system() == "Windows":
+        # Check for Windows PowerShell first
+        win_ps = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+        if os.path.exists(win_ps):
+            return win_ps
+    return "powershell"
+
+
 def check_spo_module_installed() -> bool:
     """Check if SharePoint Online PowerShell module is installed."""
+    ps_exe = get_powershell_executable()
     try:
         result = subprocess.run(
-            ["powershell", "-Command", "Get-Module -ListAvailable -Name Microsoft.Online.SharePoint.PowerShell"],
+            [ps_exe, "-Command", "Get-Module -ListAvailable -Name Microsoft.Online.SharePoint.PowerShell"],
             capture_output=True,
             text=True,
             timeout=30
@@ -593,10 +606,14 @@ def check_spo_module_installed() -> bool:
 
 def install_spo_module() -> bool:
     """Install SharePoint Online PowerShell module."""
+    ps_exe = get_powershell_executable()
     print_info("Installing SharePoint Online PowerShell module...")
+    print_info(f"Using: {ps_exe}")
     try:
+        # Use Windows PowerShell for better compatibility
         result = subprocess.run(
-            ["powershell", "-Command",
+            [ps_exe, "-ExecutionPolicy", "Bypass", "-Command",
+             "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; "
              "Install-Module -Name Microsoft.Online.SharePoint.PowerShell -Force -AllowClobber -Scope CurrentUser"],
             capture_output=True,
             text=True,
@@ -615,6 +632,7 @@ def install_spo_module() -> bool:
 
 def get_spo_deleted_sites(admin_url: str) -> List[Dict[str, Any]]:
     """Get deleted SharePoint sites using PowerShell."""
+    ps_exe = get_powershell_executable()
     sites = []
     
     # PowerShell script to get deleted sites
@@ -638,7 +656,7 @@ try {{
     try:
         print_info("Connecting to SharePoint Online...")
         result = subprocess.run(
-            ["powershell", "-Command", ps_script],
+            [ps_exe, "-ExecutionPolicy", "Bypass", "-Command", ps_script],
             capture_output=True,
             text=True,
             timeout=120
@@ -666,6 +684,7 @@ try {{
 
 def purge_spo_deleted_site(admin_url: str, site_url: str) -> bool:
     """Permanently delete a SharePoint site from the recycle bin."""
+    ps_exe = get_powershell_executable()
     ps_script = f'''
 $ErrorActionPreference = "Stop"
 try {{
@@ -680,7 +699,7 @@ try {{
     
     try:
         result = subprocess.run(
-            ["powershell", "-Command", ps_script],
+            [ps_exe, "-ExecutionPolicy", "Bypass", "-Command", ps_script],
             capture_output=True,
             text=True,
             timeout=60
