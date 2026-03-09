@@ -512,13 +512,15 @@ def create_custom_app() -> Optional[Dict[str, Any]]:
     print()
     
     try:
-        # Step 1: Create the app registration
-        print(f"  {Colors.DIM}Step 1/3: Creating app registration...{Colors.NC}")
+        # Step 1: Create the app registration with redirect URI
+        print(f"  {Colors.DIM}Step 1/4: Creating app registration...{Colors.NC}")
         
+        # Create app with a web redirect URI (required for admin consent)
         create_result = subprocess.run(
             [az_path, "ad", "app", "create",
              "--display-name", CUSTOM_APP_NAME,
              "--sign-in-audience", "AzureADMyOrg",
+             "--web-redirect-uris", "https://login.microsoftonline.com/common/oauth2/nativeclient",
              "-o", "json"],
             capture_output=True,
             text=True,
@@ -536,7 +538,7 @@ def create_custom_app() -> Optional[Dict[str, Any]]:
         print(f"  {Colors.GREEN}✓{Colors.NC} App created: {app_id}")
         
         # Step 2: Add required API permissions
-        print(f"  {Colors.DIM}Step 2/3: Adding API permissions...{Colors.NC}")
+        print(f"  {Colors.DIM}Step 2/4: Adding API permissions...{Colors.NC}")
         
         for perm_name, perm_id in GRAPH_PERMISSION_IDS.items():
             add_perm_result = subprocess.run(
@@ -555,7 +557,7 @@ def create_custom_app() -> Optional[Dict[str, Any]]:
                 print(f"    {Colors.YELLOW}⚠{Colors.NC} {perm_name}: {add_perm_result.stderr.strip()[:50]}")
         
         # Step 3: Create a service principal for the app
-        print(f"  {Colors.DIM}Step 3/3: Creating service principal...{Colors.NC}")
+        print(f"  {Colors.DIM}Step 3/4: Creating service principal...{Colors.NC}")
         
         sp_result = subprocess.run(
             [az_path, "ad", "sp", "create",
