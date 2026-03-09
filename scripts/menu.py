@@ -350,6 +350,25 @@ def install_terraform() -> bool:
 # Azure CLI App ID (first-party Microsoft app)
 AZURE_CLI_APP_ID = "04b07795-8ddb-461a-bbee-02f9e1bf7b46"
 
+# Our custom app name for SharePoint management
+CUSTOM_APP_NAME = "SharePoint-Sites-Terraform-Tool"
+
+# Config file to store custom app details
+APP_CONFIG_FILE = SCRIPT_DIR / ".app_config.json"
+
+# Microsoft Graph API ID (constant across all tenants)
+MICROSOFT_GRAPH_API_ID = "00000003-0000-0000-c000-000000000000"
+
+# Microsoft Graph API permission IDs (Application permissions)
+# These are the GUIDs for the specific permissions we need
+GRAPH_PERMISSION_IDS = {
+    "Sites.Read.All": "332a536c-c7ef-4017-ab91-336970924f0d",
+    "Sites.ReadWrite.All": "9492366f-7969-46a4-8d15-ed1a20078fff",
+    "Files.ReadWrite.All": "75359482-378d-4052-8f01-80520e7db3cd",
+    "Group.Read.All": "5b567255-7703-4780-807c-7be8301ae99b",
+    "Group.ReadWrite.All": "62a82d76-70ea-41e2-9197-370581804d09"
+}
+
 # Required permissions for SharePoint operations
 REQUIRED_GRAPH_PERMISSIONS = [
     "Sites.Read.All",
@@ -428,6 +447,351 @@ def get_tenant_id() -> Optional[str]:
     if account_info:
         return account_info.get("tenantId")
     return None
+
+# ============================================================================
+# CUSTOM APP REGISTRATION FOR SEAMLESS PERMISSIONS
+# ============================================================================
+
+def load_app_config() -> Optional[Dict[str, Any]]:
+    """Load the custom app configuration from file."""
+    if APP_CONFIG_FILE.exists():
+        try:
+            with open(APP_CONFIG_FILE, 'r') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return None
+
+def save_app_config(config: Dict[str, Any]) -> bool:
+    """Save the custom app configuration to file."""
+    try:
+        with open(APP_CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=2)
+        return True
+    except Exception as e:
+        print_error(f"Failed to save app config: {e}")
+        return False
+
+def find_existing_app() -> Optional[Dict[str, Any]]:
+    """Check if our custom app already exists in the tenant."""
+    az_path = find_azure_cli_path()
+    if not az_path:
+        return None
+    
+    try:
+        result = subprocess.run(
+            [az_path, "ad", "app", "list",
+             "--display-name", CUSTOM_APP_NAME,
+             "--query", "[0]",
+             "-o", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode == 0 and result.stdout.strip() and result.stdout.strip() != "null":
+            return json.loads(result.stdout)
+    except Exception:
+        pass
+    
+    return None
+
+def create_custom_app() -> Optional[Dict[str, Any]]:
+    """Create a custom app registration with required permissions."""
+    az_path = find_azure_cli_path()
+    if not az_path:
+        print_error("Azure CLI not found")
+        return None
+    
+    print()
+    print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+    print(f"  {Colors.WHITE}{Colors.BOLD}Creating Custom App Registration{Colors.NC}")
+    print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+    print()
+    print(f"  {Colors.WHITE}App Name:{Colors.NC} {CUSTOM_APP_NAME}")
+    print()
+    
+    try:
+        # Step 1: Create the app registration
+        print(f"  {Colors.DIM}Step 1/3: Creating app registration...{Colors.NC}")
+        
+        create_result = subprocess.run(
+            [az_path, "ad", "app", "create",
+             "--display-name", CUSTOM_APP_NAME,
+             "--sign-in-audience", "AzureADMyOrg",
+             "-o", "json"],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        
+        if create_result.returncode != 0:
+            print_error(f"Failed to create app: {create_result.stderr}")
+            return None
+        
+        app_data = json.loads(create_result.stdout)
+        app_id = app_data.get("appId")
+        object_id = app_data.get("id")
+        
+        print(f"  {Colors.GREEN}✓{Colors.NC} App created: {app_id}")
+        
+        # Step 2: Add required API permissions
+        print(f"  {Colors.DIM}Step 2/3: Adding API permissions...{Colors.NC}")
+        
+        for perm_name, perm_id in GRAPH_PERMISSION_IDS.items():
+            add_perm_result = subprocess.run(
+                [az_path, "ad", "app", "permission", "add",
+                 "--id", app_id,
+                 "--api", MICROSOFT_GRAPH_API_ID,
+                 "--api-permissions", f"{perm_id}=Role"],  # Role = Application permission
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if add_perm_result.returncode == 0:
+                print(f"    {Colors.GREEN}✓{Colors.NC} Added: {perm_name}")
+            else:
+                print(f"    {Colors.YELLOW}⚠{Colors.NC} {perm_name}: {add_perm_result.stderr.strip()[:50]}")
+        
+        # Step 3: Create a service principal for the app
+        print(f"  {Colors.DIM}Step 3/3: Creating service principal...{Colors.NC}")
+        
+        sp_result = subprocess.run(
+            [az_path, "ad", "sp", "create",
+             "--id", app_id,
+             "-o", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if sp_result.returncode == 0:
+            print(f"  {Colors.GREEN}✓{Colors.NC} Service principal created")
+        else:
+            # Service principal might already exist
+            if "already exists" in sp_result.stderr.lower():
+                print(f"  {Colors.GREEN}✓{Colors.NC} Service principal already exists")
+            else:
+                print(f"  {Colors.YELLOW}⚠{Colors.NC} SP creation: {sp_result.stderr.strip()[:50]}")
+        
+        # Save the app config
+        config = {
+            "app_id": app_id,
+            "object_id": object_id,
+            "display_name": CUSTOM_APP_NAME,
+            "tenant_id": get_tenant_id()
+        }
+        save_app_config(config)
+        
+        print()
+        print(f"  {Colors.GREEN}✓{Colors.NC} App registration complete!")
+        
+        return config
+        
+    except subprocess.TimeoutExpired:
+        print_error("Command timed out")
+        return None
+    except Exception as e:
+        print_error(f"Failed to create app: {e}")
+        return None
+
+def grant_consent_for_custom_app(app_id: str) -> bool:
+    """Grant admin consent for the custom app."""
+    az_path = find_azure_cli_path()
+    if not az_path:
+        return False
+    
+    print()
+    print(f"  {Colors.WHITE}Granting admin consent for app...{Colors.NC}")
+    
+    try:
+        result = subprocess.run(
+            [az_path, "ad", "app", "permission", "admin-consent",
+             "--id", app_id],
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        
+        if result.returncode == 0:
+            print(f"  {Colors.GREEN}✓{Colors.NC} Admin consent granted!")
+            return True
+        else:
+            # Check for specific errors
+            if "Insufficient privileges" in result.stderr or "Authorization_RequestDenied" in result.stderr:
+                print(f"  {Colors.YELLOW}⚠{Colors.NC} Insufficient privileges to grant consent.")
+                print(f"    {Colors.DIM}A Global Administrator must grant consent.{Colors.NC}")
+            else:
+                print(f"  {Colors.YELLOW}⚠{Colors.NC} Could not grant consent: {result.stderr.strip()[:100]}")
+            return False
+            
+    except subprocess.TimeoutExpired:
+        print_error("Command timed out")
+        return False
+    except Exception as e:
+        print_error(f"Failed to grant consent: {e}")
+        return False
+
+def open_consent_url_for_custom_app(app_id: str) -> bool:
+    """Open the admin consent URL for the custom app in the browser."""
+    import webbrowser
+    
+    tenant_id = get_tenant_id()
+    if not tenant_id:
+        print_error("Could not determine tenant ID")
+        return False
+    
+    consent_url = (
+        f"https://login.microsoftonline.com/{tenant_id}/adminconsent"
+        f"?client_id={app_id}"
+    )
+    
+    print()
+    print(f"  {Colors.WHITE}Opening browser for admin consent...{Colors.NC}")
+    print()
+    print(f"  {Colors.YELLOW}In the browser:{Colors.NC}")
+    print(f"    1. Sign in as a Global Administrator")
+    print(f"    2. Review the permissions")
+    print(f"    3. Click 'Accept' to grant consent")
+    print()
+    
+    try:
+        webbrowser.open(consent_url)
+        print(f"  {Colors.GREEN}✓{Colors.NC} Browser opened!")
+        return True
+    except Exception as e:
+        print_error(f"Could not open browser: {e}")
+        print(f"  Please open this URL manually:")
+        print(f"  {Colors.CYAN}{consent_url}{Colors.NC}")
+        return False
+
+def setup_custom_app_with_consent() -> bool:
+    """Set up custom app registration and grant consent - fully automated."""
+    print()
+    print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+    print(f"  {Colors.WHITE}{Colors.BOLD}Automatic App Registration & Consent{Colors.NC}")
+    print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+    print()
+    print(f"  {Colors.DIM}This will create a custom app registration in your tenant{Colors.NC}")
+    print(f"  {Colors.DIM}and grant it the necessary permissions for SharePoint access.{Colors.NC}")
+    print()
+    
+    # Check if app already exists
+    print(f"  {Colors.WHITE}Checking for existing app...{Colors.NC}")
+    existing_app = find_existing_app()
+    
+    if existing_app:
+        app_id = existing_app.get("appId")
+        print(f"  {Colors.GREEN}✓{Colors.NC} Found existing app: {app_id}")
+        
+        # Save config if not already saved
+        config = load_app_config()
+        if not config or config.get("app_id") != app_id:
+            config = {
+                "app_id": app_id,
+                "object_id": existing_app.get("id"),
+                "display_name": CUSTOM_APP_NAME,
+                "tenant_id": get_tenant_id()
+            }
+            save_app_config(config)
+    else:
+        # Create new app
+        config = create_custom_app()
+        if not config:
+            return False
+        app_id = config.get("app_id")
+    
+    # Try to grant admin consent via CLI first
+    if grant_consent_for_custom_app(app_id):
+        # Wait a moment for permissions to propagate
+        import time
+        print()
+        print(f"  {Colors.DIM}Waiting for permissions to propagate...{Colors.NC}")
+        time.sleep(5)
+        
+        # Verify permissions work
+        result = check_graph_permissions()
+        if result.get("has_permissions"):
+            print()
+            print(f"  {Colors.GREEN}{'═' * 60}{Colors.NC}")
+            print(f"  {Colors.GREEN}✓ Setup Complete! SharePoint access is now enabled.{Colors.NC}")
+            print(f"  {Colors.GREEN}{'═' * 60}{Colors.NC}")
+            return True
+        else:
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} Permissions may still be propagating.")
+            print(f"    Please wait a minute and try again.")
+    else:
+        # Fall back to browser-based consent
+        print()
+        print(f"  {Colors.WHITE}Falling back to browser-based consent...{Colors.NC}")
+        
+        if open_consent_url_for_custom_app(app_id):
+            print()
+            print(f"  {Colors.YELLOW}Waiting for you to complete consent in the browser...{Colors.NC}")
+            print(f"  {Colors.DIM}(Checking every 2 seconds for up to 2 minutes){Colors.NC}")
+            print()
+            
+            import time
+            for i in range(60):  # Wait up to 2 minutes
+                time.sleep(2)
+                print(f"  Checking permissions... ({(i+1)*2}/120 seconds)", end='\r')
+                result = check_graph_permissions()
+                if result.get("has_permissions"):
+                    print()
+                    print()
+                    print(f"  {Colors.GREEN}{'═' * 60}{Colors.NC}")
+                    print(f"  {Colors.GREEN}✓ Setup Complete! SharePoint access is now enabled.{Colors.NC}")
+                    print(f"  {Colors.GREEN}{'═' * 60}{Colors.NC}")
+                    return True
+            
+            print()
+            print()
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} Consent not detected yet.")
+            print(f"    It may take a few minutes for permissions to propagate.")
+            print(f"    Please try running the prerequisites check again.")
+    
+    return False
+
+def delete_custom_app() -> bool:
+    """Delete the custom app registration (cleanup)."""
+    az_path = find_azure_cli_path()
+    if not az_path:
+        return False
+    
+    config = load_app_config()
+    if not config:
+        existing_app = find_existing_app()
+        if existing_app:
+            app_id = existing_app.get("appId")
+        else:
+            print_info("No custom app found to delete.")
+            return True
+    else:
+        app_id = config.get("app_id")
+    
+    print(f"  {Colors.WHITE}Deleting app registration: {app_id}...{Colors.NC}")
+    
+    try:
+        result = subprocess.run(
+            [az_path, "ad", "app", "delete", "--id", app_id],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode == 0:
+            print(f"  {Colors.GREEN}✓{Colors.NC} App deleted successfully")
+            # Remove config file
+            if APP_CONFIG_FILE.exists():
+                APP_CONFIG_FILE.unlink()
+            return True
+        else:
+            print_error(f"Failed to delete app: {result.stderr}")
+            return False
+    except Exception as e:
+        print_error(f"Failed to delete app: {e}")
+        return False
 
 def grant_admin_consent_via_cli() -> bool:
     """Try to grant admin consent using Azure CLI (requires admin privileges)."""
@@ -515,43 +879,14 @@ def open_admin_consent_url() -> bool:
         return False
 
 def auto_grant_admin_consent() -> bool:
-    """Automatically grant admin consent - tries CLI first, then browser."""
-    print()
-    print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
-    print(f"  {Colors.WHITE}{Colors.BOLD}Granting Admin Consent for SharePoint Access{Colors.NC}")
-    print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+    """Automatically grant admin consent using custom app registration.
     
-    # First, try the CLI method (fastest if user is admin)
-    if grant_admin_consent_via_cli():
-        return True
-    
-    # If CLI fails, fall back to browser method
-    print()
-    print(f"  {Colors.WHITE}Falling back to browser-based consent...{Colors.NC}")
-    
-    if open_admin_consent_url():
-        print()
-        print(f"  {Colors.YELLOW}Waiting for you to complete consent in the browser...{Colors.NC}")
-        print()
-        
-        # Wait for user to complete consent
-        import time
-        for i in range(30):  # Wait up to 30 seconds, checking every second
-            time.sleep(2)
-            print(f"  Checking permissions... ({i*2+2}/60 seconds)", end='\r')
-            result = check_graph_permissions()
-            if result.get("has_permissions"):
-                print()
-                print(f"  {Colors.GREEN}✓{Colors.NC} Permissions granted successfully!")
-                return True
-        
-        print()
-        print(f"  {Colors.YELLOW}⚠{Colors.NC} Consent not detected yet.")
-        print(f"    It may take a few minutes for permissions to propagate.")
-        print(f"    Please try running the script again in a few minutes.")
-        return False
-    
-    return False
+    This creates a custom app registration in the tenant (if it doesn't exist)
+    and grants it the necessary permissions. This is more reliable than trying
+    to grant consent for the Azure CLI app, which is a first-party Microsoft app.
+    """
+    # Use the custom app registration flow - this is the most reliable method
+    return setup_custom_app_with_consent()
 
 def run_graph_permissions_check() -> None:
     """Run the Graph API permissions check and offer to grant consent."""
@@ -564,6 +899,11 @@ def run_graph_permissions_check() -> None:
         print(f"  {Colors.YELLOW}⚠{Colors.NC} Not logged into Azure. Please log in first.")
         return
     
+    # Check if we have a custom app configured
+    app_config = load_app_config()
+    if app_config:
+        print(f"  {Colors.GREEN}✓{Colors.NC} Custom app registered: {app_config.get('app_id', 'Unknown')}")
+    
     result = check_graph_permissions()
     
     if result["has_permissions"]:
@@ -574,11 +914,26 @@ def run_graph_permissions_check() -> None:
         if result["error"]:
             print(f"    {Colors.DIM}Error: {result['error']}{Colors.NC}")
         print()
-        print(f"  {Colors.YELLOW}Would you like to open the admin consent page?{Colors.NC}")
-        print(f"  {Colors.DIM}(Requires Global Administrator or Privileged Role Administrator){Colors.NC}")
+        print(f"  {Colors.WHITE}Options to fix this:{Colors.NC}")
         print()
-        choice = input(f"  Open admin consent page? (y/n): ").strip().lower()
-        if choice == 'y':
+        print(f"    {Colors.CYAN}1{Colors.NC}. Automatic Setup (Recommended)")
+        print(f"       {Colors.DIM}Creates a custom app registration and grants permissions{Colors.NC}")
+        print()
+        print(f"    {Colors.CYAN}2{Colors.NC}. Manual Browser Consent")
+        print(f"       {Colors.DIM}Opens browser for manual admin consent{Colors.NC}")
+        print()
+        print(f"    {Colors.CYAN}3{Colors.NC}. Skip for now")
+        print()
+        
+        choice = input(f"  Enter choice (1-3): ").strip()
+        
+        if choice == '1':
+            # Automatic setup with custom app
+            if setup_custom_app_with_consent():
+                print()
+                print(f"  {Colors.GREEN}✓{Colors.NC} Setup complete! You can now use SharePoint features.")
+        elif choice == '2':
+            # Manual browser consent
             open_admin_consent_url()
             print()
             input(f"  {Colors.YELLOW}Press Enter after granting consent to re-check...{Colors.NC}")
@@ -591,6 +946,8 @@ def run_graph_permissions_check() -> None:
                 print(f"  {Colors.YELLOW}⚠{Colors.NC} Permissions still not available.")
                 print(f"    It may take a few minutes for consent to propagate.")
                 print(f"    Try running the populate_files.py script again later.")
+        else:
+            print(f"  {Colors.DIM}Skipped. You can set up permissions later.{Colors.NC}")
 
 def check_prerequisites(auto_install: bool = False) -> dict:
     """Check all prerequisites and optionally install missing ones."""
@@ -775,19 +1132,20 @@ def run_prerequisites_check_menu() -> None:
             print(f"  {Colors.WHITE}{Colors.BOLD}Graph API Permissions{Colors.NC}")
             print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
             print()
-            print(f"  {Colors.YELLOW}⚠{Colors.NC} SharePoint access requires admin consent for the Azure CLI app.")
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} SharePoint access requires Microsoft Graph API permissions.")
             print()
-            print(f"  {Colors.WHITE}Would you like to grant admin consent now?{Colors.NC}")
+            print(f"  {Colors.WHITE}Would you like to set up permissions automatically?{Colors.NC}")
+            print(f"  {Colors.DIM}This will create a custom app registration and grant the required permissions.{Colors.NC}")
             print(f"  {Colors.DIM}(Requires Global Administrator or Privileged Role Administrator){Colors.NC}")
             print()
-            print(f"    {Colors.GREEN}[Y]{Colors.NC} Yes, grant admin consent automatically")
+            print(f"    {Colors.GREEN}[Y]{Colors.NC} Yes, set up automatically (recommended)")
             print(f"    {Colors.RED}[N]{Colors.NC} No, I'll do this later")
             print()
             
             choice = input(f"  {Colors.YELLOW}Choice:{Colors.NC} ").strip().lower()
             
             if choice == 'y':
-                # Use the automated consent function
+                # Use the automated consent function (now uses custom app registration)
                 if auto_grant_admin_consent():
                     # Re-check and update results
                     results["graph_permissions"] = check_graph_permissions()
@@ -839,6 +1197,9 @@ def print_menu(prereq_status: dict) -> None:
     print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.CYAN}[C]{Colors.NC} {Colors.WHITE}⚙️  Edit Configuration{Colors.NC}                                 {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Environments, sites, and settings{Colors.NC}                     {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.MAGENTA}[A]{Colors.NC} {Colors.WHITE}🔑 Manage App Registration{Colors.NC}                            {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Setup or remove custom app for permissions{Colors.NC}            {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.WHITE}[H]{Colors.NC} {Colors.WHITE}❓ Help & Documentation{Colors.NC}                               {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.WHITE}[Q]{Colors.NC} {Colors.WHITE}🚪 Quit{Colors.NC}                                                {Colors.CYAN}│{Colors.NC}")
@@ -900,6 +1261,150 @@ def print_help() -> None:
     print(f"    • {Colors.BLUE}docs/TROUBLESHOOTING.md{Colors.NC} - Common issues")
     print()
     input(f"  {Colors.YELLOW}Press Enter to return to menu...{Colors.NC}")
+
+# ============================================================================
+# APP REGISTRATION MANAGEMENT
+# ============================================================================
+
+def manage_app_registration_menu() -> None:
+    """Show the app registration management menu."""
+    while True:
+        clear_screen()
+        print()
+        print(f"  {Colors.CYAN}{'=' * 60}{Colors.NC}")
+        print(f"  {Colors.WHITE}{Colors.BOLD}🔑 Manage App Registration{Colors.NC}")
+        print(f"  {Colors.CYAN}{'=' * 60}{Colors.NC}")
+        print()
+        
+        # Check current app status
+        app_config = load_app_config()
+        existing_app = find_existing_app() if not app_config else None
+        
+        if app_config:
+            print(f"  {Colors.GREEN}✓{Colors.NC} Custom app is configured:")
+            print(f"    {Colors.DIM}App ID: {app_config.get('app_id', 'Unknown')}{Colors.NC}")
+            print(f"    {Colors.DIM}Name: {app_config.get('display_name', CUSTOM_APP_NAME)}{Colors.NC}")
+            print(f"    {Colors.DIM}Tenant: {app_config.get('tenant_id', 'Unknown')}{Colors.NC}")
+        elif existing_app:
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} Found existing app (not in local config):")
+            print(f"    {Colors.DIM}App ID: {existing_app.get('appId', 'Unknown')}{Colors.NC}")
+        else:
+            print(f"  {Colors.DIM}No custom app registration found.{Colors.NC}")
+        
+        # Check permissions
+        print()
+        if check_azure_login():
+            result = check_graph_permissions()
+            if result.get("has_permissions"):
+                print(f"  {Colors.GREEN}✓{Colors.NC} Graph API permissions: Working")
+            else:
+                print(f"  {Colors.RED}✗{Colors.NC} Graph API permissions: Not working")
+                if result.get("error"):
+                    print(f"    {Colors.DIM}{result['error']}{Colors.NC}")
+        else:
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} Not logged into Azure")
+        
+        print()
+        print(f"  {Colors.WHITE}Options:{Colors.NC}")
+        print()
+        print(f"  {Colors.CYAN}╭──────────────────────────────────────────────────────────────╮{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.GREEN}[1]{Colors.NC} {Colors.WHITE}🔧 Setup App Registration{Colors.NC}                             {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Create app and grant permissions automatically{Colors.NC}        {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.YELLOW}[2]{Colors.NC} {Colors.WHITE}🔍 Check Permissions{Colors.NC}                                  {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Test if current permissions are working{Colors.NC}               {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.RED}[3]{Colors.NC} {Colors.WHITE}🗑️  Delete App Registration{Colors.NC}                            {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Remove the custom app from Azure AD{Colors.NC}                   {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}├──────────────────────────────────────────────────────────────┤{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.WHITE}[B]{Colors.NC} {Colors.WHITE}← Back to Main Menu{Colors.NC}                                  {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}╰──────────────────────────────────────────────────────────────╯{Colors.NC}")
+        print()
+        
+        choice = input(f"  {Colors.YELLOW}Enter choice:{Colors.NC} ").strip().lower()
+        
+        if choice == '1':
+            # Setup app registration
+            if not check_azure_login():
+                print()
+                print_error("Please log into Azure first (option 0 from main menu)")
+                input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+                continue
+            
+            setup_custom_app_with_consent()
+            input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            
+        elif choice == '2':
+            # Check permissions
+            print()
+            if not check_azure_login():
+                print_error("Please log into Azure first")
+            else:
+                result = check_graph_permissions()
+                if result.get("has_permissions"):
+                    print(f"  {Colors.GREEN}✓{Colors.NC} Permissions are working correctly!")
+                    print(f"  {Colors.GREEN}✓{Colors.NC} You can access SharePoint sites.")
+                else:
+                    print(f"  {Colors.RED}✗{Colors.NC} Permissions are not working.")
+                    if result.get("error"):
+                        print(f"    {Colors.DIM}Error: {result['error']}{Colors.NC}")
+                    print()
+                    print(f"  {Colors.WHITE}Use option [1] to set up app registration.{Colors.NC}")
+            input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            
+        elif choice == '3':
+            # Delete app registration
+            print()
+            if not check_azure_login():
+                print_error("Please log into Azure first")
+                input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+                continue
+            
+            # Confirm deletion
+            app_config = load_app_config()
+            existing_app = find_existing_app()
+            
+            if not app_config and not existing_app:
+                print_info("No custom app registration found to delete.")
+                input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+                continue
+            
+            print(f"  {Colors.RED}{Colors.BOLD}⚠️  WARNING: This will delete the app registration!{Colors.NC}")
+            print()
+            if app_config:
+                print(f"  App to delete: {app_config.get('app_id', 'Unknown')}")
+            elif existing_app:
+                print(f"  App to delete: {existing_app.get('appId', 'Unknown')}")
+            print()
+            print(f"  {Colors.YELLOW}This action cannot be undone.{Colors.NC}")
+            print(f"  {Colors.DIM}You will need to set up the app again to use SharePoint features.{Colors.NC}")
+            print()
+            
+            confirm = input(f"  Type 'DELETE' to confirm: ").strip()
+            
+            if confirm == 'DELETE':
+                if delete_custom_app():
+                    print()
+                    print(f"  {Colors.GREEN}✓{Colors.NC} App registration deleted successfully!")
+                else:
+                    print()
+                    print(f"  {Colors.RED}✗{Colors.NC} Failed to delete app registration.")
+            else:
+                print()
+                print(f"  {Colors.DIM}Deletion cancelled.{Colors.NC}")
+            
+            input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            
+        elif choice == 'b':
+            break
+        else:
+            print()
+            print_warning("Invalid choice. Please try again.")
+            input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
 
 # ============================================================================
 # CONFIGURATION EDITING
@@ -1370,6 +1875,12 @@ def main() -> None:
         elif choice == 'c':
             # Edit Configuration
             edit_configuration_menu()
+            
+        elif choice == 'a':
+            # Manage App Registration
+            manage_app_registration_menu()
+            # Refresh prereq status after app management
+            prereq_status = check_prerequisites(auto_install=False)
             
         elif choice == 'h':
             print_help()

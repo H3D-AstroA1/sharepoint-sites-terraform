@@ -820,6 +820,10 @@ insomnia-workspace*.json
 # consider if they should be added to the main sections above instead.
 # ============================================================================
 
+# Custom app registration config (contains tenant-specific app IDs)
+scripts/.app_config.json
+.app_config.json
+
 # Generated Terraform configuration (created by deploy.py)
 terraform/terraform.tfvars
 
