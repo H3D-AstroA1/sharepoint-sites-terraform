@@ -593,13 +593,47 @@ def check_spo_module_installed() -> bool:
     """Check if SharePoint Online PowerShell module is installed."""
     ps_exe = get_powershell_executable()
     try:
+        # Check in all possible module paths
+        check_script = '''
+$ErrorActionPreference = "SilentlyContinue"
+$found = $false
+
+# Check standard module paths
+$modulePaths = @(
+    "$env:USERPROFILE\\Documents\\WindowsPowerShell\\Modules",
+    "$env:ProgramFiles\\WindowsPowerShell\\Modules",
+    "C:\\Program Files\\WindowsPowerShell\\Modules",
+    "$env:USERPROFILE\\Documents\\PowerShell\\Modules"
+)
+
+foreach ($path in $modulePaths) {
+    if (Test-Path "$path\\Microsoft.Online.SharePoint.PowerShell") {
+        $found = $true
+        break
+    }
+}
+
+# Also check using Get-Module
+if (-not $found) {
+    $module = Get-Module -ListAvailable -Name Microsoft.Online.SharePoint.PowerShell
+    if ($module) {
+        $found = $true
+    }
+}
+
+if ($found) {
+    Write-Output "FOUND"
+} else {
+    Write-Output "NOT_FOUND"
+}
+'''
         result = subprocess.run(
-            [ps_exe, "-Command", "Get-Module -ListAvailable -Name Microsoft.Online.SharePoint.PowerShell"],
+            [ps_exe, "-ExecutionPolicy", "Bypass", "-Command", check_script],
             capture_output=True,
             text=True,
             timeout=30
         )
-        return "Microsoft.Online.SharePoint.PowerShell" in result.stdout
+        return "FOUND" in result.stdout
     except Exception:
         return False
 
