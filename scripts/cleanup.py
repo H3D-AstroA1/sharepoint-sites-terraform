@@ -799,7 +799,7 @@ try {{
 
 
 def purge_spo_deleted_site(admin_url: str, site_url: str) -> bool:
-    """Permanently delete a SharePoint site from the recycle bin."""
+    """Permanently delete a SharePoint site from the recycle bin (single site)."""
     ps_exe = get_powershell_executable()
     ps_script = f'''
 $ErrorActionPreference = "Stop"
@@ -818,13 +818,81 @@ try {{
             [ps_exe, "-ExecutionPolicy", "Bypass", "-Command", ps_script],
             capture_output=True,
             text=True,
-            timeout=60
+            timeout=120
         )
         
         return result.returncode == 0 and "SUCCESS" in result.stdout
     except Exception as e:
         print_error(f"Error purging site: {e}")
         return False
+
+
+def purge_spo_deleted_sites_batch(admin_url: str, site_urls: List[str]) -> Dict[str, bool]:
+    """Permanently delete multiple SharePoint sites in a single session (no re-auth)."""
+    ps_exe = get_powershell_executable()
+    
+    # Build the list of sites to delete
+    sites_array = ", ".join([f'"{url}"' for url in site_urls])
+    
+    ps_script = f'''
+$ErrorActionPreference = "Stop"
+$results = @{{}}
+$sites = @({sites_array})
+
+try {{
+    # Connect once at the start
+    Write-Host "Connecting to SharePoint Online..."
+    Connect-SPOService -Url "{admin_url}" -ErrorAction Stop
+    Write-Host "Connected successfully!"
+    
+    foreach ($site in $sites) {{
+        try {{
+            Write-Host "Deleting: $site"
+            Remove-SPODeletedSite -Identity $site -Confirm:$false -ErrorAction Stop
+            $results[$site] = "SUCCESS"
+            Write-Host "SUCCESS: $site"
+        }} catch {{
+            $results[$site] = "FAILED: $($_.Exception.Message)"
+            Write-Host "FAILED: $site - $($_.Exception.Message)"
+        }}
+    }}
+    
+    # Output results as JSON
+    $results | ConvertTo-Json -Compress
+}} catch {{
+    Write-Error "Connection failed: $($_.Exception.Message)"
+    exit 1
+}}
+'''
+    
+    try:
+        print_info("Connecting to SharePoint Online (authenticate once)...")
+        result = subprocess.run(
+            [ps_exe, "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+            capture_output=True,
+            text=True,
+            timeout=600  # 10 minutes for batch operation
+        )
+        
+        if result.returncode == 0:
+            # Parse results from output
+            results = {}
+            for url in site_urls:
+                if f"SUCCESS: {url}" in result.stdout or f'"{url}":"SUCCESS"' in result.stdout:
+                    results[url] = True
+                else:
+                    results[url] = False
+            return results
+        else:
+            print_error(f"Batch deletion failed: {result.stderr}")
+            return {url: False for url in site_urls}
+            
+    except subprocess.TimeoutExpired:
+        print_error("Batch operation timed out")
+        return {url: False for url in site_urls}
+    except Exception as e:
+        print_error(f"Error in batch purge: {e}")
+        return {url: False for url in site_urls}
 
 
 def display_spo_deleted_sites_for_selection(sites: List[Dict[str, Any]]) -> None:
@@ -921,25 +989,28 @@ def purge_spo_deleted_sites_mode(admin_url: str, auto_confirm: bool = False) -> 
             print_info("Permanent deletion cancelled")
             return
     
-    # Delete the sites
+    # Delete the sites using batch operation (single authentication)
     print()
-    total = len(selected_sites)
-    success_count = 0
+    site_urls = [site.get("Url", "") for site in selected_sites if site.get("Url")]
     
-    for i, site in enumerate(selected_sites, 1):
-        url = site.get("Url", "Unknown")
+    print_info(f"Deleting {len(site_urls)} sites in a single session...")
+    print_info("You will only need to authenticate once.")
+    print()
+    
+    results = purge_spo_deleted_sites_batch(admin_url, site_urls)
+    
+    # Show results
+    success_count = 0
+    for url, success in results.items():
         site_name = url.split("/sites/")[-1] if "/sites/" in url else url
-        
-        print_progress(i, total, f"Purging {site_name}...")
-        
-        if purge_spo_deleted_site(admin_url, url):
+        if success:
             print_success(f"Permanently deleted: {site_name}")
             success_count += 1
         else:
             print_error(f"Failed to permanently delete: {site_name}")
     
     print()
-    print_info(f"Permanently deleted {success_count} of {total} sites")
+    print_info(f"Permanently deleted {success_count} of {len(site_urls)} sites")
     if success_count > 0:
         print_info("The site URLs are now available for reuse")
 
