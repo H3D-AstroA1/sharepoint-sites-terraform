@@ -19,13 +19,16 @@ Usage:
     python cleanup.py --list-groups             # List Microsoft 365 Groups
     python cleanup.py --delete-groups           # Delete Microsoft 365 Groups
     python cleanup.py --list-deleted            # List deleted groups in recycle bin
-    python cleanup.py --purge-deleted           # Permanently delete from recycle bin
+    python cleanup.py --purge-deleted           # Permanently delete groups from recycle bin
+    python cleanup.py --purge-spo-recycle       # Purge SharePoint site recycle bin
+    python cleanup.py --purge-spo-recycle --tenant contoso  # With tenant name
     python cleanup.py --help                    # Show help
 
 Requirements:
     - Python 3.8+
     - Azure CLI (logged in)
     - Microsoft Graph API permissions (Sites.ReadWrite.All, Files.ReadWrite.All)
+    - SharePoint Online PowerShell module (for --purge-spo-recycle)
 
 WARNING: This script performs DESTRUCTIVE operations. Always backup important data first!
 """
@@ -566,6 +569,242 @@ def purge_deleted_groups_mode(groups: List[Dict[str, Any]], access_token: str, a
     
     print()
     print_info(f"Permanently deleted {success_count} of {total} groups")
+    if success_count > 0:
+        print_info("The site URLs are now available for reuse")
+
+
+# ============================================================================
+# SHAREPOINT ONLINE POWERSHELL FUNCTIONS (for SharePoint site recycle bin)
+# ============================================================================
+
+def check_spo_module_installed() -> bool:
+    """Check if SharePoint Online PowerShell module is installed."""
+    try:
+        result = subprocess.run(
+            ["powershell", "-Command", "Get-Module -ListAvailable -Name Microsoft.Online.SharePoint.PowerShell"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        return "Microsoft.Online.SharePoint.PowerShell" in result.stdout
+    except Exception:
+        return False
+
+
+def install_spo_module() -> bool:
+    """Install SharePoint Online PowerShell module."""
+    print_info("Installing SharePoint Online PowerShell module...")
+    try:
+        result = subprocess.run(
+            ["powershell", "-Command",
+             "Install-Module -Name Microsoft.Online.SharePoint.PowerShell -Force -AllowClobber -Scope CurrentUser"],
+            capture_output=True,
+            text=True,
+            timeout=300
+        )
+        if result.returncode == 0:
+            print_success("SharePoint Online PowerShell module installed")
+            return True
+        else:
+            print_error(f"Failed to install module: {result.stderr}")
+            return False
+    except Exception as e:
+        print_error(f"Error installing module: {e}")
+        return False
+
+
+def get_spo_deleted_sites(admin_url: str) -> List[Dict[str, Any]]:
+    """Get deleted SharePoint sites using PowerShell."""
+    sites = []
+    
+    # PowerShell script to get deleted sites
+    ps_script = f'''
+$ErrorActionPreference = "Stop"
+try {{
+    # Connect to SharePoint Online (will prompt for credentials if needed)
+    Connect-SPOService -Url "{admin_url}" -ErrorAction Stop
+    
+    # Get deleted sites
+    $deletedSites = Get-SPODeletedSite -ErrorAction Stop
+    
+    # Output as JSON
+    $deletedSites | Select-Object Url, DeletionTime, SiteId, Status | ConvertTo-Json -Compress
+}} catch {{
+    Write-Error $_.Exception.Message
+    exit 1
+}}
+'''
+    
+    try:
+        print_info("Connecting to SharePoint Online...")
+        result = subprocess.run(
+            ["powershell", "-Command", ps_script],
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        
+        if result.returncode == 0 and result.stdout.strip():
+            output = result.stdout.strip()
+            # Handle single item vs array
+            if output.startswith('['):
+                sites = json.loads(output)
+            elif output.startswith('{'):
+                sites = [json.loads(output)]
+        elif result.stderr:
+            print_error(f"PowerShell error: {result.stderr}")
+            
+    except subprocess.TimeoutExpired:
+        print_error("Connection timed out. Please try again.")
+    except json.JSONDecodeError:
+        print_warning("Could not parse deleted sites response")
+    except Exception as e:
+        print_error(f"Error getting deleted sites: {e}")
+    
+    return sites
+
+
+def purge_spo_deleted_site(admin_url: str, site_url: str) -> bool:
+    """Permanently delete a SharePoint site from the recycle bin."""
+    ps_script = f'''
+$ErrorActionPreference = "Stop"
+try {{
+    Connect-SPOService -Url "{admin_url}" -ErrorAction SilentlyContinue
+    Remove-SPODeletedSite -Identity "{site_url}" -Confirm:$false -ErrorAction Stop
+    Write-Output "SUCCESS"
+}} catch {{
+    Write-Error $_.Exception.Message
+    exit 1
+}}
+'''
+    
+    try:
+        result = subprocess.run(
+            ["powershell", "-Command", ps_script],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        
+        return result.returncode == 0 and "SUCCESS" in result.stdout
+    except Exception as e:
+        print_error(f"Error purging site: {e}")
+        return False
+
+
+def display_spo_deleted_sites_for_selection(sites: List[Dict[str, Any]]) -> None:
+    """Display deleted SharePoint sites in a numbered list for selection."""
+    print()
+    print(f"  {Colors.WHITE}{Colors.BOLD}Deleted SharePoint Sites (SharePoint Recycle Bin):{Colors.NC}")
+    print(f"  {Colors.CYAN}{'─' * 70}{Colors.NC}")
+    print()
+    
+    for i, site in enumerate(sites, 1):
+        url = site.get("Url", "Unknown")
+        deleted_time = site.get("DeletionTime", "Unknown")
+        
+        # Extract site name from URL
+        site_name = url.split("/sites/")[-1] if "/sites/" in url else url
+        
+        print(f"  [{Colors.YELLOW}{i:2d}{Colors.NC}] 🗑️  {Colors.WHITE}{site_name}{Colors.NC}")
+        print(f"       {Colors.CYAN}{url}{Colors.NC}")
+        print(f"       Deleted: {deleted_time}")
+        print()
+
+
+def interactive_select_spo_deleted_sites(sites: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Allow user to select deleted SharePoint sites from a numbered list."""
+    display_spo_deleted_sites_for_selection(sites)
+    
+    print(f"  Enter site numbers to select (e.g., 1,3,5 or 1-5 or * for all):")
+    selection = input(f"  > ").strip()
+    
+    if not selection:
+        return []
+    
+    selected_indices = parse_selection(selection, len(sites))
+    
+    if not selected_indices:
+        print_warning("No valid selection made")
+        return []
+    
+    selected_sites = [sites[i-1] for i in sorted(selected_indices) if 1 <= i <= len(sites)]
+    print_info(f"Selected {len(selected_sites)} site(s)")
+    
+    return selected_sites
+
+
+def purge_spo_deleted_sites_mode(admin_url: str, auto_confirm: bool = False) -> None:
+    """List and permanently delete SharePoint sites from the recycle bin."""
+    
+    # Check if SPO module is installed
+    if not check_spo_module_installed():
+        print_warning("SharePoint Online PowerShell module is not installed")
+        install_choice = input("  Would you like to install it now? (y/n): ").strip().lower()
+        if install_choice == 'y':
+            if not install_spo_module():
+                print_error("Could not install SharePoint Online PowerShell module")
+                print_info("You can install it manually with:")
+                print_info("  Install-Module -Name Microsoft.Online.SharePoint.PowerShell -Force")
+                return
+        else:
+            print_info("Skipping SharePoint site recycle bin cleanup")
+            return
+    
+    # Get deleted sites
+    print_info("Fetching deleted SharePoint sites...")
+    sites = get_spo_deleted_sites(admin_url)
+    
+    if not sites:
+        print_warning("No deleted SharePoint sites found in recycle bin")
+        print_info("The SharePoint recycle bin is empty")
+        return
+    
+    print_success(f"Found {len(sites)} deleted SharePoint site(s)")
+    
+    # Let user select sites
+    selected_sites = interactive_select_spo_deleted_sites(sites)
+    
+    if not selected_sites:
+        print_info("No sites selected for permanent deletion")
+        return
+    
+    # Show confirmation
+    print()
+    print_danger("WARNING: Permanently deleting sites cannot be undone!")
+    print_danger("This will free up the site URLs for reuse.")
+    print()
+    print(f"  {Colors.WHITE}Sites to be permanently deleted:{Colors.NC}")
+    for site in selected_sites:
+        url = site.get("Url", "Unknown")
+        print(f"    {Colors.RED}✗{Colors.NC} {url}")
+    print()
+    
+    if not auto_confirm:
+        confirm = input(f"  Type 'PURGE' to confirm permanent deletion: ").strip()
+        if confirm != "PURGE":
+            print_info("Permanent deletion cancelled")
+            return
+    
+    # Delete the sites
+    print()
+    total = len(selected_sites)
+    success_count = 0
+    
+    for i, site in enumerate(selected_sites, 1):
+        url = site.get("Url", "Unknown")
+        site_name = url.split("/sites/")[-1] if "/sites/" in url else url
+        
+        print_progress(i, total, f"Purging {site_name}...")
+        
+        if purge_spo_deleted_site(admin_url, url):
+            print_success(f"Permanently deleted: {site_name}")
+            success_count += 1
+        else:
+            print_error(f"Failed to permanently delete: {site_name}")
+    
+    print()
+    print_info(f"Permanently deleted {success_count} of {total} sites")
     if success_count > 0:
         print_info("The site URLs are now available for reuse")
 
@@ -1274,6 +1513,17 @@ Selection Syntax (for --select-sites and --select-files):
         action='store_true',
         help='Permanently delete groups from the recycle bin (frees up URLs)'
     )
+    parser.add_argument(
+        '--purge-spo-recycle',
+        action='store_true',
+        help='Permanently delete sites from SharePoint recycle bin (requires SPO PowerShell)'
+    )
+    parser.add_argument(
+        '--tenant',
+        type=str,
+        metavar='NAME',
+        help='SharePoint tenant name (e.g., "contoso" for contoso.sharepoint.com)'
+    )
     
     args = parser.parse_args()
     
@@ -1388,6 +1638,31 @@ Selection Syntax (for --select-sites and --select-files):
         if args.purge_deleted:
             purge_deleted_groups_mode(deleted_groups, access_token, args.yes)
             sys.exit(0)
+    
+    # Handle SharePoint site recycle bin (requires SPO PowerShell)
+    if args.purge_spo_recycle:
+        print_step(4, "Purge SharePoint Site Recycle Bin")
+        
+        # Get tenant name from args or environment
+        tenant_name = args.tenant
+        if not tenant_name:
+            # Try to get from environment config
+            if selected_env:
+                m365_config = selected_env.get("m365", {})
+                tenant_name = m365_config.get("tenant_name", "")
+        
+        if not tenant_name:
+            print_warning("Tenant name not specified")
+            tenant_name = input("  Enter your SharePoint tenant name (e.g., 'contoso' for contoso.sharepoint.com): ").strip()
+            if not tenant_name:
+                print_error("Tenant name is required for SharePoint recycle bin operations")
+                sys.exit(1)
+        
+        admin_url = f"https://{tenant_name}-admin.sharepoint.com"
+        print_info(f"SharePoint Admin URL: {admin_url}")
+        
+        purge_spo_deleted_sites_mode(admin_url, args.yes)
+        sys.exit(0)
     
     # Step 4: Get SharePoint sites (or fall back to Groups if Sites API fails)
     print_step(4, "Discover SharePoint Sites")
