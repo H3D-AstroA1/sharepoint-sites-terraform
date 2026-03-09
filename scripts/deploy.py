@@ -1489,6 +1489,16 @@ Examples:
     print(f"  {Colors.GREEN}Your SharePoint sites have been created!{Colors.NC}")
     print()
     
+    # Helper function to convert site name to URL-safe mailNickname
+    def get_site_url_name(site_name: str, template: str) -> str:
+        """Convert site name to the actual URL name used by SharePoint."""
+        # Remove all non-alphanumeric characters (same as PowerShell script)
+        url_name = ''.join(c for c in site_name if c.isalnum())
+        # Communication sites created as fallback get 'site' suffix
+        if template == "SITEPAGEPUBLISHING#0":
+            url_name = url_name + "site"
+        return url_name
+    
     # Separate sites by visibility
     private_sites = [s for s in sites if s.get('visibility', 'Private').lower() == 'private']
     public_sites = [s for s in sites if s.get('visibility', 'Private').lower() == 'public']
@@ -1496,17 +1506,24 @@ Examples:
     if private_sites:
         print(f"  {Colors.WHITE}{Colors.BOLD}Private Sites:{Colors.NC}")
         for site in private_sites:
-            print(f"    {Colors.YELLOW}🔒{Colors.NC} {Colors.CYAN}https://{m365_tenant}.sharepoint.com/sites/{site['name']}{Colors.NC}")
+            url_name = get_site_url_name(site['name'], site.get('template', 'STS#3'))
+            print(f"    {Colors.YELLOW}🔒{Colors.NC} {site.get('display_name', site['name'])}")
+            print(f"       {Colors.CYAN}https://{m365_tenant}.sharepoint.com/sites/{url_name}{Colors.NC}")
         print()
     
     if public_sites:
         print(f"  {Colors.WHITE}{Colors.BOLD}Public Sites:{Colors.NC}")
         for site in public_sites:
-            print(f"    {Colors.GREEN}🌐{Colors.NC} {Colors.CYAN}https://{m365_tenant}.sharepoint.com/sites/{site['name']}{Colors.NC}")
+            url_name = get_site_url_name(site['name'], site.get('template', 'STS#3'))
+            print(f"    {Colors.GREEN}🌐{Colors.NC} {site.get('display_name', site['name'])}")
+            print(f"       {Colors.CYAN}https://{m365_tenant}.sharepoint.com/sites/{url_name}{Colors.NC}")
         print()
     
     print(f"  {Colors.WHITE}{Colors.BOLD}SharePoint Admin Center:{Colors.NC}")
     print(f"    {Colors.CYAN}https://{m365_tenant}-admin.sharepoint.com{Colors.NC}")
+    print()
+    
+    print(f"  {Colors.YELLOW}Note: Sites may take a few minutes to be fully accessible after creation.{Colors.NC}")
     print()
 
 

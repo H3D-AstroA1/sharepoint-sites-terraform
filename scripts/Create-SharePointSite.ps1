@@ -104,13 +104,48 @@ function Test-SiteExists {
     }
     
     try {
-        $encodedUrl = [System.Web.HttpUtility]::UrlEncode($SiteUrl)
-        $response = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/sites/$($TenantName).sharepoint.com:/sites/$SiteName" -Headers $headers -Method Get -ErrorAction SilentlyContinue
+        # Extract site path from URL
+        $uri = [System.Uri]$SiteUrl
+        $sitePath = $uri.AbsolutePath
+        $response = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/sites/$($TenantName).sharepoint.com:$sitePath" -Headers $headers -Method Get -ErrorAction Stop
         return $true
     }
     catch {
         return $false
     }
+}
+
+# Function to get group's SharePoint site URL
+function Get-GroupSiteUrl {
+    param(
+        [string]$GroupId,
+        [string]$AccessToken,
+        [int]$MaxRetries = 12,
+        [int]$RetryDelaySeconds = 10
+    )
+    
+    $headers = @{
+        "Authorization" = "Bearer $AccessToken"
+        "Content-Type" = "application/json"
+    }
+    
+    for ($i = 1; $i -le $MaxRetries; $i++) {
+        try {
+            Write-ColorOutput "  Checking for SharePoint site (attempt $i of $MaxRetries)..." "Yellow"
+            $response = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/groups/$GroupId/sites/root" -Headers $headers -Method Get -ErrorAction Stop
+            if ($response.webUrl) {
+                return $response.webUrl
+            }
+        }
+        catch {
+            if ($i -lt $MaxRetries) {
+                Write-ColorOutput "  Site not ready yet, waiting $RetryDelaySeconds seconds..." "Yellow"
+                Start-Sleep -Seconds $RetryDelaySeconds
+            }
+        }
+    }
+    
+    return $null
 }
 
 # Function to create a Microsoft 365 Group-connected Team Site
@@ -124,11 +159,15 @@ function New-TeamSite {
         "Content-Type" = "application/json"
     }
     
+    # Use the SiteName directly as mailNickname (Graph API will sanitize it)
+    # But we need to ensure it's valid - remove invalid characters
+    $mailNickname = $SiteName -replace '[^a-zA-Z0-9]', ''
+    
     # Create a Microsoft 365 Group (which creates a Team Site)
     $groupBody = @{
         displayName = $DisplayName
         description = $Description
-        mailNickname = $SiteName -replace '[^a-zA-Z0-9]', ''
+        mailNickname = $mailNickname
         mailEnabled = $true
         securityEnabled = $false
         groupTypes = @("Unified")
@@ -160,20 +199,53 @@ function New-TeamSite {
     $jsonBody = $groupBody | ConvertTo-Json -Depth 10
     
     try {
+        Write-ColorOutput "Creating Microsoft 365 Group..." "Yellow"
         $response = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/groups" -Headers $headers -Method Post -Body $jsonBody
-        return $response
+        
+        if ($response.id) {
+            Write-ColorOutput "Group created successfully! Group ID: $($response.id)" "Green"
+            
+            # Wait for SharePoint site to be provisioned
+            Write-ColorOutput "Waiting for SharePoint site provisioning..." "Yellow"
+            $siteUrl = Get-GroupSiteUrl -GroupId $response.id -AccessToken $AccessToken
+            
+            if ($siteUrl) {
+                Write-ColorOutput "SharePoint site provisioned successfully!" "Green"
+                return @{
+                    GroupId = $response.id
+                    SiteUrl = $siteUrl
+                    Success = $true
+                }
+            }
+            else {
+                Write-ColorOutput "WARNING: Group created but SharePoint site not yet available." "Yellow"
+                Write-ColorOutput "The site may still be provisioning. Check SharePoint Admin Center." "Yellow"
+                return @{
+                    GroupId = $response.id
+                    SiteUrl = "https://$TenantName.sharepoint.com/sites/$mailNickname"
+                    Success = $true
+                    Pending = $true
+                }
+            }
+        }
+        else {
+            throw "Group creation response did not contain an ID"
+        }
     }
     catch {
         $errorMessage = $_.Exception.Message
         if ($_.Exception.Response) {
-            $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
-            $errorMessage = $reader.ReadToEnd()
+            try {
+                $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                $errorMessage = $reader.ReadToEnd()
+            }
+            catch {}
         }
         throw "Failed to create group: $errorMessage"
     }
 }
 
-# Function to create a Communication Site using Microsoft Graph API
+# Function to create a Communication Site using SharePoint REST API
 function New-CommunicationSite {
     param(
         [string]$AccessToken
@@ -206,102 +278,124 @@ function New-CommunicationSite {
                     WebTemplate = "SITEPAGEPUBLISHING#0"
                     SiteDesignId = "00000000-0000-0000-0000-000000000000"
                     WebTemplateExtensionId = "00000000-0000-0000-0000-000000000000"
+                    Owner = $AdminEmail
                 }
             }
             
             $jsonBody = $body | ConvertTo-Json -Depth 10
             
-            $response = Invoke-RestMethod -Uri "https://$TenantName.sharepoint.com/_api/SPSiteManager/create" -Headers $headers -Method Post -Body $jsonBody
+            $response = Invoke-RestMethod -Uri "https://$TenantName.sharepoint.com/_api/SPSiteManager/create" -Headers $headers -Method Post -Body $jsonBody -ErrorAction Stop
             
-            if ($response.SiteId -or $response.d.SiteId) {
-                return $response
+            if ($response.SiteId -or ($response.d -and $response.d.SiteId)) {
+                $siteId = if ($response.SiteId) { $response.SiteId } else { $response.d.SiteId }
+                Write-ColorOutput "Communication Site created successfully! Site ID: $siteId" "Green"
+                return @{
+                    SiteId = $siteId
+                    SiteUrl = $siteUrl
+                    Success = $true
+                }
+            }
+            elseif ($response.SiteStatus -eq 2 -or ($response.d -and $response.d.SiteStatus -eq 2)) {
+                Write-ColorOutput "Communication Site created successfully!" "Green"
+                return @{
+                    SiteUrl = $siteUrl
+                    Success = $true
+                }
             }
         }
     }
     catch {
-        Write-ColorOutput "SharePoint API method failed, trying Graph API..." "Yellow"
+        $errorDetail = $_.Exception.Message
+        Write-ColorOutput "SharePoint API method failed: $errorDetail" "Yellow"
+        Write-ColorOutput "Trying alternative method..." "Yellow"
     }
     
-    # Method 2: Try using Microsoft Graph Sites API (beta)
-    Write-ColorOutput "Attempting to create Communication Site via Graph API..." "Yellow"
+    # Method 2: Create as a Team Site (fallback) since Communication Sites require SharePoint Admin permissions
+    Write-ColorOutput "Creating as Team Site (Communication Site requires SharePoint Admin permissions)..." "Yellow"
     
     $headers = @{
         "Authorization" = "Bearer $AccessToken"
         "Content-Type" = "application/json"
     }
     
-    # For Communication Sites, we can create them as a site without a group
-    # Using the sites endpoint with siteCollection
-    $body = @{
+    # Create a Microsoft 365 Group but configure it to be more like a communication site
+    $mailNickname = ($SiteName -replace '[^a-zA-Z0-9]', '') + "site"
+    
+    $groupBody = @{
         displayName = $DisplayName
         description = $Description
-        name = $SiteName
-        webUrl = $siteUrl
+        mailNickname = $mailNickname
+        mailEnabled = $true
+        securityEnabled = $false
+        groupTypes = @("Unified")
+        visibility = $Visibility
+        resourceBehaviorOptions = @("HideGroupInOutlook", "WelcomeEmailDisabled", "SubscribeMembersToCalendarEventsDisabled")
     }
     
-    $jsonBody = $body | ConvertTo-Json -Depth 10
+    # Add owners if specified
+    if (-not [string]::IsNullOrEmpty($Owners)) {
+        $ownerEmails = $Owners -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+        if ($ownerEmails.Count -gt 0) {
+            $ownerIds = @()
+            foreach ($email in $ownerEmails) {
+                try {
+                    $user = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/users/$email" -Headers $headers -Method Get -ErrorAction SilentlyContinue
+                    if ($user.id) {
+                        $ownerIds += "https://graph.microsoft.com/v1.0/users/$($user.id)"
+                    }
+                }
+                catch {
+                    Write-ColorOutput "WARNING: Could not find user: $email" "Yellow"
+                }
+            }
+            if ($ownerIds.Count -gt 0) {
+                $groupBody["owners@odata.bind"] = $ownerIds
+            }
+        }
+    }
+    
+    $jsonBody = $groupBody | ConvertTo-Json -Depth 10
     
     try {
-        # Try the beta endpoint for creating sites
-        $response = Invoke-RestMethod -Uri "https://graph.microsoft.com/beta/sites/root/sites" -Headers $headers -Method Post -Body $jsonBody -ErrorAction Stop
-        return $response
+        Write-ColorOutput "Creating Microsoft 365 Group (fallback)..." "Yellow"
+        $response = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/groups" -Headers $headers -Method Post -Body $jsonBody
+        
+        if ($response.id) {
+            Write-ColorOutput "Group created! Waiting for SharePoint site..." "Green"
+            
+            # Wait for SharePoint site to be provisioned
+            $actualSiteUrl = Get-GroupSiteUrl -GroupId $response.id -AccessToken $AccessToken
+            
+            if ($actualSiteUrl) {
+                Write-ColorOutput "Site provisioned successfully!" "Green"
+                return @{
+                    GroupId = $response.id
+                    SiteUrl = $actualSiteUrl
+                    Success = $true
+                    IsFallback = $true
+                }
+            }
+            else {
+                return @{
+                    GroupId = $response.id
+                    SiteUrl = "https://$TenantName.sharepoint.com/sites/$mailNickname"
+                    Success = $true
+                    Pending = $true
+                    IsFallback = $true
+                }
+            }
+        }
     }
     catch {
-        # Method 3: Create as a Team Site but without group features (fallback)
-        Write-ColorOutput "Graph API method failed, creating as Team Site instead..." "Yellow"
-        
-        # Create a Microsoft 365 Group but configure it as a communication-style site
-        $groupBody = @{
-            displayName = $DisplayName
-            description = $Description
-            mailNickname = ($SiteName -replace '[^a-zA-Z0-9]', '') + "comm"
-            mailEnabled = $true
-            securityEnabled = $false
-            groupTypes = @("Unified")
-            visibility = $Visibility
-            resourceBehaviorOptions = @("HideGroupInOutlook", "WelcomeEmailDisabled")
-        }
-        
-        # Add owners if specified
-        if (-not [string]::IsNullOrEmpty($Owners)) {
-            $ownerEmails = $Owners -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
-            if ($ownerEmails.Count -gt 0) {
-                $ownerIds = @()
-                foreach ($email in $ownerEmails) {
-                    try {
-                        $user = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/users/$email" -Headers $headers -Method Get -ErrorAction SilentlyContinue
-                        if ($user.id) {
-                            $ownerIds += "https://graph.microsoft.com/v1.0/users/$($user.id)"
-                        }
-                    }
-                    catch {
-                        Write-ColorOutput "WARNING: Could not find user: $email" "Yellow"
-                    }
-                }
-                if ($ownerIds.Count -gt 0) {
-                    $groupBody["owners@odata.bind"] = $ownerIds
-                }
+        $errorMessage = $_.Exception.Message
+        if ($_.Exception.Response) {
+            try {
+                $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                $errorMessage = $reader.ReadToEnd()
             }
+            catch {}
         }
-        
-        $jsonBody = $groupBody | ConvertTo-Json -Depth 10
-        
-        try {
-            $response = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/groups" -Headers $headers -Method Post -Body $jsonBody
-            Write-ColorOutput "Created as Team Site (Communication Site creation requires SharePoint Admin permissions)" "Yellow"
-            return $response
-        }
-        catch {
-            $errorMessage = $_.Exception.Message
-            if ($_.Exception.Response) {
-                try {
-                    $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
-                    $errorMessage = $reader.ReadToEnd()
-                }
-                catch {}
-            }
-            throw "Failed to create communication site: $errorMessage"
-        }
+        throw "Failed to create site: $errorMessage"
     }
 }
 
@@ -322,13 +416,22 @@ Write-ColorOutput "Getting Microsoft Graph access token..." "Yellow"
 $accessToken = Get-GraphAccessToken
 Write-ColorOutput "Access token obtained successfully." "Green"
 
+# Generate expected site URL based on template
+$mailNickname = $SiteName -replace '[^a-zA-Z0-9]', ''
+$expectedSiteUrl = "https://$TenantName.sharepoint.com/sites/$mailNickname"
+
 # Check if site already exists
-$siteUrl = "https://$TenantName.sharepoint.com/sites/$SiteName"
 Write-ColorOutput "Checking if site already exists..." "Yellow"
 
-if (Test-SiteExists -SiteUrl $siteUrl -AccessToken $accessToken) {
-    Write-ColorOutput "Site already exists: $siteUrl" "Yellow"
+if (Test-SiteExists -SiteUrl $expectedSiteUrl -AccessToken $accessToken) {
+    Write-ColorOutput "Site already exists: $expectedSiteUrl" "Yellow"
     Write-ColorOutput "Skipping creation." "Yellow"
+    Write-ColorOutput ""
+    Write-ColorOutput "========================================" "Green"
+    Write-ColorOutput "Site Already Exists" "Green"
+    Write-ColorOutput "========================================" "Green"
+    Write-ColorOutput "URL: $expectedSiteUrl" "Cyan"
+    Write-ColorOutput ""
     exit 0
 }
 
@@ -336,31 +439,42 @@ if (Test-SiteExists -SiteUrl $siteUrl -AccessToken $accessToken) {
 Write-ColorOutput "Creating SharePoint site..." "Yellow"
 
 try {
+    $result = $null
+    
     if ($Template -eq "SITEPAGEPUBLISHING#0") {
         # Communication Site
         Write-ColorOutput "Creating Communication Site..." "Yellow"
         $result = New-CommunicationSite -AccessToken $accessToken
-        Write-ColorOutput "Communication Site created successfully!" "Green"
     }
     else {
         # Team Site (STS#3 or GROUP#0)
         Write-ColorOutput "Creating Team Site (Microsoft 365 Group)..." "Yellow"
         $result = New-TeamSite -AccessToken $accessToken
-        Write-ColorOutput "Team Site created successfully!" "Green"
-        
-        # Wait for site provisioning
-        Write-ColorOutput "Waiting for site provisioning (30 seconds)..." "Yellow"
-        Start-Sleep -Seconds 30
     }
     
-    Write-ColorOutput "" "White"
-    Write-ColorOutput "========================================" "Green"
-    Write-ColorOutput "Site Created Successfully!" "Green"
-    Write-ColorOutput "========================================" "Green"
-    Write-ColorOutput "URL: $siteUrl" "Cyan"
-    Write-ColorOutput "" "White"
-    
-    exit 0
+    if ($result -and $result.Success) {
+        Write-ColorOutput "" "White"
+        Write-ColorOutput "========================================" "Green"
+        Write-ColorOutput "Site Created Successfully!" "Green"
+        Write-ColorOutput "========================================" "Green"
+        Write-ColorOutput "URL: $($result.SiteUrl)" "Cyan"
+        
+        if ($result.Pending) {
+            Write-ColorOutput "" "White"
+            Write-ColorOutput "NOTE: Site is still provisioning. It may take a few minutes to be accessible." "Yellow"
+        }
+        
+        if ($result.IsFallback) {
+            Write-ColorOutput "" "White"
+            Write-ColorOutput "NOTE: Created as Team Site (Communication Site requires SharePoint Admin permissions)." "Yellow"
+        }
+        
+        Write-ColorOutput "" "White"
+        exit 0
+    }
+    else {
+        throw "Site creation did not return a success result"
+    }
 }
 catch {
     Write-ColorOutput "" "White"
@@ -370,8 +484,6 @@ catch {
     Write-ColorOutput $_.Exception.Message "Red"
     Write-ColorOutput "" "White"
     
-    # Don't fail the Terraform apply - just warn
-    # This allows the deployment to continue even if some sites fail
-    Write-ColorOutput "WARNING: Site creation failed but continuing deployment." "Yellow"
-    exit 0
+    # Exit with error code so Terraform knows it failed
+    exit 1
 }
