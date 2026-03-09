@@ -343,13 +343,195 @@ def install_terraform() -> bool:
         print_error(f"Failed to install Terraform: {e}")
         return False
 
+# ============================================================================
+# MICROSOFT GRAPH API PERMISSIONS
+# ============================================================================
+
+# Azure CLI App ID (first-party Microsoft app)
+AZURE_CLI_APP_ID = "04b07795-8ddb-461a-bbee-02f9e1bf7b46"
+
+# Required permissions for SharePoint operations
+REQUIRED_GRAPH_PERMISSIONS = [
+    "Sites.Read.All",
+    "Sites.ReadWrite.All",
+    "Files.ReadWrite.All",
+    "Group.Read.All",
+    "Group.ReadWrite.All"
+]
+
+def get_graph_access_token() -> Optional[str]:
+    """Get Microsoft Graph access token using Azure CLI."""
+    az_path = find_azure_cli_path()
+    if not az_path:
+        return None
+    try:
+        result = subprocess.run(
+            [az_path, "account", "get-access-token",
+             "--resource", "https://graph.microsoft.com",
+             "--query", "accessToken", "-o", "tsv"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return result.stdout.strip()
+    except Exception:
+        return None
+
+def check_graph_permissions() -> dict:
+    """Check if the current token has required Microsoft Graph permissions.
+    
+    Returns a dict with:
+        - has_permissions: bool - True if all required permissions are granted
+        - can_access_sites: bool - True if we can access SharePoint sites
+        - error: str or None - Error message if any
+    """
+    import urllib.request
+    import urllib.error
+    
+    result = {
+        "has_permissions": False,
+        "can_access_sites": False,
+        "error": None
+    }
+    
+    token = get_graph_access_token()
+    if not token:
+        result["error"] = "Could not get Graph API token"
+        return result
+    
+    # Try to access SharePoint sites to test permissions
+    try:
+        url = "https://graph.microsoft.com/v1.0/sites?search=*&$top=1"
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Content-Type", "application/json")
+        
+        with urllib.request.urlopen(req, timeout=10) as response:
+            if response.status == 200:
+                result["has_permissions"] = True
+                result["can_access_sites"] = True
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            result["error"] = "403 Forbidden - Admin consent required"
+        elif e.code == 401:
+            result["error"] = "401 Unauthorized - Token expired or invalid"
+        else:
+            result["error"] = f"{e.code} - {e.reason}"
+    except Exception as e:
+        result["error"] = str(e)
+    
+    return result
+
+def get_tenant_id() -> Optional[str]:
+    """Get the current tenant ID from Azure CLI."""
+    account_info = get_azure_account_info()
+    if account_info:
+        return account_info.get("tenantId")
+    return None
+
+def open_admin_consent_url() -> bool:
+    """Open the admin consent URL in the default browser."""
+    import webbrowser
+    
+    tenant_id = get_tenant_id()
+    if not tenant_id:
+        print_error("Could not determine tenant ID. Please log in first.")
+        return False
+    
+    # Construct the admin consent URL
+    # This URL will prompt an admin to grant consent for the Azure CLI app
+    permissions = " ".join([
+        "https://graph.microsoft.com/Sites.Read.All",
+        "https://graph.microsoft.com/Sites.ReadWrite.All",
+        "https://graph.microsoft.com/Files.ReadWrite.All",
+        "https://graph.microsoft.com/Group.Read.All",
+        "https://graph.microsoft.com/Group.ReadWrite.All"
+    ])
+    
+    # Admin consent URL format
+    consent_url = (
+        f"https://login.microsoftonline.com/{tenant_id}/adminconsent"
+        f"?client_id={AZURE_CLI_APP_ID}"
+    )
+    
+    print()
+    print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+    print(f"  {Colors.WHITE}{Colors.BOLD}Admin Consent Required{Colors.NC}")
+    print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+    print()
+    print(f"  The Azure CLI app needs admin consent for SharePoint permissions.")
+    print()
+    print(f"  {Colors.YELLOW}Required Permissions:{Colors.NC}")
+    for perm in REQUIRED_GRAPH_PERMISSIONS:
+        print(f"    • {perm}")
+    print()
+    print(f"  {Colors.WHITE}Opening admin consent page in your browser...{Colors.NC}")
+    print()
+    print(f"  {Colors.DIM}URL: {consent_url}{Colors.NC}")
+    print()
+    
+    try:
+        webbrowser.open(consent_url)
+        print(f"  {Colors.GREEN}✓{Colors.NC} Browser opened. Please complete the consent process.")
+        print()
+        print(f"  {Colors.YELLOW}Note:{Colors.NC} You must be a Global Administrator or")
+        print(f"        Privileged Role Administrator to grant consent.")
+        print()
+        return True
+    except Exception as e:
+        print_error(f"Could not open browser: {e}")
+        print()
+        print(f"  Please open this URL manually:")
+        print(f"  {Colors.CYAN}{consent_url}{Colors.NC}")
+        return False
+
+def run_graph_permissions_check() -> None:
+    """Run the Graph API permissions check and offer to grant consent."""
+    print()
+    print(f"  {Colors.WHITE}{Colors.BOLD}Checking Microsoft Graph API Permissions...{Colors.NC}")
+    print()
+    
+    # First check if logged in
+    if not check_azure_login():
+        print(f"  {Colors.YELLOW}⚠{Colors.NC} Not logged into Azure. Please log in first.")
+        return
+    
+    result = check_graph_permissions()
+    
+    if result["has_permissions"]:
+        print(f"  {Colors.GREEN}✓{Colors.NC} Graph API permissions: OK")
+        print(f"  {Colors.GREEN}✓{Colors.NC} Can access SharePoint sites: Yes")
+    else:
+        print(f"  {Colors.RED}✗{Colors.NC} Graph API permissions: Missing")
+        if result["error"]:
+            print(f"    {Colors.DIM}Error: {result['error']}{Colors.NC}")
+        print()
+        print(f"  {Colors.YELLOW}Would you like to open the admin consent page?{Colors.NC}")
+        print(f"  {Colors.DIM}(Requires Global Administrator or Privileged Role Administrator){Colors.NC}")
+        print()
+        choice = input(f"  Open admin consent page? (y/n): ").strip().lower()
+        if choice == 'y':
+            open_admin_consent_url()
+            print()
+            input(f"  {Colors.YELLOW}Press Enter after granting consent to re-check...{Colors.NC}")
+            print()
+            # Re-check permissions
+            result = check_graph_permissions()
+            if result["has_permissions"]:
+                print(f"  {Colors.GREEN}✓{Colors.NC} Permissions granted successfully!")
+            else:
+                print(f"  {Colors.YELLOW}⚠{Colors.NC} Permissions still not available.")
+                print(f"    It may take a few minutes for consent to propagate.")
+                print(f"    Try running the populate_files.py script again later.")
+
 def check_prerequisites(auto_install: bool = False) -> dict:
     """Check all prerequisites and optionally install missing ones."""
     results = {
         "python": {"installed": True, "version": f"Python {sys.version.split()[0]}"},
         "azure_cli": {"installed": False, "version": None},
         "terraform": {"installed": False, "version": None},
-        "azure_login": {"logged_in": False, "account_info": None}
+        "azure_login": {"logged_in": False, "account_info": None},
+        "graph_permissions": {"has_permissions": False, "error": None}
     }
     
     # Check Azure CLI
@@ -360,6 +542,9 @@ def check_prerequisites(auto_install: bool = False) -> dict:
         results["azure_login"]["logged_in"] = check_azure_login()
         if results["azure_login"]["logged_in"]:
             results["azure_login"]["account_info"] = get_azure_account_info()
+            # Check Graph API permissions (only if logged in)
+            graph_result = check_graph_permissions()
+            results["graph_permissions"] = graph_result
     elif auto_install:
         if install_azure_cli():
             results["azure_cli"]["installed"] = True
@@ -416,16 +601,31 @@ def display_prerequisites_status(results: dict) -> None:
         else:
             print(f"  {Colors.YELLOW}⚠{Colors.NC} Azure Login: Not logged in")
     
+    # Graph API Permissions (only show if logged in)
+    if results["azure_login"]["logged_in"]:
+        graph_perms = results.get("graph_permissions", {})
+        if graph_perms.get("has_permissions"):
+            print(f"  {Colors.GREEN}✓{Colors.NC} Graph API Permissions: OK (SharePoint access)")
+        else:
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} Graph API Permissions: Admin consent required")
+            if graph_perms.get("error"):
+                print(f"    {Colors.DIM}└─ {graph_perms['error']}{Colors.NC}")
+    
     print()
     
     # Summary
     all_installed = (
-        results["azure_cli"]["installed"] and 
+        results["azure_cli"]["installed"] and
         results["terraform"]["installed"]
     )
     
-    if all_installed and results["azure_login"]["logged_in"]:
+    graph_ok = results.get("graph_permissions", {}).get("has_permissions", False)
+    
+    if all_installed and results["azure_login"]["logged_in"] and graph_ok:
         print(f"  {Colors.GREEN}{Colors.BOLD}✓ All prerequisites met! Ready to proceed.{Colors.NC}")
+    elif all_installed and results["azure_login"]["logged_in"] and not graph_ok:
+        print(f"  {Colors.YELLOW}{Colors.BOLD}⚠ Graph API permissions missing.{Colors.NC}")
+        print(f"  {Colors.DIM}  Select option [G] to grant admin consent for SharePoint access.{Colors.NC}")
     elif all_installed:
         print(f"  {Colors.YELLOW}{Colors.BOLD}⚠ Tools installed but not logged into Azure.{Colors.NC}")
         print(f"  {Colors.DIM}  Run 'az login' to authenticate.{Colors.NC}")
@@ -491,10 +691,46 @@ def run_prerequisites_check_menu() -> None:
                     subprocess.run([az_path, "login"], check=True)
                     print()
                     print_success("Azure login successful!")
+                    # Re-check prerequisites after login
+                    results = check_prerequisites(auto_install=False)
                 except subprocess.CalledProcessError as e:
                     print_error(f"Azure login failed: {e}")
                 except Exception as e:
                     print_error(f"Azure login failed: {e}")
+    
+    # Check Graph API permissions and offer to grant consent
+    if results["azure_login"]["logged_in"]:
+        graph_perms = results.get("graph_permissions", {})
+        if not graph_perms.get("has_permissions"):
+            print()
+            print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
+            print(f"  {Colors.WHITE}{Colors.BOLD}Graph API Permissions{Colors.NC}")
+            print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
+            print()
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} SharePoint access requires admin consent for the Azure CLI app.")
+            print()
+            print(f"  {Colors.WHITE}Would you like to grant admin consent now?{Colors.NC}")
+            print(f"  {Colors.DIM}(Requires Global Administrator or Privileged Role Administrator){Colors.NC}")
+            print()
+            print(f"    {Colors.GREEN}[Y]{Colors.NC} Yes, open admin consent page in browser")
+            print(f"    {Colors.RED}[N]{Colors.NC} No, I'll do this later")
+            print()
+            
+            choice = input(f"  {Colors.YELLOW}Choice:{Colors.NC} ").strip().lower()
+            
+            if choice == 'y':
+                open_admin_consent_url()
+                print()
+                input(f"  {Colors.YELLOW}Press Enter after granting consent to re-check...{Colors.NC}")
+                print()
+                # Re-check permissions
+                graph_result = check_graph_permissions()
+                if graph_result.get("has_permissions"):
+                    print(f"  {Colors.GREEN}✓{Colors.NC} Permissions granted successfully!")
+                else:
+                    print(f"  {Colors.YELLOW}⚠{Colors.NC} Permissions still not available.")
+                    print(f"    It may take a few minutes for consent to propagate.")
+                    print(f"    Try running the populate_files.py script again later.")
     
     print()
     input(f"  {Colors.YELLOW}Press Enter to return to menu...{Colors.NC}")
