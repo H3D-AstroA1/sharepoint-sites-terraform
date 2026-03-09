@@ -97,12 +97,13 @@ class Colors:
     WHITE = '\033[97m'
     NC = '\033[0m'
     BOLD = '\033[1m'
+    DIM = '\033[2m'
 
     @classmethod
     def disable(cls) -> None:
         """Disable colors for non-terminal output."""
         cls.RED = cls.GREEN = cls.YELLOW = cls.BLUE = ''
-        cls.MAGENTA = cls.CYAN = cls.WHITE = cls.NC = cls.BOLD = ''
+        cls.MAGENTA = cls.CYAN = cls.WHITE = cls.NC = cls.BOLD = cls.DIM = ''
 
 # Disable colors if not a terminal
 if not sys.stdout.isatty():
@@ -1065,8 +1066,17 @@ def interactive_select_groups(groups: List[Dict[str, Any]]) -> List[Dict[str, An
     return selected_groups
 
 
-def delete_groups_mode(groups: List[Dict[str, Any]], access_token: str, auto_confirm: bool = False) -> None:
-    """Delete selected Microsoft 365 Groups (and their SharePoint sites)."""
+def delete_groups_mode(groups: List[Dict[str, Any]], access_token: str, auto_confirm: bool = False,
+                       tenant: Optional[str] = None, skip_recycle_purge: bool = False) -> None:
+    """Delete selected Microsoft 365 Groups (and their SharePoint sites).
+    
+    Args:
+        groups: List of M365 groups to delete
+        access_token: Microsoft Graph access token
+        auto_confirm: Skip confirmation prompts
+        tenant: SharePoint tenant name for SPO recycle bin purge (e.g., 'contoso')
+        skip_recycle_purge: Skip automatic recycle bin purge after deletion
+    """
     if not groups:
         print_warning("No groups to delete")
         return
@@ -1113,6 +1123,59 @@ def delete_groups_mode(groups: List[Dict[str, Any]], access_token: str, auto_con
     
     print()
     print_info(f"Deleted: {deleted}, Failed: {failed}")
+    
+    # Automatically purge recycle bins after deletion
+    if deleted > 0 and not skip_recycle_purge:
+        print()
+        print_banner("RECYCLE BIN CLEANUP")
+        print()
+        print_info("Sites have been soft-deleted. They now exist in two recycle bins:")
+        print(f"    {Colors.CYAN}1.{Colors.NC} Microsoft 365 Groups recycle bin (Azure AD)")
+        print(f"    {Colors.CYAN}2.{Colors.NC} SharePoint site recycle bin (SharePoint Admin Center)")
+        print()
+        
+        # Ask if user wants to skip recycle bin purge
+        if not auto_confirm:
+            skip_choice = input(f"  {Colors.YELLOW}Purge recycle bins now? (Y/n): {Colors.NC}").strip().lower()
+            if skip_choice == 'n':
+                print_warning("Skipping recycle bin purge. Sites remain in recycle bins.")
+                print_info("You can purge them later using menu options [6] and [7]")
+                return
+        
+        # Step 1: Purge M365 Groups recycle bin
+        print()
+        print_step(1, "Purging M365 Groups recycle bin (Azure AD)")
+        
+        # Wait a moment for Azure AD to process the deletions
+        print_info("Waiting for Azure AD to process deletions...")
+        import time
+        time.sleep(3)
+        
+        deleted_groups = get_deleted_m365_groups(access_token)
+        if deleted_groups:
+            print_info(f"Found {len(deleted_groups)} deleted groups in recycle bin")
+            purge_deleted_groups_mode(deleted_groups, access_token, auto_confirm=True)
+        else:
+            print_info("No deleted groups found in Azure AD recycle bin")
+        
+        # Step 2: Purge SharePoint site recycle bin
+        print()
+        print_step(2, "Purging SharePoint site recycle bin")
+        
+        # Get tenant name if not provided
+        if not tenant:
+            print()
+            print(f"  {Colors.WHITE}Enter your SharePoint tenant name{Colors.NC}")
+            print(f"  {Colors.DIM}(e.g., 'contoso' for contoso.sharepoint.com){Colors.NC}")
+            print()
+            tenant = input(f"  {Colors.YELLOW}Tenant name (or press Enter to skip): {Colors.NC}").strip()
+        
+        if tenant:
+            admin_url = f"https://{tenant}-admin.sharepoint.com"
+            purge_spo_deleted_sites_mode(admin_url, auto_confirm=True)
+        else:
+            print_warning("Skipping SharePoint recycle bin purge (no tenant provided)")
+            print_info("You can purge it later using menu option [7]")
 
 def get_site_files(site_id: str, access_token: str) -> List[Dict[str, Any]]:
     """Get all files from a SharePoint site's document library."""
@@ -1574,8 +1637,14 @@ def delete_selected_files_mode(sites: List[Dict[str, Any]], access_token: str) -
     if total_fail > 0:
         print_warning(f"Failed to delete {total_fail} items")
 
-def delete_sites_mode(sites: List[Dict[str, Any]], access_token: str) -> None:
-    """Delete selected SharePoint sites."""
+def delete_sites_mode(sites: List[Dict[str, Any]], access_token: str, tenant: Optional[str] = None) -> None:
+    """Delete selected SharePoint sites.
+    
+    Args:
+        sites: List of SharePoint sites to delete
+        access_token: Microsoft Graph access token
+        tenant: SharePoint tenant name for SPO recycle bin purge (e.g., 'contoso')
+    """
     print_step(5, "Delete SharePoint Sites")
     
     print()
@@ -1620,6 +1689,57 @@ def delete_sites_mode(sites: List[Dict[str, Any]], access_token: str) -> None:
     if success_count > 0:
         print_success(f"Deleted {success_count} sites successfully")
         print_info("Note: Deleted sites go to the SharePoint recycle bin for 93 days")
+        
+        # Automatically purge recycle bins after deletion
+        print()
+        print_banner("RECYCLE BIN CLEANUP")
+        print()
+        print_info("Sites have been soft-deleted. They now exist in two recycle bins:")
+        print(f"    {Colors.CYAN}1.{Colors.NC} Microsoft 365 Groups recycle bin (Azure AD)")
+        print(f"    {Colors.CYAN}2.{Colors.NC} SharePoint site recycle bin (SharePoint Admin Center)")
+        print()
+        
+        # Ask if user wants to skip recycle bin purge
+        skip_choice = input(f"  {Colors.YELLOW}Purge recycle bins now? (Y/n): {Colors.NC}").strip().lower()
+        if skip_choice == 'n':
+            print_warning("Skipping recycle bin purge. Sites remain in recycle bins.")
+            print_info("You can purge them later using menu options [6] and [7]")
+        else:
+            # Step 1: Purge M365 Groups recycle bin
+            print()
+            print_step(1, "Purging M365 Groups recycle bin (Azure AD)")
+            
+            # Wait a moment for Azure AD to process the deletions
+            print_info("Waiting for Azure AD to process deletions...")
+            import time
+            time.sleep(3)
+            
+            deleted_groups = get_deleted_m365_groups(access_token)
+            if deleted_groups:
+                print_info(f"Found {len(deleted_groups)} deleted groups in recycle bin")
+                purge_deleted_groups_mode(deleted_groups, access_token, auto_confirm=True)
+            else:
+                print_info("No deleted groups found in Azure AD recycle bin")
+            
+            # Step 2: Purge SharePoint site recycle bin
+            print()
+            print_step(2, "Purging SharePoint site recycle bin")
+            
+            # Get tenant name if not provided
+            if not tenant:
+                print()
+                print(f"  {Colors.WHITE}Enter your SharePoint tenant name{Colors.NC}")
+                print(f"  {Colors.DIM}(e.g., 'contoso' for contoso.sharepoint.com){Colors.NC}")
+                print()
+                tenant = input(f"  {Colors.YELLOW}Tenant name (or press Enter to skip): {Colors.NC}").strip()
+            
+            if tenant:
+                admin_url = f"https://{tenant}-admin.sharepoint.com"
+                purge_spo_deleted_sites_mode(admin_url, auto_confirm=True)
+            else:
+                print_warning("Skipping SharePoint recycle bin purge (no tenant provided)")
+                print_info("You can purge it later using menu option [7]")
+        
     if fail_count > 0:
         print_warning(f"Failed to delete {fail_count} sites")
         print_info("You may need SharePoint Admin permissions to delete sites")
@@ -1809,7 +1929,7 @@ Selection Syntax (for --select-sites and --select-files):
         if args.delete_groups:
             selected_groups = interactive_select_groups(groups)
             if selected_groups:
-                delete_groups_mode(selected_groups, access_token, args.yes)
+                delete_groups_mode(selected_groups, access_token, args.yes, tenant=args.tenant)
             sys.exit(0)
     
     # Handle deleted groups (recycle bin) mode
@@ -1901,7 +2021,7 @@ Selection Syntax (for --select-sites and --select-files):
             if confirm == 'yes':
                 selected_groups = interactive_select_groups(groups)
                 if selected_groups:
-                    delete_groups_mode(selected_groups, access_token, args.yes)
+                    delete_groups_mode(selected_groups, access_token, args.yes, tenant=args.tenant)
             
             sys.exit(0)
         else:
@@ -2043,12 +2163,12 @@ Selection Syntax (for --select-sites and --select-files):
     if delete_files and not delete_sites:
         delete_files_mode(sites, access_token)
     elif delete_sites and not delete_files:
-        delete_sites_mode(sites, access_token)
+        delete_sites_mode(sites, access_token, tenant=args.tenant)
     elif delete_files and delete_sites:
         # Delete files first, then sites
         print_info("Deleting files first, then sites...")
         delete_files_mode(sites, access_token)
-        delete_sites_mode(sites, access_token)
+        delete_sites_mode(sites, access_token, tenant=args.tenant)
     
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()
