@@ -1681,6 +1681,7 @@ def list_files_in_sites_menu() -> None:
     import urllib.request
     import urllib.error
     
+    # Get access token once at the start
     clear_screen()
     print()
     print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
@@ -1688,7 +1689,6 @@ def list_files_in_sites_menu() -> None:
     print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
     print()
     
-    # Get access token
     print(f"  {Colors.WHITE}Connecting to Microsoft Graph...{Colors.NC}")
     token = get_graph_access_token()
     
@@ -1698,7 +1698,7 @@ def list_files_in_sites_menu() -> None:
         input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
         return
     
-    # Get sites first (using M365 Groups API as fallback)
+    # Get sites once at the start
     sites = []
     try:
         url = "https://graph.microsoft.com/v1.0/sites?search=*&$top=100"
@@ -1755,55 +1755,6 @@ def list_files_in_sites_menu() -> None:
         input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
         return
     
-    print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(sites)} SharePoint sites")
-    print()
-    
-    # Ask what to show
-    print(f"  {Colors.WHITE}What would you like to view?{Colors.NC}")
-    print()
-    print(f"    [1] 📁 Folders only (top-level)")
-    print(f"    [2] 📄 Files only (top-level)")
-    print(f"    [3] 📋 All items (folders + files, top-level)")
-    print(f"    [4] 📄 All files recursively (includes files in subfolders)")
-    print()
-    print(f"    [{Colors.RED}B{Colors.NC}]  Back to main menu")
-    print()
-    
-    view_choice = input(f"  {Colors.YELLOW}Enter choice (1-4):{Colors.NC} ").strip().lower()
-    
-    if view_choice == 'b' or not view_choice:
-        return
-    
-    try:
-        view_mode = int(view_choice)
-        if view_mode < 1 or view_mode > 4:
-            view_mode = 3  # Default to all items
-    except ValueError:
-        view_mode = 3  # Default to all items
-    
-    # Let user select a site or all sites
-    clear_screen()
-    print()
-    print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
-    print(f"  {Colors.CYAN}{'📁 SELECT SITE':^60}{Colors.NC}")
-    print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
-    print()
-    print(f"  {Colors.WHITE}Select a site to view:{Colors.NC}")
-    print()
-    print(f"    [{Colors.GREEN}*{Colors.NC}]  {Colors.GREEN}All sites{Colors.NC}")
-    print()
-    for i, site in enumerate(sites, 1):
-        name = site.get("displayName", site.get("name", "Unknown"))
-        print(f"    [{i:2}] {name}")
-    print()
-    print(f"    [{Colors.RED}B{Colors.NC}]  Back to main menu")
-    print()
-    
-    choice = input(f"  {Colors.YELLOW}Enter site number or * for all:{Colors.NC} ").strip().lower()
-    
-    if choice == 'b' or not choice:
-        return
-    
     # Helper function to display items based on view mode
     def display_items(items: list, view_mode: int, indent: str = "      ") -> int:
         """Display items based on view mode. Returns count of displayed items."""
@@ -1849,143 +1800,202 @@ def list_files_in_sites_menu() -> None:
         4: "ALL FILES (RECURSIVE)"
     }
     
-    # Handle "all sites" option
-    if choice == '*':
+    # Main menu loop - stays in this menu until user chooses to go back
+    while True:
         clear_screen()
         print()
         print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
-        print(f"  {Colors.CYAN}{f'📁 {mode_labels[view_mode]} IN ALL SITES':^60}{Colors.NC}")
+        print(f"  {Colors.CYAN}{'📁 FILES IN SHAREPOINT SITES':^60}{Colors.NC}")
+        print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+        print()
+        print(f"  {Colors.GREEN}✓{Colors.NC} {len(sites)} SharePoint sites available")
+        print()
+        
+        # Ask what to show
+        print(f"  {Colors.WHITE}What would you like to view?{Colors.NC}")
+        print()
+        print(f"    [1] 📁 Folders only (top-level)")
+        print(f"    [2] 📄 Files only (top-level)")
+        print(f"    [3] 📋 All items (folders + files, top-level)")
+        print(f"    [4] 📄 All files recursively (includes files in subfolders)")
+        print()
+        print(f"    [{Colors.RED}B{Colors.NC}]  Back to main menu")
+        print()
+        
+        view_choice = input(f"  {Colors.YELLOW}Enter choice (1-4):{Colors.NC} ").strip().lower()
+        
+        if view_choice == 'b' or not view_choice:
+            return
+        
+        try:
+            view_mode = int(view_choice)
+            if view_mode < 1 or view_mode > 4:
+                view_mode = 3  # Default to all items
+        except ValueError:
+            view_mode = 3  # Default to all items
+        
+        # Let user select a site or all sites
+        clear_screen()
+        print()
+        print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+        print(f"  {Colors.CYAN}{'📁 SELECT SITE':^60}{Colors.NC}")
+        print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+        print()
+        print(f"  {Colors.WHITE}Select a site to view:{Colors.NC}")
+        print()
+        print(f"    [{Colors.GREEN}*{Colors.NC}]  {Colors.GREEN}All sites{Colors.NC}")
+        print()
+        for i, site in enumerate(sites, 1):
+            name = site.get("displayName", site.get("name", "Unknown"))
+            print(f"    [{i:2}] {name}")
+        print()
+        print(f"    [{Colors.RED}B{Colors.NC}]  Back to view options")
+        print()
+        
+        choice = input(f"  {Colors.YELLOW}Enter site number or * for all:{Colors.NC} ").strip().lower()
+        
+        if choice == 'b' or not choice:
+            continue  # Go back to view options menu
+        
+        # Handle "all sites" option
+        if choice == '*':
+            clear_screen()
+            print()
+            print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+            print(f"  {Colors.CYAN}{f'📁 {mode_labels[view_mode]} IN ALL SITES':^60}{Colors.NC}")
+            print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+            print()
+            
+            total_items = 0
+            for site in sites:
+                site_id = site.get("id", "")
+                site_name = site.get("displayName", "Unknown")
+                
+                if not site_id:
+                    continue
+                
+                try:
+                    if view_mode == 4:
+                        # Recursive mode - get all files from all folders
+                        items = get_folder_contents_recursive(site_id, "", token)
+                    else:
+                        # Top-level only
+                        drive_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root/children"
+                        req = urllib.request.Request(drive_url)
+                        req.add_header("Authorization", f"Bearer {token}")
+                        req.add_header("Content-Type", "application/json")
+                        
+                        with urllib.request.urlopen(req, timeout=30) as response:
+                            data = json.loads(response.read().decode())
+                            items = data.get("value", [])
+                    
+                    # Filter items based on view mode for counting
+                    if view_mode == 1:
+                        filtered_items = [i for i in items if "folder" in i]
+                    elif view_mode == 2 or view_mode == 4:
+                        filtered_items = [i for i in items if "folder" not in i]
+                    else:
+                        filtered_items = items
+                    
+                    if filtered_items:
+                        print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+                        print(f"  {Colors.WHITE}{Colors.BOLD}📁 {site_name}{Colors.NC} ({len(filtered_items)} items)")
+                        print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+                        
+                        count = display_items(items, view_mode)
+                        total_items += count
+                        print()
+                except Exception:
+                    pass
+            
+            print(f"  {Colors.WHITE}{'═' * 60}{Colors.NC}")
+            print(f"  {Colors.GREEN}Total: {total_items} items across {len(sites)} sites{Colors.NC}")
+            print()
+            input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            continue  # Return to view options menu
+        
+        # Handle specific site selection
+        try:
+            site_idx = int(choice) - 1
+            if site_idx < 0 or site_idx >= len(sites):
+                print(f"  {Colors.RED}✗{Colors.NC} Invalid selection")
+                input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+                continue  # Return to view options menu
+        except ValueError:
+            print(f"  {Colors.RED}✗{Colors.NC} Invalid input")
+            input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            continue  # Return to view options menu
+        
+        selected_site = sites[site_idx]
+        site_id = selected_site.get("id", "")
+        site_name = selected_site.get("displayName", "Unknown")
+        
+        if not site_id:
+            print(f"  {Colors.RED}✗{Colors.NC} Could not get site ID")
+            input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            continue  # Return to view options menu
+        
+        # Get files from the site's document library
+        print()
+        print(f"  {Colors.WHITE}Loading from '{site_name}'...{Colors.NC}")
+        
+        items = []
+        try:
+            if view_mode == 4:
+                # Recursive mode - get all files from all folders
+                items = get_folder_contents_recursive(site_id, "", token)
+            else:
+                # Top-level only
+                drive_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root/children"
+                req = urllib.request.Request(drive_url)
+                req.add_header("Authorization", f"Bearer {token}")
+                req.add_header("Content-Type", "application/json")
+                
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    data = json.loads(response.read().decode())
+                    items = data.get("value", [])
+        except urllib.error.HTTPError as e:
+            print(f"  {Colors.RED}✗{Colors.NC} Error accessing files: {e.code} - {e.reason}")
+            input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            continue  # Return to view options menu
+        except Exception as e:
+            print(f"  {Colors.RED}✗{Colors.NC} Error: {str(e)}")
+            input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            continue  # Return to view options menu
+        
+        # Display items
+        clear_screen()
+        print()
+        print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+        title = f"📁 {mode_labels[view_mode]} IN: {site_name[:35]}"
+        print(f"  {Colors.CYAN}{title:^60}{Colors.NC}")
         print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
         print()
         
-        total_items = 0
-        for site in sites:
-            site_id = site.get("id", "")
-            site_name = site.get("displayName", "Unknown")
-            
-            if not site_id:
-                continue
-            
-            try:
-                if view_mode == 4:
-                    # Recursive mode - get all files from all folders
-                    items = get_folder_contents_recursive(site_id, "", token)
-                else:
-                    # Top-level only
-                    drive_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root/children"
-                    req = urllib.request.Request(drive_url)
-                    req.add_header("Authorization", f"Bearer {token}")
-                    req.add_header("Content-Type", "application/json")
-                    
-                    with urllib.request.urlopen(req, timeout=30) as response:
-                        data = json.loads(response.read().decode())
-                        items = data.get("value", [])
-                
-                # Filter items based on view mode for counting
-                if view_mode == 1:
-                    filtered_items = [i for i in items if "folder" in i]
-                elif view_mode == 2 or view_mode == 4:
-                    filtered_items = [i for i in items if "folder" not in i]
-                else:
-                    filtered_items = items
-                
-                if filtered_items:
-                    print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
-                    print(f"  {Colors.WHITE}{Colors.BOLD}📁 {site_name}{Colors.NC} ({len(filtered_items)} items)")
-                    print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
-                    
-                    count = display_items(items, view_mode)
-                    total_items += count
-                    print()
-            except Exception:
-                pass
+        # Filter items based on view mode for counting
+        if view_mode == 1:
+            filtered_items = [i for i in items if "folder" in i]
+        elif view_mode == 2 or view_mode == 4:
+            filtered_items = [i for i in items if "folder" not in i]
+        else:
+            filtered_items = items
         
-        print(f"  {Colors.WHITE}{'═' * 60}{Colors.NC}")
-        print(f"  {Colors.GREEN}Total: {total_items} items across {len(sites)} sites{Colors.NC}")
+        if not filtered_items:
+            print(f"  {Colors.YELLOW}No items found matching the selected filter.{Colors.NC}")
+        else:
+            print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(filtered_items)} items")
+            print()
+            print(f"  {Colors.WHITE}{'─' * 70}{Colors.NC}")
+            print()
+            
+            display_items(items, view_mode, indent="  ")
+            
+            print()
+            print(f"  {Colors.WHITE}{'─' * 70}{Colors.NC}")
+        
         print()
         input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
-        return
-    
-    try:
-        site_idx = int(choice) - 1
-        if site_idx < 0 or site_idx >= len(sites):
-            print(f"  {Colors.RED}✗{Colors.NC} Invalid selection")
-            input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
-            return
-    except ValueError:
-        print(f"  {Colors.RED}✗{Colors.NC} Invalid input")
-        input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
-        return
-    
-    selected_site = sites[site_idx]
-    site_id = selected_site.get("id", "")
-    site_name = selected_site.get("displayName", "Unknown")
-    
-    if not site_id:
-        print(f"  {Colors.RED}✗{Colors.NC} Could not get site ID")
-        input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
-        return
-    
-    # Get files from the site's document library
-    print()
-    print(f"  {Colors.WHITE}Loading from '{site_name}'...{Colors.NC}")
-    
-    items = []
-    try:
-        if view_mode == 4:
-            # Recursive mode - get all files from all folders
-            items = get_folder_contents_recursive(site_id, "", token)
-        else:
-            # Top-level only
-            drive_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root/children"
-            req = urllib.request.Request(drive_url)
-            req.add_header("Authorization", f"Bearer {token}")
-            req.add_header("Content-Type", "application/json")
-            
-            with urllib.request.urlopen(req, timeout=30) as response:
-                data = json.loads(response.read().decode())
-                items = data.get("value", [])
-    except urllib.error.HTTPError as e:
-        print(f"  {Colors.RED}✗{Colors.NC} Error accessing files: {e.code} - {e.reason}")
-        input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
-        return
-    except Exception as e:
-        print(f"  {Colors.RED}✗{Colors.NC} Error: {str(e)}")
-        input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
-        return
-    
-    # Display items
-    clear_screen()
-    print()
-    print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
-    title = f"📁 {mode_labels[view_mode]} IN: {site_name[:35]}"
-    print(f"  {Colors.CYAN}{title:^60}{Colors.NC}")
-    print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
-    print()
-    
-    # Filter items based on view mode for counting
-    if view_mode == 1:
-        filtered_items = [i for i in items if "folder" in i]
-    elif view_mode == 2 or view_mode == 4:
-        filtered_items = [i for i in items if "folder" not in i]
-    else:
-        filtered_items = items
-    
-    if not filtered_items:
-        print(f"  {Colors.YELLOW}No items found matching the selected filter.{Colors.NC}")
-    else:
-        print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(filtered_items)} items")
-        print()
-        print(f"  {Colors.WHITE}{'─' * 70}{Colors.NC}")
-        print()
-        
-        display_items(items, view_mode, indent="  ")
-        
-        print()
-        print(f"  {Colors.WHITE}{'─' * 70}{Colors.NC}")
-    
-    print()
-    input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        # Loop continues back to view options menu
 
 
 # ============================================================================
