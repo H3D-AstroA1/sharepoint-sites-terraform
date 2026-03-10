@@ -118,6 +118,24 @@ class EmailCleaner:
         
         return self.graph_client.delete_all_emails(mailbox, folder, permanent, max_emails)
     
+    def delete_all_folders(
+        self,
+        mailbox: str,
+        permanent: bool = False,
+        max_emails: int = 10000
+    ) -> Dict[str, Dict[str, int]]:
+        """Delete emails from all folders in a mailbox."""
+        if not self.graph_client:
+            return {}
+        
+        folders = ["inbox", "sentitems", "drafts", "deleteditems"]
+        results = {}
+        
+        for folder in folders:
+            results[folder] = self.graph_client.delete_all_emails(mailbox, folder, permanent, max_emails)
+        
+        return results
+    
     def empty_deleted_items(self, mailbox: str) -> Dict[str, int]:
         """Empty the Deleted Items folder for a mailbox."""
         if not self.graph_client:
@@ -132,7 +150,8 @@ class EmailCleaner:
         folder: str = "inbox",
         permanent: bool = False,
         empty_trash: bool = False,
-        dry_run: bool = False
+        dry_run: bool = False,
+        all_folders: bool = False
     ) -> bool:
         """
         Main execution method.
@@ -144,11 +163,20 @@ class EmailCleaner:
             permanent: Permanently delete (skip Deleted Items).
             empty_trash: Also empty Deleted Items folder.
             dry_run: Preview without deleting.
+            all_folders: Clean all folders (inbox, sentitems, drafts, deleteditems).
             
         Returns:
             True if successful, False otherwise.
         """
         self.stats["start_time"] = datetime.now()
+        
+        # Determine folders to clean
+        if all_folders:
+            folders_to_clean = ["inbox", "sentitems", "drafts", "deleteditems"]
+            folder_display = "ALL FOLDERS"
+        else:
+            folders_to_clean = [folder]
+            folder_display = folder
         
         # Get mailboxes
         mailboxes = self.get_mailboxes(all_mailboxes, specific)
@@ -191,18 +219,31 @@ class EmailCleaner:
             upn = user.get("upn", "")
             if dry_run:
                 count = "N/A (dry run)"
+                mailbox_counts.append((user, {"total": count}))
+                print(f"    {upn}: {count}")
             else:
-                count = self.get_mailbox_email_count(upn, folder)
-                total_emails += count if isinstance(count, int) else 0
-            mailbox_counts.append((user, count))
-            print(f"    {upn}: {count} emails in {folder}")
+                folder_counts = {}
+                user_total = 0
+                for f in folders_to_clean:
+                    count = self.get_mailbox_email_count(upn, f)
+                    folder_counts[f] = count
+                    user_total += count if isinstance(count, int) else 0
+                folder_counts["total"] = user_total
+                total_emails += user_total
+                mailbox_counts.append((user, folder_counts))
+                if all_folders:
+                    print(f"    {upn}: {user_total} total emails")
+                    for f in folders_to_clean:
+                        print(f"      - {f}: {folder_counts[f]}")
+                else:
+                    print(f"    {upn}: {folder_counts.get(folder, 0)} emails in {folder}")
         
         print()
         
         # Show summary
         print_summary_box("Email Cleanup Summary", [
             ("Mailboxes:", len(mailboxes)),
-            ("Folder:", folder),
+            ("Folder:", folder_display),
             ("Total Emails:", total_emails if not dry_run else "N/A"),
             ("Delete Mode:", "PERMANENT" if permanent else "Move to Deleted Items"),
             ("Empty Trash:", "Yes" if empty_trash else "No"),
@@ -214,6 +255,8 @@ class EmailCleaner:
             warning_msg = "⚠️  WARNING: This will DELETE emails!"
             if permanent:
                 warning_msg += " PERMANENTLY!"
+            if all_folders:
+                warning_msg += " FROM ALL FOLDERS!"
             print(f"  {Colors.RED}{warning_msg}{Colors.NC}")
             print()
             
@@ -223,27 +266,29 @@ class EmailCleaner:
         
         # Process mailboxes
         print()
-        for i, (user, count) in enumerate(mailbox_counts):
+        for i, (user, folder_counts) in enumerate(mailbox_counts):
             upn = user.get("upn", "Unknown")
             
             print(f"  {Colors.CYAN}[{i+1}/{len(mailboxes)}]{Colors.NC} {upn}")
             
             if dry_run:
-                print(f"       {Colors.YELLOW}[DRY RUN]{Colors.NC} Would delete emails from {folder}")
+                print(f"       {Colors.YELLOW}[DRY RUN]{Colors.NC} Would delete emails from {folder_display}")
                 self.stats["mailboxes_processed"] += 1
             else:
-                # Delete emails
-                print(f"       Deleting emails from {folder}...")
-                results = self.delete_emails_from_mailbox(upn, folder, permanent)
+                # Delete emails from each folder
+                for f in folders_to_clean:
+                    print(f"       Deleting emails from {f}...")
+                    results = self.delete_emails_from_mailbox(upn, f, permanent)
+                    
+                    self.stats["emails_deleted"] += results["success"]
+                    self.stats["emails_failed"] += results["failed"]
+                    
+                    print(f"       {Colors.GREEN}✓{Colors.NC} {f}: Deleted {results['success']}, Failed {results['failed']}")
                 
-                self.stats["emails_deleted"] += results["success"]
-                self.stats["emails_failed"] += results["failed"]
                 self.stats["mailboxes_processed"] += 1
                 
-                print(f"       {Colors.GREEN}✓{Colors.NC} Deleted: {results['success']}, Failed: {results['failed']}")
-                
-                # Empty trash if requested
-                if empty_trash:
+                # Empty trash if requested (only if not already cleaning deleteditems)
+                if empty_trash and "deleteditems" not in folders_to_clean:
                     print(f"       Emptying Deleted Items...")
                     trash_results = self.empty_deleted_items(upn)
                     print(f"       {Colors.GREEN}✓{Colors.NC} Emptied: {trash_results['success']} items")
@@ -309,19 +354,22 @@ def interactive_mode():
     print()
     print(f"  {Colors.WHITE}Which folder do you want to clean?{Colors.NC}")
     print()
-    print(f"    {Colors.GREEN}[1]{Colors.NC} Inbox")
-    print(f"    {Colors.BLUE}[2]{Colors.NC} Sent Items")
-    print(f"    {Colors.YELLOW}[3]{Colors.NC} Deleted Items")
-    print(f"    {Colors.MAGENTA}[4]{Colors.NC} All folders (inbox + sent)")
+    print(f"    {Colors.GREEN}[1]{Colors.NC} Inbox only")
+    print(f"    {Colors.BLUE}[2]{Colors.NC} Sent Items only")
+    print(f"    {Colors.YELLOW}[3]{Colors.NC} Drafts only")
+    print(f"    {Colors.CYAN}[4]{Colors.NC} Deleted Items only")
+    print(f"    {Colors.MAGENTA}[5]{Colors.NC} 🗑️  ALL FOLDERS (inbox, sent, drafts, deleted) - Full cleanup")
     print()
     
     folder_choice = input(f"  {Colors.YELLOW}Enter your choice:{Colors.NC} ").strip()
     
+    all_folders = folder_choice == '5'
     folder_map = {
         '1': 'inbox',
         '2': 'sentitems',
-        '3': 'deleteditems',
-        '4': 'inbox',  # Will handle both
+        '3': 'drafts',
+        '4': 'deleteditems',
+        '5': 'inbox',  # Will use all_folders flag
     }
     folder = folder_map.get(folder_choice, 'inbox')
     
@@ -338,9 +386,9 @@ def interactive_mode():
     mode_choice = input(f"  {Colors.YELLOW}Enter your choice:{Colors.NC} ").strip()
     permanent = mode_choice == '2'
     
-    # Empty trash option
+    # Empty trash option (only if not cleaning all folders which includes deleteditems)
     empty_trash = False
-    if not permanent:
+    if not permanent and not all_folders:
         print()
         print(f"  {Colors.WHITE}Also empty Deleted Items folder?{Colors.NC}")
         empty_choice = input(f"  {Colors.YELLOW}[y/N]:{Colors.NC} ").strip().lower()
@@ -357,7 +405,8 @@ def interactive_mode():
         folder=folder,
         permanent=permanent,
         empty_trash=empty_trash,
-        dry_run=False
+        dry_run=False,
+        all_folders=all_folders
     )
 
 
@@ -369,12 +418,16 @@ def main():
         epilog="""
 Examples:
   python cleanup_emails.py                           # Interactive mode
-  python cleanup_emails.py --all                     # Delete from all mailboxes
+  python cleanup_emails.py --all                     # Delete from all mailboxes (inbox only)
   python cleanup_emails.py --mailboxes user@domain.com
-  python cleanup_emails.py --all --folder sentitems  # Delete sent items
+  python cleanup_emails.py --all --folder sentitems  # Delete sent items only
+  python cleanup_emails.py --all --all-folders       # Delete from ALL folders (full cleanup)
   python cleanup_emails.py --all --permanent         # Permanently delete
   python cleanup_emails.py --all --empty-trash       # Also empty Deleted Items
   python cleanup_emails.py --all --dry-run           # Preview only
+  
+Full Cleanup Example:
+  python cleanup_emails.py --all --all-folders --permanent  # Complete mailbox wipe
         """
     )
     
@@ -397,7 +450,12 @@ Examples:
         type=str,
         default="inbox",
         choices=["inbox", "sentitems", "deleteditems", "drafts"],
-        help="Folder to clean (default: inbox)"
+        help="Folder to clean (default: inbox). Ignored if --all-folders is used."
+    )
+    parser.add_argument(
+        "--all-folders",
+        action="store_true",
+        help="Clean ALL folders (inbox, sentitems, drafts, deleteditems) - Full cleanup"
     )
     parser.add_argument(
         "--permanent",
@@ -450,7 +508,8 @@ Examples:
         folder=args.folder,
         permanent=args.permanent,
         empty_trash=args.empty_trash,
-        dry_run=args.dry_run
+        dry_run=args.dry_run,
+        all_folders=args.all_folders
     )
     
     sys.exit(0 if success else 1)
