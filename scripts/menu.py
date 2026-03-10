@@ -1479,6 +1479,123 @@ def manage_app_registration_menu() -> None:
             print_warning("Invalid choice. Please try again.")
             input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
 
+
+def list_sharepoint_sites_menu() -> None:
+    """List SharePoint sites with a clean, friendly interface."""
+    import urllib.request
+    import urllib.error
+    
+    clear_screen()
+    print()
+    print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+    print(f"  {Colors.CYAN}{'📋 SHAREPOINT SITES':^60}{Colors.NC}")
+    print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+    print()
+    
+    # Get access token
+    print(f"  {Colors.WHITE}Connecting to Microsoft Graph...{Colors.NC}")
+    token = get_graph_access_token()
+    
+    if not token:
+        print(f"  {Colors.RED}✗{Colors.NC} Failed to get access token")
+        print(f"  {Colors.YELLOW}ℹ{Colors.NC} Please ensure you're logged in to Azure CLI")
+        input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        return
+    
+    # Try SharePoint Sites API first
+    sites = []
+    try:
+        url = "https://graph.microsoft.com/v1.0/sites?search=*&$top=100"
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Content-Type", "application/json")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode())
+            sites = data.get("value", [])
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            # Fall back to M365 Groups API
+            pass
+        else:
+            print(f"  {Colors.RED}✗{Colors.NC} Error: {e.code} - {e.reason}")
+    except Exception as e:
+        print(f"  {Colors.RED}✗{Colors.NC} Error: {str(e)}")
+    
+    # If no sites from Sites API, try M365 Groups
+    if not sites:
+        print(f"  {Colors.YELLOW}ℹ{Colors.NC} Using Microsoft 365 Groups API...")
+        try:
+            url = "https://graph.microsoft.com/v1.0/groups?$filter=groupTypes/any(c:c eq 'Unified')&$select=id,displayName,createdDateTime,visibility&$top=100"
+            req = urllib.request.Request(url)
+            req.add_header("Authorization", f"Bearer {token}")
+            req.add_header("Content-Type", "application/json")
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                data = json.loads(response.read().decode())
+                groups = data.get("value", [])
+                
+                # Convert groups to sites format
+                for group in groups:
+                    try:
+                        site_url = f"https://graph.microsoft.com/v1.0/groups/{group['id']}/sites/root"
+                        site_req = urllib.request.Request(site_url)
+                        site_req.add_header("Authorization", f"Bearer {token}")
+                        
+                        with urllib.request.urlopen(site_req, timeout=10) as site_response:
+                            site_data = json.loads(site_response.read().decode())
+                            sites.append({
+                                "displayName": group.get("displayName", "Unknown"),
+                                "webUrl": site_data.get("webUrl", ""),
+                                "createdDateTime": group.get("createdDateTime", ""),
+                                "visibility": group.get("visibility", ""),
+                                "isGroup": True
+                            })
+                    except Exception:
+                        # Group might not have a SharePoint site
+                        pass
+        except Exception as e:
+            print(f"  {Colors.RED}✗{Colors.NC} Error: {str(e)}")
+    
+    if not sites:
+        print()
+        print(f"  {Colors.YELLOW}No SharePoint sites found.{Colors.NC}")
+        print()
+        print(f"  {Colors.WHITE}Possible reasons:{Colors.NC}")
+        print(f"    • No sites have been created yet")
+        print(f"    • Missing permissions (Sites.Read.All or Group.Read.All)")
+        print(f"    • Use option [A] to set up app registration with proper permissions")
+        input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        return
+    
+    # Display sites
+    print()
+    print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(sites)} SharePoint sites")
+    print()
+    print(f"  {Colors.WHITE}{'─' * 70}{Colors.NC}")
+    print()
+    
+    for i, site in enumerate(sites, 1):
+        name = site.get("displayName", site.get("name", "Unknown"))
+        web_url = site.get("webUrl", "")
+        visibility = site.get("visibility", "")
+        is_group = site.get("isGroup", False)
+        
+        # Icon based on visibility
+        if visibility == "Private":
+            icon = "🔒"
+        else:
+            icon = "🌐"
+        
+        print(f"  [{i:2}] {icon} {name}")
+        print(f"       {Colors.DIM}{web_url}{Colors.NC}")
+        print()
+    
+    print(f"  {Colors.WHITE}{'─' * 70}{Colors.NC}")
+    print()
+    input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+
+
 # ============================================================================
 # CONFIGURATION EDITING
 # ============================================================================
@@ -1930,7 +2047,7 @@ def main() -> None:
             
         elif choice == '4':
             # List SharePoint Sites
-            run_script("cleanup.py", ["--list-sites"])
+            list_sharepoint_sites_menu()
             
         elif choice == '5':
             # List Files in Sites
