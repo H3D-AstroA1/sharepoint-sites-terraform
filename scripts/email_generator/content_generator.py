@@ -19,19 +19,21 @@ from . import variations
 class EmailContentGenerator:
     """Generates realistic email content based on templates and context."""
     
-    def __init__(self, config: Dict[str, Any], sites: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], sites: Dict[str, Any], user_pool: Any = None):
         """
         Initialize the content generator.
         
         Args:
             config: Mailbox configuration dictionary.
             sites: SharePoint sites configuration dictionary.
+            user_pool: Optional UserPool instance for CC/BCC generation.
         """
         self.config = config
         self.sites = sites
         self.settings = config.get("settings", {})
         self.departments = config.get("departments", {})
         self.external_senders = config.get("external_senders", {})
+        self.user_pool = user_pool
         
         # Build site lookup
         self.site_lookup = self._build_site_lookup()
@@ -44,12 +46,13 @@ class EmailContentGenerator:
             lookup[name] = site
         return lookup
     
-    def generate_email(self, recipient: Dict[str, Any]) -> Dict[str, Any]:
+    def generate_email(self, recipient: Dict[str, Any], folder: str = "inbox") -> Dict[str, Any]:
         """
         Generate a complete email for a recipient.
         
         Args:
             recipient: Recipient user configuration.
+            folder: Target folder (inbox, sentitems, drafts).
             
         Returns:
             Dictionary containing email data.
@@ -92,12 +95,77 @@ class EmailContentGenerator:
             "supports_threading": template.get("supports_threading", False),
         }
         
+        # Add CC/BCC recipients if user_pool is available
+        if self.user_pool:
+            cc_bcc = self._generate_cc_bcc_recipients(
+                mailbox_upn=recipient.get("upn", ""),
+                sender_email=sender.get("email", ""),
+                category=category,
+                folder=folder
+            )
+            if cc_bcc.get("cc_recipients"):
+                email["cc_recipients"] = cc_bcc["cc_recipients"]
+            if cc_bcc.get("bcc_recipients"):
+                email["bcc_recipients"] = cc_bcc["bcc_recipients"]
+        
         # Add attachment type if needed
         if email["has_attachment"]:
             email["attachment_type"] = self._select_attachment_type(recipient)
             email["attachment_department"] = recipient.get("department", "General")
         
         return email
+    
+    def _generate_cc_bcc_recipients(
+        self,
+        mailbox_upn: str,
+        sender_email: str,
+        category: str,
+        folder: str
+    ) -> Dict[str, Any]:
+        """
+        Generate CC and BCC recipients using the user pool.
+        
+        Args:
+            mailbox_upn: The mailbox UPN.
+            sender_email: The sender's email.
+            category: Email category.
+            folder: Target folder.
+            
+        Returns:
+            Dictionary with cc_recipients and bcc_recipients lists.
+        """
+        result: Dict[str, Any] = {}
+        
+        if not self.user_pool:
+            return result
+        
+        try:
+            # Use the user pool's generate_recipient_selection method
+            selection = self.user_pool.generate_recipient_selection(
+                mailbox_upn=mailbox_upn,
+                sender_email=sender_email,
+                category=category,
+                folder=folder
+            )
+            
+            # Convert CC recipients to dict format
+            if selection.cc:
+                result["cc_recipients"] = [
+                    {"name": r.display_name, "email": r.email}
+                    for r in selection.cc
+                ]
+            
+            # Convert BCC recipients to dict format
+            if selection.bcc:
+                result["bcc_recipients"] = [
+                    {"name": r.display_name, "email": r.email}
+                    for r in selection.bcc
+                ]
+        except Exception:
+            # If anything fails, just return empty - CC/BCC is optional
+            pass
+        
+        return result
     
     def _select_category(self) -> str:
         """Select email category based on configured distribution."""

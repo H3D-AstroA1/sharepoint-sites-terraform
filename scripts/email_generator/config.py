@@ -3,8 +3,9 @@ Configuration loader for M365 email population.
 
 Handles loading and validation of:
 - mailboxes.yaml - User mailbox configuration
-- sites.json - SharePoint sites configuration  
+- sites.json - SharePoint sites configuration
 - environments.json - Tenant/environment configuration
+- Azure AD auto-discovery settings
 """
 
 import json
@@ -26,6 +27,7 @@ CONFIG_DIR = PROJECT_DIR / "config"
 MAILBOXES_FILE = CONFIG_DIR / "mailboxes.yaml"
 SITES_FILE = CONFIG_DIR / "sites.json"
 ENVIRONMENTS_FILE = CONFIG_DIR / "environments.json"
+AZURE_AD_CACHE_FILE = CONFIG_DIR / ".azure_ad_cache.json"
 
 
 def check_yaml_installed() -> bool:
@@ -274,6 +276,45 @@ def apply_defaults(config: Dict[str, Any]) -> Dict[str, Any]:
             "medium": 50,
             "low": 25,
         },
+        # Azure AD auto-discovery defaults
+        "azure_ad": {
+            "enabled": False,
+            "users": {
+                "max_users": None,  # No limit by default
+                "include_departments": None,  # All departments
+                "exclude_departments": None,
+                "exclude_external_users": False,
+                "exclude_service_accounts": True,
+                "validate_mailbox_exists": True,
+            },
+            "groups": {
+                "enabled": True,
+                "include_m365_groups": True,
+                "include_security_groups": True,
+                "include_distribution_lists": True,
+                "exclude_patterns": None,
+                "min_members": 2,
+                "max_groups": None,
+            },
+            "cache": {
+                "enabled": True,
+                "ttl_minutes": 60,
+                "cache_file": str(AZURE_AD_CACHE_FILE),
+            },
+        },
+        # CC/BCC configuration defaults
+        "cc_bcc": {
+            "cc": {
+                "enabled": True,
+                "probability": 0.3,
+                "max_recipients": 5,
+            },
+            "bcc": {
+                "enabled": True,
+                "probability": 0.1,
+                "max_recipients": 3,
+            },
+        },
     }
     
     # Deep merge defaults with config
@@ -445,3 +486,247 @@ def _get_display_name(user: Dict[str, Any]) -> str:
     parts = name_part.replace(".", " ").replace("_", " ").replace("-", " ").split()
     
     return " ".join(part.capitalize() for part in parts)
+
+
+# =============================================================================
+# AZURE AD CONFIGURATION HELPERS
+# =============================================================================
+
+def is_azure_ad_enabled(config: Dict[str, Any]) -> bool:
+    """
+    Check if Azure AD auto-discovery is enabled.
+    
+    Args:
+        config: Full mailbox configuration.
+        
+    Returns:
+        True if Azure AD discovery is enabled.
+    """
+    return config.get("azure_ad", {}).get("enabled", False)
+
+
+def get_azure_ad_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Get Azure AD configuration section.
+    
+    Args:
+        config: Full mailbox configuration.
+        
+    Returns:
+        Azure AD configuration dictionary.
+    """
+    return config.get("azure_ad", {})
+
+
+def get_azure_ad_user_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Get Azure AD user discovery configuration.
+    
+    Args:
+        config: Full mailbox configuration.
+        
+    Returns:
+        User discovery configuration dictionary.
+    """
+    return config.get("azure_ad", {}).get("users", {})
+
+
+def get_azure_ad_group_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Get Azure AD group discovery configuration.
+    
+    Args:
+        config: Full mailbox configuration.
+        
+    Returns:
+        Group discovery configuration dictionary.
+    """
+    return config.get("azure_ad", {}).get("groups", {})
+
+
+def get_azure_ad_cache_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Get Azure AD cache configuration.
+    
+    Args:
+        config: Full mailbox configuration.
+        
+    Returns:
+        Cache configuration dictionary.
+    """
+    return config.get("azure_ad", {}).get("cache", {})
+
+
+def get_cc_bcc_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Get CC/BCC configuration.
+    
+    Args:
+        config: Full mailbox configuration.
+        
+    Returns:
+        CC/BCC configuration dictionary.
+    """
+    return config.get("cc_bcc", {})
+
+
+def get_azure_ad_cache_path(config: Dict[str, Any]) -> Path:
+    """
+    Get the path to the Azure AD cache file.
+    
+    Args:
+        config: Full mailbox configuration.
+        
+    Returns:
+        Path to cache file.
+    """
+    cache_config = get_azure_ad_cache_config(config)
+    cache_file = cache_config.get("cache_file", str(AZURE_AD_CACHE_FILE))
+    return Path(cache_file)
+
+
+def is_azure_ad_cache_enabled(config: Dict[str, Any]) -> bool:
+    """
+    Check if Azure AD caching is enabled.
+    
+    Args:
+        config: Full mailbox configuration.
+        
+    Returns:
+        True if caching is enabled.
+    """
+    return get_azure_ad_cache_config(config).get("enabled", True)
+
+
+def get_azure_ad_cache_ttl(config: Dict[str, Any]) -> int:
+    """
+    Get Azure AD cache TTL in minutes.
+    
+    Args:
+        config: Full mailbox configuration.
+        
+    Returns:
+        Cache TTL in minutes.
+    """
+    return get_azure_ad_cache_config(config).get("ttl_minutes", 60)
+
+
+def get_mailbox_users_from_config(config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Get users that have mailboxes from YAML configuration.
+    
+    This returns users from the 'users' section that are expected
+    to have mailboxes (for email population).
+    
+    Args:
+        config: Full mailbox configuration.
+        
+    Returns:
+        List of user dictionaries with mailboxes.
+    """
+    return get_all_users(config)
+
+
+def merge_yaml_and_azure_ad_users(
+    yaml_users: List[Dict[str, Any]],
+    azure_ad_users: List[Dict[str, Any]],
+    prefer_azure_ad: bool = True
+) -> List[Dict[str, Any]]:
+    """
+    Merge users from YAML configuration and Azure AD discovery.
+    
+    Args:
+        yaml_users: Users from YAML configuration.
+        azure_ad_users: Users from Azure AD discovery.
+        prefer_azure_ad: If True, Azure AD data takes precedence for duplicates.
+        
+    Returns:
+        Merged list of users.
+    """
+    user_map: Dict[str, Dict[str, Any]] = {}
+    
+    # Add users based on preference
+    if prefer_azure_ad:
+        # Add YAML users first
+        for user in yaml_users:
+            upn = user.get("upn", "").lower()
+            if upn:
+                user_map[upn] = user
+        
+        # Override with Azure AD users
+        for user in azure_ad_users:
+            upn = user.get("upn", user.get("email", "")).lower()
+            if upn:
+                user_map[upn] = user
+    else:
+        # Add Azure AD users first
+        for user in azure_ad_users:
+            upn = user.get("upn", user.get("email", "")).lower()
+            if upn:
+                user_map[upn] = user
+        
+        # Override with YAML users
+        for user in yaml_users:
+            upn = user.get("upn", "").lower()
+            if upn:
+                user_map[upn] = user
+    
+    return list(user_map.values())
+
+
+def validate_azure_ad_config(config: Dict[str, Any]) -> List[str]:
+    """
+    Validate Azure AD configuration and return any warnings.
+    
+    Args:
+        config: Full mailbox configuration.
+        
+    Returns:
+        List of warning messages (empty if valid).
+    """
+    warnings: List[str] = []
+    azure_ad = config.get("azure_ad", {})
+    
+    if not azure_ad.get("enabled", False):
+        return warnings
+    
+    # Check user configuration
+    user_config = azure_ad.get("users", {})
+    max_users = user_config.get("max_users")
+    if max_users is not None and max_users < 1:
+        warnings.append("azure_ad.users.max_users should be at least 1 or None for unlimited")
+    
+    # Check group configuration
+    group_config = azure_ad.get("groups", {})
+    min_members = group_config.get("min_members", 2)
+    if min_members < 1:
+        warnings.append("azure_ad.groups.min_members should be at least 1")
+    
+    # Check cache configuration
+    cache_config = azure_ad.get("cache", {})
+    ttl = cache_config.get("ttl_minutes", 60)
+    if ttl < 1:
+        warnings.append("azure_ad.cache.ttl_minutes should be at least 1")
+    
+    # Check CC/BCC configuration
+    cc_bcc = config.get("cc_bcc", {})
+    cc_config = cc_bcc.get("cc", {})
+    bcc_config = cc_bcc.get("bcc", {})
+    
+    cc_prob = cc_config.get("probability", 0.3)
+    if not 0 <= cc_prob <= 1:
+        warnings.append("cc_bcc.cc.probability should be between 0 and 1")
+    
+    bcc_prob = bcc_config.get("probability", 0.1)
+    if not 0 <= bcc_prob <= 1:
+        warnings.append("cc_bcc.bcc.probability should be between 0 and 1")
+    
+    cc_max = cc_config.get("max_recipients", 5)
+    if cc_max < 1:
+        warnings.append("cc_bcc.cc.max_recipients should be at least 1")
+    
+    bcc_max = bcc_config.get("max_recipients", 3)
+    if bcc_max < 1:
+        warnings.append("cc_bcc.bcc.max_recipients should be at least 1")
+    
+    return warnings

@@ -517,6 +517,18 @@ class GraphClient:
                 for cc in email["cc_recipients"]
             ]
         
+        # Add BCC recipients if present
+        if email.get("bcc_recipients"):
+            message["bccRecipients"] = [
+                {
+                    "emailAddress": {
+                        "name": bcc.get("name", ""),
+                        "address": bcc.get("email", ""),
+                    }
+                }
+                for bcc in email["bcc_recipients"]
+            ]
+        
         # Add importance based on category
         category = email.get("category", "")
         if category == "organisational":

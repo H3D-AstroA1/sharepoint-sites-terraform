@@ -307,3 +307,148 @@ volume_mappings:
   high: 100
   medium: 50
   low: 25
+
+# =============================================================================
+# Azure AD Auto-Discovery Configuration
+# =============================================================================
+# Enable this to automatically discover users and groups from Azure AD
+# instead of (or in addition to) manually defining users above.
+#
+# When enabled, the tool will:
+# - Discover all users from Azure AD
+# - Identify which users have mailboxes
+# - Use all users (with or without mailboxes) as senders/recipients
+# - Discover groups and distribution lists for CC/BCC
+# =============================================================================
+
+azure_ad:
+  # Enable Azure AD auto-discovery (default: false)
+  enabled: false
+  
+  # User discovery settings
+  users:
+    # Maximum number of users to discover (null = unlimited)
+    max_users: null
+    
+    # Only include users from these departments (null = all departments)
+    include_departments: null
+    # Example:
+    # include_departments:
+    #   - IT Department
+    #   - Human Resources
+    #   - Finance Department
+    
+    # Exclude users from these departments
+    exclude_departments: null
+    # Example:
+    # exclude_departments:
+    #   - Contractors
+    #   - Temporary Staff
+    
+    # Exclude guest/external users (default: false)
+    exclude_external_users: false
+    
+    # Exclude service accounts (default: true)
+    # Filters out accounts with patterns like: service, admin, system, noreply, mailbox
+    exclude_service_accounts: true
+    
+    # Validate that users have mailboxes (default: true)
+    # This makes API calls to check each user's mailbox status
+    validate_mailbox_exists: true
+  
+  # Group discovery settings
+  groups:
+    # Enable group discovery (default: true)
+    enabled: true
+    
+    # Include Microsoft 365 Groups (default: true)
+    include_m365_groups: true
+    
+    # Include mail-enabled security groups (default: true)
+    include_security_groups: true
+    
+    # Include distribution lists (default: true)
+    include_distribution_lists: true
+    
+    # Exclude groups matching these patterns (supports wildcards)
+    exclude_patterns: null
+    # Example:
+    # exclude_patterns:
+    #   - "Test*"
+    #   - "Dev*"
+    #   - "*Archive*"
+    
+    # Minimum number of members for a group to be included (default: 2)
+    min_members: 2
+    
+    # Maximum number of groups to discover (null = unlimited)
+    max_groups: null
+  
+  # Cache settings
+  cache:
+    # Enable caching of discovered data (default: true)
+    enabled: true
+    
+    # Cache time-to-live in minutes (default: 60)
+    ttl_minutes: 60
+    
+    # Cache file location (relative to config directory)
+    cache_file: ".azure_ad_cache.json"
+
+# =============================================================================
+# CC/BCC Configuration
+# =============================================================================
+# Configure how CC and BCC recipients are added to emails.
+# This uses the user pool (from YAML or Azure AD discovery).
+# =============================================================================
+
+cc_bcc:
+  # CC (Carbon Copy) settings
+  cc:
+    # Enable CC recipients (default: true)
+    enabled: true
+    
+    # Probability of adding CC recipients (0.0 to 1.0, default: 0.3)
+    probability: 0.3
+    
+    # Maximum number of CC recipients per email (default: 5)
+    max_recipients: 5
+  
+  # BCC (Blind Carbon Copy) settings
+  bcc:
+    # Enable BCC recipients (default: true)
+    enabled: true
+    
+    # Probability of adding BCC recipients (0.0 to 1.0, default: 0.1)
+    probability: 0.1
+    
+    # Maximum number of BCC recipients per email (default: 3)
+    max_recipients: 3
+
+# =============================================================================
+# Folder Distribution Configuration
+# =============================================================================
+# Configure how emails are distributed across mailbox folders.
+# =============================================================================
+
+folder_distribution:
+  # Enable folder distribution (default: true)
+  enabled: true
+  
+  # Folder weights (higher = more emails in that folder)
+  weights:
+    inbox: 60
+    sentitems: 30
+    drafts: 10
+  
+  # Category-specific folder overrides
+  # Some email types should only go to specific folders
+  category_overrides:
+    spam:
+      inbox: 100
+      sentitems: 0
+      drafts: 0
+    security:
+      inbox: 80
+      sentitems: 15
+      drafts: 5

@@ -43,11 +43,14 @@ from email_generator.config import (
     get_tenant_domain,
     get_all_users,
     check_yaml_installed,
+    is_azure_ad_enabled,
+    get_cc_bcc_config,
 )
 from email_generator.content_generator import EmailContentGenerator
 from email_generator.graph_client import GraphClient
 from email_generator.threading import ThreadManager
 from email_generator.attachments import AttachmentGenerator
+from email_generator.user_pool import UserPool
 from email_generator.utils import (
     Colors,
     clear_screen,
@@ -91,6 +94,7 @@ class EmailPopulator:
         self.content_generator: Optional[EmailContentGenerator] = None
         self.thread_manager: Optional[ThreadManager] = None
         self.attachment_generator: Optional[AttachmentGenerator] = None
+        self.user_pool: Optional[UserPool] = None
         
         # Statistics
         self.stats = {
@@ -147,8 +151,15 @@ class EmailPopulator:
             # Initialize Graph client
             self.graph_client = GraphClient()
             
-            # Initialize content generator
-            self.content_generator = EmailContentGenerator(self.config, self.sites)
+            # Initialize user pool for CC/BCC support
+            # This uses the cc_bcc configuration from mailboxes.yaml
+            cc_bcc_config = get_cc_bcc_config(self.config)
+            if cc_bcc_config.get("cc", {}).get("enabled", True) or cc_bcc_config.get("bcc", {}).get("enabled", True):
+                self.user_pool = UserPool(config=self.config)
+                print_success("User pool initialized for CC/BCC support")
+            
+            # Initialize content generator with user pool
+            self.content_generator = EmailContentGenerator(self.config, self.sites, self.user_pool)
             
             # Initialize thread manager
             self.thread_manager = ThreadManager(self.config)
@@ -647,6 +658,9 @@ Examples:
     python populate_emails.py --folders inbox,sentitems # Specific folders
     python populate_emails.py --dry-run                 # Preview only
     python populate_emails.py --list-mailboxes          # List configured mailboxes
+    python populate_emails.py --auto-discover           # Use Azure AD discovery
+    python populate_emails.py --auto-discover --refresh-cache  # Refresh Azure AD cache
+    python populate_emails.py --enable-cc --enable-bcc  # Enable CC/BCC recipients
 
 Available folders:
     inbox        - Inbox folder
@@ -710,6 +724,49 @@ Available folders:
         type=str,
         metavar='FOLDERS',
         help='Comma-separated list of folders (inbox,sentitems,deleteditems,drafts) or "all"'
+    )
+    
+    # Azure AD Discovery options
+    discovery = parser.add_argument_group("Azure AD Discovery")
+    discovery.add_argument(
+        '--auto-discover',
+        action='store_true',
+        help='Use Azure AD auto-discovery for users and groups'
+    )
+    discovery.add_argument(
+        '--refresh-cache',
+        action='store_true',
+        help='Force refresh of Azure AD cache before population'
+    )
+    discovery.add_argument(
+        '--use-cache',
+        action='store_true',
+        help='Use existing Azure AD cache without refresh'
+    )
+    
+    # CC/BCC options
+    cc_bcc = parser.add_argument_group("CC/BCC Options")
+    cc_bcc.add_argument(
+        '--enable-cc',
+        action='store_true',
+        default=None,
+        help='Enable CC recipients (uses config default if not specified)'
+    )
+    cc_bcc.add_argument(
+        '--disable-cc',
+        action='store_true',
+        help='Disable CC recipients'
+    )
+    cc_bcc.add_argument(
+        '--enable-bcc',
+        action='store_true',
+        default=None,
+        help='Enable BCC recipients (uses config default if not specified)'
+    )
+    cc_bcc.add_argument(
+        '--disable-bcc',
+        action='store_true',
+        help='Disable BCC recipients'
     )
     
     # Other options

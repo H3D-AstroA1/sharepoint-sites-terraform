@@ -1479,6 +1479,9 @@ def print_menu(prereq_status: dict) -> None:
     print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.YELLOW}[8]{Colors.NC} {Colors.WHITE}📬 List Mailboxes{Colors.NC}                                     {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}View configured mailboxes and status{Colors.NC}                   {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.BLUE}[9]{Colors.NC} {Colors.WHITE}🔍 Azure AD User Discovery{Colors.NC}                            {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Discover users & groups from Azure AD{Colors.NC}                  {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}├──────────────────────────────────────────────────────────────┤{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.CYAN}[C]{Colors.NC} {Colors.WHITE}⚙️  Edit Configuration{Colors.NC}                                 {Colors.CYAN}│{Colors.NC}")
@@ -1555,6 +1558,16 @@ def print_help() -> None:
     print(f"    • Optional validation against Azure AD")
     print(f"    • Shows email count per mailbox")
     print(f"    • Department summary")
+    print()
+    print(f"  {Colors.BLUE}{Colors.BOLD}Option 9: Azure AD User Discovery{Colors.NC}")
+    print(f"  {Colors.DIM}───────────────────────────────────{Colors.NC}")
+    print(f"  Discover users and groups from Azure AD:")
+    print(f"    • Discover all users (with/without mailboxes)")
+    print(f"    • Discover M365 groups, security groups, distribution lists")
+    print(f"    • Validate which users have mailboxes")
+    print(f"    • View users by department")
+    print(f"    • Cache results for faster email population")
+    print(f"  Configure in {Colors.YELLOW}config/mailboxes.yaml{Colors.NC} under 'azure_ad' section")
     print()
     print(f"  {Colors.YELLOW}{Colors.BOLD}Quick Commands:{Colors.NC}")
     print(f"  {Colors.DIM}────────────────{Colors.NC}")
@@ -2766,6 +2779,277 @@ def get_site_filter() -> str:
     return filter_input
 
 # ============================================================================
+# AZURE AD DISCOVERY MENU
+# ============================================================================
+
+def azure_ad_discovery_menu() -> None:
+    """Show the Azure AD user discovery menu."""
+    while True:
+        clear_screen()
+        print()
+        print(f"  {Colors.CYAN}{'=' * 60}{Colors.NC}")
+        print(f"  {Colors.WHITE}{Colors.BOLD}🔍 Azure AD User Discovery{Colors.NC}")
+        print(f"  {Colors.CYAN}{'=' * 60}{Colors.NC}")
+        print()
+        
+        # Check if we have a valid token
+        token = get_graph_access_token()
+        if not token:
+            print(f"  {Colors.RED}✗{Colors.NC} Not authenticated. Please check prerequisites first.")
+            print()
+            input(f"  {Colors.YELLOW}Press Enter to return to menu...{Colors.NC}")
+            return
+        
+        # Try to load existing cache
+        cache_info = _get_azure_ad_cache_info()
+        
+        if cache_info:
+            print(f"  {Colors.GREEN}✓{Colors.NC} Cached data available:")
+            print(f"    {Colors.DIM}Users: {cache_info.get('total_users', 0)} ({cache_info.get('mailbox_users', 0)} with mailboxes){Colors.NC}")
+            print(f"    {Colors.DIM}Groups: {cache_info.get('groups', 0)}{Colors.NC}")
+            print(f"    {Colors.DIM}Last updated: {cache_info.get('timestamp', 'Unknown')}{Colors.NC}")
+            print(f"    {Colors.DIM}Cache valid: {'Yes' if cache_info.get('valid', False) else 'No (expired)'}{Colors.NC}")
+        else:
+            print(f"  {Colors.YELLOW}ℹ{Colors.NC} No cached data. Run discovery to populate.")
+        
+        print()
+        print(f"  {Colors.WHITE}What would you like to do?{Colors.NC}")
+        print()
+        print(f"    {Colors.GREEN}[1]{Colors.NC} Run full discovery (users + groups)")
+        print(f"    {Colors.BLUE}[2]{Colors.NC} Discover users only")
+        print(f"    {Colors.YELLOW}[3]{Colors.NC} Discover groups only")
+        print(f"    {Colors.MAGENTA}[4]{Colors.NC} View discovery statistics")
+        print(f"    {Colors.CYAN}[5]{Colors.NC} View users by department")
+        print(f"    {Colors.RED}[6]{Colors.NC} Clear cache")
+        print(f"    {Colors.WHITE}[B]{Colors.NC} Back to main menu")
+        print()
+        
+        choice = input(f"  {Colors.YELLOW}Enter your choice:{Colors.NC} ").strip().lower()
+        
+        if choice == '1':
+            _run_azure_ad_discovery(token, discover_users=True, discover_groups=True)
+        elif choice == '2':
+            _run_azure_ad_discovery(token, discover_users=True, discover_groups=False)
+        elif choice == '3':
+            _run_azure_ad_discovery(token, discover_users=False, discover_groups=True)
+        elif choice == '4':
+            _show_discovery_statistics()
+        elif choice == '5':
+            _show_users_by_department()
+        elif choice == '6':
+            _clear_azure_ad_cache()
+        elif choice == 'b':
+            return
+        else:
+            print(f"  {Colors.RED}✗{Colors.NC} Invalid choice.")
+            input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+
+
+def _get_azure_ad_cache_info() -> Optional[Dict]:
+    """Get information about the Azure AD cache."""
+    try:
+        cache_path = SCRIPT_DIR.parent / "config" / ".azure_ad_cache.json"
+        if not cache_path.exists():
+            return None
+        
+        with open(cache_path, 'r') as f:
+            data = json.load(f)
+        
+        from datetime import datetime, timedelta
+        
+        timestamp_str = data.get("timestamp")
+        if timestamp_str:
+            timestamp = datetime.fromisoformat(timestamp_str)
+            ttl_minutes = 60  # Default TTL
+            is_valid = datetime.now() - timestamp < timedelta(minutes=ttl_minutes)
+            timestamp_display = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            is_valid = False
+            timestamp_display = "Unknown"
+        
+        users = data.get("users", [])
+        mailbox_users = len([u for u in users if u.get("has_mailbox", False)])
+        
+        return {
+            "total_users": len(users),
+            "mailbox_users": mailbox_users,
+            "groups": len(data.get("groups", [])),
+            "timestamp": timestamp_display,
+            "valid": is_valid,
+        }
+    except Exception:
+        return None
+
+
+def _run_azure_ad_discovery(token: str, discover_users: bool = True, discover_groups: bool = True) -> None:
+    """Run Azure AD discovery."""
+    clear_screen()
+    print()
+    print(f"  {Colors.CYAN}{'=' * 60}{Colors.NC}")
+    print(f"  {Colors.WHITE}{Colors.BOLD}Running Azure AD Discovery{Colors.NC}")
+    print(f"  {Colors.CYAN}{'=' * 60}{Colors.NC}")
+    print()
+    
+    try:
+        # Import the discovery module
+        from email_generator.azure_ad_discovery import AzureADDiscovery
+        from email_generator.config import load_mailbox_config
+        
+        # Load configuration
+        try:
+            config = load_mailbox_config()
+        except Exception:
+            config = {}
+        
+        # Create discovery instance
+        discovery = AzureADDiscovery(token, config)
+        
+        def progress_callback(current: int, total: int, message: str) -> None:
+            percentage = (current / total) * 100 if total > 0 else 0
+            print(f"\r  {Colors.CYAN}[{percentage:5.1f}%]{Colors.NC} {message:<50}", end='', flush=True)
+        
+        if discover_users:
+            print(f"  {Colors.BLUE}ℹ{Colors.NC} Discovering users from Azure AD...")
+            print()
+            users = discovery.discover_users(
+                validate_mailboxes=True,
+                progress_callback=progress_callback
+            )
+            print()
+            print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(users)} users")
+            mailbox_count = len([u for u in users if u.has_mailbox])
+            print(f"    {Colors.DIM}{mailbox_count} users have mailboxes{Colors.NC}")
+            print()
+        
+        if discover_groups:
+            print(f"  {Colors.BLUE}ℹ{Colors.NC} Discovering groups from Azure AD...")
+            print()
+            groups = discovery.discover_groups(
+                progress_callback=progress_callback
+            )
+            print()
+            print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(groups)} groups")
+            print()
+        
+        # Save cache
+        discovery._save_cache()
+        print(f"  {Colors.GREEN}✓{Colors.NC} Cache saved successfully")
+        
+    except ImportError as e:
+        print(f"  {Colors.RED}✗{Colors.NC} Failed to import discovery module: {e}")
+        print(f"    {Colors.DIM}Make sure PyYAML is installed: pip install pyyaml{Colors.NC}")
+    except Exception as e:
+        print(f"  {Colors.RED}✗{Colors.NC} Discovery failed: {e}")
+    
+    print()
+    input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+
+
+def _show_discovery_statistics() -> None:
+    """Show discovery statistics."""
+    clear_screen()
+    print()
+    print(f"  {Colors.CYAN}{'=' * 60}{Colors.NC}")
+    print(f"  {Colors.WHITE}{Colors.BOLD}Discovery Statistics{Colors.NC}")
+    print(f"  {Colors.CYAN}{'=' * 60}{Colors.NC}")
+    print()
+    
+    cache_info = _get_azure_ad_cache_info()
+    
+    if not cache_info:
+        print(f"  {Colors.YELLOW}ℹ{Colors.NC} No cached data available. Run discovery first.")
+    else:
+        print(f"  {Colors.WHITE}{Colors.BOLD}Users:{Colors.NC}")
+        print(f"    Total users:        {cache_info.get('total_users', 0)}")
+        print(f"    With mailboxes:     {cache_info.get('mailbox_users', 0)}")
+        print(f"    Without mailboxes:  {cache_info.get('total_users', 0) - cache_info.get('mailbox_users', 0)}")
+        print()
+        print(f"  {Colors.WHITE}{Colors.BOLD}Groups:{Colors.NC}")
+        print(f"    Total groups:       {cache_info.get('groups', 0)}")
+        print()
+        print(f"  {Colors.WHITE}{Colors.BOLD}Cache:{Colors.NC}")
+        print(f"    Last updated:       {cache_info.get('timestamp', 'Unknown')}")
+        print(f"    Status:             {'Valid' if cache_info.get('valid', False) else 'Expired'}")
+    
+    print()
+    input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+
+
+def _show_users_by_department() -> None:
+    """Show users grouped by department."""
+    clear_screen()
+    print()
+    print(f"  {Colors.CYAN}{'=' * 60}{Colors.NC}")
+    print(f"  {Colors.WHITE}{Colors.BOLD}Users by Department{Colors.NC}")
+    print(f"  {Colors.CYAN}{'=' * 60}{Colors.NC}")
+    print()
+    
+    try:
+        cache_path = SCRIPT_DIR.parent / "config" / ".azure_ad_cache.json"
+        if not cache_path.exists():
+            print(f"  {Colors.YELLOW}ℹ{Colors.NC} No cached data available. Run discovery first.")
+            print()
+            input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            return
+        
+        with open(cache_path, 'r') as f:
+            data = json.load(f)
+        
+        users = data.get("users", [])
+        
+        # Group by department
+        departments: Dict[str, Dict[str, int]] = {}
+        for user in users:
+            dept = user.get("department") or "Unknown"
+            if dept not in departments:
+                departments[dept] = {"total": 0, "mailbox": 0}
+            departments[dept]["total"] += 1
+            if user.get("has_mailbox", False):
+                departments[dept]["mailbox"] += 1
+        
+        # Sort by total users
+        sorted_depts = sorted(departments.items(), key=lambda x: x[1]["total"], reverse=True)
+        
+        print(f"  {'Department':<35} {'Total':>8} {'Mailbox':>10}")
+        print(f"  {'-' * 35} {'-' * 8} {'-' * 10}")
+        
+        for dept, counts in sorted_depts:
+            dept_display = dept[:33] + ".." if len(dept) > 35 else dept
+            print(f"  {dept_display:<35} {counts['total']:>8} {counts['mailbox']:>10}")
+        
+        print()
+        print(f"  {Colors.DIM}Total: {len(users)} users across {len(departments)} departments{Colors.NC}")
+        
+    except Exception as e:
+        print(f"  {Colors.RED}✗{Colors.NC} Failed to load data: {e}")
+    
+    print()
+    input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+
+
+def _clear_azure_ad_cache() -> None:
+    """Clear the Azure AD cache."""
+    print()
+    print(f"  {Colors.YELLOW}⚠{Colors.NC} This will delete all cached Azure AD data.")
+    confirm = input(f"  {Colors.YELLOW}Type 'CLEAR' to confirm:{Colors.NC} ").strip()
+    
+    if confirm == 'CLEAR':
+        try:
+            cache_path = SCRIPT_DIR.parent / "config" / ".azure_ad_cache.json"
+            if cache_path.exists():
+                cache_path.unlink()
+                print(f"  {Colors.GREEN}✓{Colors.NC} Cache cleared successfully")
+            else:
+                print(f"  {Colors.YELLOW}ℹ{Colors.NC} No cache file found")
+        except Exception as e:
+            print(f"  {Colors.RED}✗{Colors.NC} Failed to clear cache: {e}")
+    else:
+        print(f"  {Colors.YELLOW}Operation cancelled{Colors.NC}")
+    
+    input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+
+
+# ============================================================================
 # MAIN FUNCTION
 # ============================================================================
 
@@ -3057,6 +3341,10 @@ def main() -> None:
         elif choice == '8':
             # List Mailboxes
             list_mailboxes_menu()
+            
+        elif choice == '9':
+            # Azure AD User Discovery
+            azure_ad_discovery_menu()
             
         elif choice == 'c':
             # Edit Configuration
