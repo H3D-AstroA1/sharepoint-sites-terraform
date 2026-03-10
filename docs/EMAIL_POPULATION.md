@@ -4,14 +4,16 @@ This tool populates Microsoft 365 mailboxes with realistic organizational emails
 
 ## Features
 
-- **Multiple Email Types**: Newsletters, organizational communications, project updates, meeting requests, and inter-departmental emails
+- **Multiple Email Types**: Newsletters, organizational communications, project updates, meeting requests, inter-departmental emails, security alerts, and spam
 - **Realistic Content**: Department-specific content with professional HTML formatting
+- **Comprehensive Variation System**: Extensive content pools for greetings, closings, project names, document names, meeting topics, and more - ensuring each email is unique
 - **Attachments**: Word, Excel, PowerPoint, and PDF documents with relevant content
 - **Email Threading**: Reply chains, forward chains, and reply-all conversations
 - **Backdated Emails**: Distributed over 6-12 months with business hours bias
 - **Sensitivity Labels**: Microsoft 365 sensitivity labels (General, Internal, Confidential, Highly Confidential)
 - **SharePoint Integration**: Links to SharePoint sites from your configuration
-- **Multi-Folder Support**: Populate emails in inbox, sent items, deleted items, and drafts folders
+- **Multi-Folder Support**: Populate emails in inbox, sent items, deleted items, drafts, and junk folders with weighted distribution
+- **Realistic Email Properties**: Read/unread status, importance levels, flags, and color categories
 
 ## Prerequisites
 
@@ -487,6 +489,7 @@ scripts/
     ├── config.py               # Configuration loader
     ├── templates.py            # Template re-exports (backward compatibility)
     ├── content_generator.py    # Dynamic content generation
+    ├── variations.py           # Content variation pools for realistic emails
     ├── attachments.py          # File attachment creation
     ├── threading.py            # Email thread management
     ├── graph_client.py         # Microsoft Graph API client
@@ -506,6 +509,46 @@ config/
 ├── environments.json           # Tenant configuration
 └── sites.json                  # SharePoint sites (for links)
 ```
+
+### Content Variation System
+
+The tool includes a comprehensive variation system (`variations.py`) that ensures each generated email is unique and realistic:
+
+#### Greeting Variations
+- **Formal**: "Dear {name}", "Good morning {name}"
+- **Informal**: "Hi {name}", "Hey {name}"
+- **Team**: "Hi Team", "Hello Everyone", "Dear Colleagues"
+
+#### Closing Variations
+- **Formal**: "Best regards", "Sincerely", "Respectfully"
+- **Informal**: "Thanks", "Cheers", "Talk soon"
+- **Professional**: "Best", "Kind regards", "Thank you"
+
+#### Dynamic Content Pools
+- **Project Names**: Codenames (Phoenix, Atlas, Titan) + Descriptors (Digital Transformation, Cloud Migration)
+- **Document Names**: Department-specific documents with prefixes (Q1, FY2024, Draft)
+- **Meeting Topics**: Various types (Sync, Review, Planning) with department context
+- **Employee Names**: Diverse pool of first and last names for spotlights
+- **Company News**: Product launches, team achievements, sustainability milestones
+- **Events**: Town halls, training sessions, team building, workshops
+
+#### Department-Specific Content
+Each department has tailored:
+- **Jargon**: Technical terms specific to the department
+- **Priorities**: Current focus areas and initiatives
+- **Key Points**: Metrics and KPIs relevant to the department
+- **Contact Information**: Department-specific support channels
+
+#### Time-Based Variations
+- Current quarter and fiscal year references
+- Random deadlines with multiple formats
+- Date references (last Monday, this week, next month)
+
+#### Tone Variations
+- **Urgency Levels**: High (URGENT:), Medium (Important:), Low (FYI:)
+- **Polite Requests**: "Could you please", "Would you mind", "I'd appreciate if"
+- **Acknowledgments**: Various thank you phrases
+- **Follow-up Phrases**: Different ways to invite questions
 
 ### Template Categories
 
