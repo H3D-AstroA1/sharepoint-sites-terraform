@@ -840,9 +840,33 @@ The Azure CLI's access token doesn't have the required Microsoft Graph permissio
 
 **Solution:**
 
-**Option 1: Grant Admin Consent (Recommended)**
+**Option 1: Use the App Registration Menu (RECOMMENDED - Easiest)**
 
-A tenant administrator must grant the Azure CLI app the required permissions:
+The main menu includes an automatic app registration feature that creates a custom app with all required permissions:
+
+```bash
+cd sharepoint-sites-terraform/scripts
+python menu.py
+# Press [A] to open App Registration menu
+# Select [1] to create a new app registration
+```
+
+This will:
+1. Create a custom app registration in your tenant
+2. Configure all required Microsoft Graph permissions
+3. Open a browser for admin consent
+4. Save the credentials locally for future use
+
+The app is granted these permissions automatically:
+- `Sites.Read.All` - Read SharePoint sites
+- `Sites.ReadWrite.All` - Create/modify SharePoint sites
+- `Files.ReadWrite.All` - Upload/delete files
+- `Group.Read.All` - Read Microsoft 365 Groups
+- `Group.ReadWrite.All` - Create/delete Microsoft 365 Groups
+
+**Option 2: Grant Admin Consent to Azure CLI**
+
+A tenant administrator can grant the Azure CLI app the required permissions:
 
 1. Go to **Azure Portal** > **Microsoft Entra ID** > **Enterprise Applications**
 2. Search for **"Azure CLI"** (App ID: `04b07795-8ddb-461a-bbee-02f9e1bf7b46`)
@@ -855,14 +879,14 @@ A tenant administrator must grant the Azure CLI app the required permissions:
    - `Group.Read.All`
    - `Group.ReadWrite.All`
 
-**Option 2: Re-login with Correct Scope**
+**Option 3: Re-login with Correct Scope**
 
 Try logging in with the Microsoft Graph scope:
 ```bash
 az login --scope https://graph.microsoft.com/.default
 ```
 
-**Option 3: Use PowerShell with PnP**
+**Option 4: Use PowerShell with PnP**
 
 If you can't get admin consent, use PnP PowerShell instead:
 ```powershell
@@ -878,7 +902,7 @@ Get-PnPTenantSite
 
 **Verification:**
 
-After granting consent, verify the token has the correct permissions:
+After setting up app registration or granting consent, verify the token has the correct permissions:
 ```bash
 # Get a new token
 az account get-access-token --resource https://graph.microsoft.com
@@ -887,6 +911,80 @@ az account get-access-token --resource https://graph.microsoft.com
 curl -H "Authorization: Bearer $(az account get-access-token --resource https://graph.microsoft.com --query accessToken -o tsv)" \
   "https://graph.microsoft.com/v1.0/sites?search=*"
 ```
+
+---
+
+### Issue 23: 403 Errors on Specific Sites During File Population
+
+**Error Message:**
+```
+✗ Failed to upload file to "My workspace" - 403 Forbidden
+✗ Failed to upload file to "Designer" - 403 Forbidden
+✗ Failed to upload file to "Team Site" - 403 Forbidden
+```
+
+**Cause:**
+Some SharePoint sites are system sites or personal sites that don't allow file uploads via the Microsoft Graph API, even with proper permissions. These include:
+- "My workspace" - Personal OneDrive-like workspace
+- "Designer" - Microsoft Designer integration site
+- "Team Site" / "Communication Site" - Default template sites
+- Sites containing "contenttypehub", "appcatalog", "search", "portal"
+- Personal sites (URLs containing "/personal/")
+
+**Solution:**
+
+The `populate_files.py` and `menu.py` scripts now automatically filter out these problematic sites. The filtering happens automatically when:
+- Listing sites for file population
+- Uploading files to sites
+- Listing files in sites
+
+**Filtered Site Patterns:**
+- `my workspace`
+- `designer`
+- `team site`
+- `communication site`
+- `contenttypehub`
+- `appcatalog`
+- `search`
+- `portal`
+- `root`
+- URLs containing `/personal/`
+
+**Manual Workaround:**
+
+If you need to work with a specific site that's being filtered, you can use the `--site` flag to target it directly:
+```bash
+python populate_files.py --site "specific-site-name" --files 10
+```
+
+---
+
+### Issue 24: M365 Groups Fallback When Sites API Returns 403
+
+**Symptom:**
+```
+ℹ Using Microsoft 365 Groups API...
+Found 15 sites via M365 Groups
+```
+
+**Cause:**
+When the Microsoft Graph Sites API returns a 403 Forbidden error (due to missing permissions), the scripts automatically fall back to using the Microsoft 365 Groups API. This API can list groups that have associated SharePoint sites.
+
+**This is expected behavior** and not an error. The fallback provides:
+- Access to team sites created via Microsoft Teams
+- Access to sites created via Microsoft 365 Groups
+- Filtered list excluding system/personal sites
+
+**To avoid the fallback:**
+
+Use the App Registration feature to get proper permissions:
+```bash
+python menu.py
+# Press [A] to open App Registration menu
+# Select [1] to create a new app registration
+```
+
+Once the custom app is configured with admin consent, the scripts will use the Sites API directly.
 
 ---
 

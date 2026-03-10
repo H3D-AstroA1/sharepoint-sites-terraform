@@ -76,7 +76,8 @@ This opens an interactive menu that guides you through all operations:
   [4] 📋 List SharePoint Sites
   [5] 📁 List Files in Sites
 
-  [C] ⚙️  Edit Configuration             ← NEW!
+  [A] 🔐 Manage App Registration         ← For SharePoint permissions
+  [C] ⚙️  Edit Configuration
   [H] ❓ Help & Documentation
   [Q] 🚪 Quit
 ```
@@ -446,6 +447,64 @@ Options:
 |-----------|---------------------|
 | Delete files | Sites.ReadWrite.All, Files.ReadWrite.All |
 | Delete sites | Sites.FullControl.All (SharePoint Admin) |
+
+---
+
+## 🔐 App Registration (Recommended)
+
+The scripts require Microsoft Graph API permissions to access SharePoint sites. The easiest way to set this up is using the built-in App Registration feature.
+
+### Why Use App Registration?
+
+| Without App Registration | With App Registration |
+|--------------------------|----------------------|
+| Azure CLI token may lack permissions | Custom app with all required permissions |
+| May get 403 Forbidden errors | Full access to SharePoint sites |
+| Limited to current user's permissions | Works with client credentials flow |
+| Requires manual admin consent | Guided admin consent process |
+
+### Setting Up App Registration
+
+```bash
+cd sharepoint-sites-terraform/scripts
+python menu.py
+# Press [A] to open App Registration menu
+```
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║   App Registration Management                                 ║
+╚══════════════════════════════════════════════════════════════╝
+
+  [1] 🆕 Create new app registration
+  [2] 🔑 Grant admin consent (opens browser)
+  [3] ✅ Check current app status
+  [4] 🗑️  Delete app registration
+
+  [B] ← Back to main menu
+```
+
+### Permissions Granted
+
+The custom app is configured with these Microsoft Graph permissions:
+
+| Permission | Purpose |
+|------------|---------|
+| `Sites.Read.All` | List SharePoint sites |
+| `Sites.ReadWrite.All` | Create and modify sites |
+| `Files.ReadWrite.All` | Upload and delete files |
+| `Group.Read.All` | List Microsoft 365 Groups |
+| `Group.ReadWrite.All` | Create and delete Groups |
+
+### Admin Consent Required
+
+After creating the app, a tenant administrator must grant consent:
+1. The script opens a browser to the Azure consent page
+2. Sign in with an admin account
+3. Click "Accept" to grant permissions
+4. Return to the script and press Enter
+
+> 💡 **Tip**: If you're not an admin, ask your IT administrator to grant consent using the URL provided by the script.
 
 ---
 
