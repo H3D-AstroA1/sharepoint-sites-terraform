@@ -1596,6 +1596,186 @@ def list_sharepoint_sites_menu() -> None:
     input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
 
 
+def list_files_in_sites_menu() -> None:
+    """List files in SharePoint sites with a clean, friendly interface."""
+    import urllib.request
+    import urllib.error
+    
+    clear_screen()
+    print()
+    print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+    print(f"  {Colors.CYAN}{'📁 FILES IN SHAREPOINT SITES':^60}{Colors.NC}")
+    print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+    print()
+    
+    # Get access token
+    print(f"  {Colors.WHITE}Connecting to Microsoft Graph...{Colors.NC}")
+    token = get_graph_access_token()
+    
+    if not token:
+        print(f"  {Colors.RED}✗{Colors.NC} Failed to get access token")
+        print(f"  {Colors.YELLOW}ℹ{Colors.NC} Please ensure you're logged in to Azure CLI")
+        input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        return
+    
+    # Get sites first (using M365 Groups API as fallback)
+    sites = []
+    try:
+        url = "https://graph.microsoft.com/v1.0/sites?search=*&$top=100"
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Content-Type", "application/json")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode())
+            sites = data.get("value", [])
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            pass  # Fall back to M365 Groups
+    except Exception:
+        pass
+    
+    # If no sites from Sites API, try M365 Groups
+    if not sites:
+        print(f"  {Colors.YELLOW}ℹ{Colors.NC} Using Microsoft 365 Groups API...")
+        try:
+            url = "https://graph.microsoft.com/v1.0/groups?$filter=groupTypes/any(c:c eq 'Unified')&$select=id,displayName&$top=100"
+            req = urllib.request.Request(url)
+            req.add_header("Authorization", f"Bearer {token}")
+            req.add_header("Content-Type", "application/json")
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                data = json.loads(response.read().decode())
+                groups = data.get("value", [])
+                
+                for group in groups:
+                    try:
+                        site_url = f"https://graph.microsoft.com/v1.0/groups/{group['id']}/sites/root"
+                        site_req = urllib.request.Request(site_url)
+                        site_req.add_header("Authorization", f"Bearer {token}")
+                        
+                        with urllib.request.urlopen(site_req, timeout=10) as site_response:
+                            site_data = json.loads(site_response.read().decode())
+                            sites.append({
+                                "id": site_data.get("id", ""),
+                                "displayName": group.get("displayName", "Unknown"),
+                                "webUrl": site_data.get("webUrl", "")
+                            })
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"  {Colors.RED}✗{Colors.NC} Error: {str(e)}")
+    
+    if not sites:
+        print()
+        print(f"  {Colors.YELLOW}No SharePoint sites found.{Colors.NC}")
+        input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        return
+    
+    print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(sites)} SharePoint sites")
+    print()
+    
+    # Let user select a site
+    print(f"  {Colors.WHITE}Select a site to view files:{Colors.NC}")
+    print()
+    for i, site in enumerate(sites, 1):
+        name = site.get("displayName", site.get("name", "Unknown"))
+        print(f"    [{i:2}] {name}")
+    print()
+    print(f"    [{Colors.RED}B{Colors.NC}]  Back to main menu")
+    print()
+    
+    choice = input(f"  {Colors.YELLOW}Enter site number:{Colors.NC} ").strip().lower()
+    
+    if choice == 'b' or not choice:
+        return
+    
+    try:
+        site_idx = int(choice) - 1
+        if site_idx < 0 or site_idx >= len(sites):
+            print(f"  {Colors.RED}✗{Colors.NC} Invalid selection")
+            input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            return
+    except ValueError:
+        print(f"  {Colors.RED}✗{Colors.NC} Invalid input")
+        input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        return
+    
+    selected_site = sites[site_idx]
+    site_id = selected_site.get("id", "")
+    site_name = selected_site.get("displayName", "Unknown")
+    
+    if not site_id:
+        print(f"  {Colors.RED}✗{Colors.NC} Could not get site ID")
+        input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        return
+    
+    # Get files from the site's document library
+    print()
+    print(f"  {Colors.WHITE}Loading files from '{site_name}'...{Colors.NC}")
+    
+    files = []
+    try:
+        # Get the default document library (drive)
+        drive_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root/children"
+        req = urllib.request.Request(drive_url)
+        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Content-Type", "application/json")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode())
+            files = data.get("value", [])
+    except urllib.error.HTTPError as e:
+        print(f"  {Colors.RED}✗{Colors.NC} Error accessing files: {e.code} - {e.reason}")
+        input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        return
+    except Exception as e:
+        print(f"  {Colors.RED}✗{Colors.NC} Error: {str(e)}")
+        input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        return
+    
+    # Display files
+    clear_screen()
+    print()
+    print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+    print(f"  {Colors.CYAN}{'📁 FILES IN: ' + site_name[:45]:^60}{Colors.NC}")
+    print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+    print()
+    
+    if not files:
+        print(f"  {Colors.YELLOW}No files found in this site's document library.{Colors.NC}")
+    else:
+        print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(files)} items")
+        print()
+        print(f"  {Colors.WHITE}{'─' * 70}{Colors.NC}")
+        print()
+        
+        for i, item in enumerate(files, 1):
+            name = item.get("name", "Unknown")
+            is_folder = "folder" in item
+            size = item.get("size", 0)
+            
+            if is_folder:
+                icon = "📁"
+                size_str = ""
+            else:
+                icon = "📄"
+                if size < 1024:
+                    size_str = f"({size} B)"
+                elif size < 1024 * 1024:
+                    size_str = f"({size // 1024} KB)"
+                else:
+                    size_str = f"({size // (1024 * 1024)} MB)"
+            
+            print(f"  [{i:3}] {icon} {name} {Colors.DIM}{size_str}{Colors.NC}")
+        
+        print()
+        print(f"  {Colors.WHITE}{'─' * 70}{Colors.NC}")
+    
+    print()
+    input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+
+
 # ============================================================================
 # CONFIGURATION EDITING
 # ============================================================================
@@ -2051,16 +2231,7 @@ def main() -> None:
             
         elif choice == '5':
             # List Files in Sites
-            clear_screen()
-            print()
-            print(f"  {Colors.MAGENTA}{Colors.BOLD}📁 List Files in Sites{Colors.NC}")
-            print(f"  {Colors.CYAN}{'─' * 40}{Colors.NC}")
-            
-            site_filter = get_site_filter()
-            args = ["--list-files"]
-            if site_filter:
-                args.extend(["--site", site_filter])
-            run_script("cleanup.py", args)
+            list_files_in_sites_menu()
             
         elif choice == 'c':
             # Edit Configuration
