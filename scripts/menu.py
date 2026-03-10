@@ -59,6 +59,51 @@ class Colors:
 if not sys.stdout.isatty():
     Colors.disable()
 
+# Sites to exclude (system sites, personal sites, etc. that typically cause 403 errors)
+EXCLUDED_SITE_PATTERNS = [
+    "my workspace",
+    "designer",
+    "team site",
+    "communication site",
+    "contenttypehub",
+    "appcatalog",
+    "search",
+    "portal",
+    "root",
+]
+
+
+def filter_writable_sites(sites: list) -> list:
+    """Filter out system/personal sites that typically cause 403 errors."""
+    filtered = []
+    excluded_count = 0
+    
+    for site in sites:
+        site_name = site.get("displayName", site.get("name", "")).lower()
+        web_url = site.get("webUrl", "").lower()
+        
+        # Check if site matches any excluded pattern
+        is_excluded = False
+        for pattern in EXCLUDED_SITE_PATTERNS:
+            if pattern in site_name or pattern in web_url:
+                is_excluded = True
+                excluded_count += 1
+                break
+        
+        # Also exclude sites that are clearly personal OneDrive sites
+        if "/personal/" in web_url:
+            is_excluded = True
+            excluded_count += 1
+        
+        if not is_excluded:
+            filtered.append(site)
+    
+    if excluded_count > 0:
+        print(f"  {Colors.YELLOW}ℹ{Colors.NC} Filtered out {excluded_count} system/personal sites")
+    
+    return filtered
+
+
 def clear_screen() -> None:
     """Clear the terminal screen."""
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -1557,6 +1602,9 @@ def list_sharepoint_sites_menu() -> None:
         except Exception as e:
             print(f"  {Colors.RED}✗{Colors.NC} Error: {str(e)}")
     
+    # Filter out system/personal sites
+    sites = filter_writable_sites(sites)
+    
     if not sites:
         print()
         print(f"  {Colors.YELLOW}No SharePoint sites found.{Colors.NC}")
@@ -1665,6 +1713,9 @@ def list_files_in_sites_menu() -> None:
                         pass
         except Exception as e:
             print(f"  {Colors.RED}✗{Colors.NC} Error: {str(e)}")
+    
+    # Filter out system/personal sites
+    sites = filter_writable_sites(sites)
     
     if not sites:
         print()
