@@ -15,7 +15,7 @@ from typing import Dict, List, Any
 # ACCOUNT BLOCKED TEMPLATE
 # =============================================================================
 
-ACCOUNT_BLOCKED = {
+ACCOUNT_BLOCKED: Dict[str, Any] = {
     "category": "security",
     "sensitivity": "confidential",
     "sender_type": "internal_system",
@@ -113,7 +113,7 @@ ACCOUNT_BLOCKED = {
 # PASSWORD RESET WITH TEMPORARY PASSWORD
 # =============================================================================
 
-PASSWORD_RESET_WITH_TEMP = {
+PASSWORD_RESET_WITH_TEMP: Dict[str, Any] = {
     "category": "security",
     "sensitivity": "highly_confidential",
     "sender_type": "internal_system",
@@ -214,7 +214,7 @@ PASSWORD_RESET_WITH_TEMP = {
 # PASSWORD RESET WITH LINK (NO PASSWORD)
 # =============================================================================
 
-PASSWORD_RESET_LINK = {
+PASSWORD_RESET_LINK: Dict[str, Any] = {
     "category": "security",
     "sensitivity": "confidential",
     "sender_type": "internal_system",
@@ -305,7 +305,7 @@ PASSWORD_RESET_LINK = {
 # ACCOUNT UNLOCKED NOTIFICATION
 # =============================================================================
 
-ACCOUNT_UNLOCKED = {
+ACCOUNT_UNLOCKED: Dict[str, Any] = {
     "category": "security",
     "sensitivity": "internal",
     "sender_type": "internal_system",
@@ -392,7 +392,7 @@ ACCOUNT_UNLOCKED = {
 # SUSPICIOUS ACTIVITY ALERT
 # =============================================================================
 
-SUSPICIOUS_ACTIVITY = {
+SUSPICIOUS_ACTIVITY: Dict[str, Any] = {
     "category": "security",
     "sensitivity": "confidential",
     "sender_type": "internal_system",
@@ -498,3 +498,6 @@ SECURITY_TEMPLATES = [
     ACCOUNT_UNLOCKED,
     SUSPICIOUS_ACTIVITY,
 ]
+
+# Templates with temporary passwords (for special handling)
+PASSWORD_TEMPLATES = [PASSWORD_RESET_WITH_TEMP]

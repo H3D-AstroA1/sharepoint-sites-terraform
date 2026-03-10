@@ -1,46 +1,49 @@
 """
-Email templates for M365 email population.
+Email templates package for M365 email population.
 
-This module re-exports all templates from the templates/ package for backward compatibility.
-All templates are now organized in separate files under the templates/ folder.
-
-Template Categories:
-- newsletters: Company and industry newsletters
-- links: SharePoint document sharing and site activity
-- attachments: Reports and documents for review
-- organisational: Company announcements, HR policies, leadership messages
-- interdepartmental: Project updates, meeting requests, status reports
-- security: Account blocked, password reset, suspicious activity alerts
-- spam: Promotional spam, phishing simulations, lottery scams
+This package contains all email templates organized by category:
+- Newsletter templates (company and industry newsletters)
+- SharePoint templates (document sharing, site activity)
+- Attachment templates (reports, documents for review)
+- Organisational templates (announcements, HR policies, leadership messages)
+- Interdepartmental templates (project updates, meeting requests, status reports)
+- Security templates (account blocked, password reset, suspicious activity)
+- Spam templates (promotional, phishing simulations, lottery scams)
 """
 
-# Import directly from the templates subpackage modules to avoid circular imports
-from .templates.newsletter_templates import (
+from typing import Dict, List, Any
+
+# Import newsletter templates
+from .newsletter_templates import (
     COMPANY_NEWSLETTER,
     INDUSTRY_NEWSLETTER,
     NEWSLETTER_TEMPLATES,
 )
 
-from .templates.sharepoint_templates import (
+# Import SharePoint templates
+from .sharepoint_templates import (
     SHAREPOINT_DOCUMENT_SHARED,
     SHAREPOINT_SITE_ACTIVITY,
     SHAREPOINT_TEMPLATES,
 )
 
-from .templates.attachment_templates import (
+# Import attachment templates
+from .attachment_templates import (
     REPORT_WITH_ATTACHMENT,
     DOCUMENT_FOR_REVIEW,
     ATTACHMENT_TEMPLATES,
 )
 
-from .templates.organisational_templates import (
+# Import organisational templates
+from .organisational_templates import (
     COMPANY_ANNOUNCEMENT,
     HR_POLICY_UPDATE,
     LEADERSHIP_MESSAGE,
     ORGANISATIONAL_TEMPLATES,
 )
 
-from .templates.interdepartmental_templates import (
+# Import interdepartmental templates
+from .interdepartmental_templates import (
     PROJECT_UPDATE,
     MEETING_REQUEST,
     STATUS_REPORT,
@@ -49,7 +52,8 @@ from .templates.interdepartmental_templates import (
     THREADABLE_TEMPLATES,
 )
 
-from .templates.security_templates import (
+# Import security templates
+from .security_templates import (
     ACCOUNT_BLOCKED,
     PASSWORD_RESET_WITH_TEMP,
     PASSWORD_RESET_LINK,
@@ -59,7 +63,8 @@ from .templates.security_templates import (
     PASSWORD_TEMPLATES,
 )
 
-from .templates.spam_templates import (
+# Import spam templates
+from .spam_templates import (
     PROMOTIONAL_SPAM,
     PHISHING_BANK,
     LOTTERY_SCAM,
@@ -69,8 +74,6 @@ from .templates.spam_templates import (
     SPAM_SENDER_DOMAINS,
     SPAM_SENDER_NAMES,
 )
-
-from typing import Dict, List, Any
 
 # =============================================================================
 # COMBINED TEMPLATE COLLECTIONS
@@ -95,6 +98,10 @@ ALL_ATTACHMENT_TEMPLATES = ATTACHMENT_TEMPLATES
 
 # All templates with temporary passwords (for special handling)
 ALL_PASSWORD_TEMPLATES = PASSWORD_TEMPLATES
+
+# =============================================================================
+# PUBLIC API
+# =============================================================================
 
 __all__ = [
     # Main template dictionary
