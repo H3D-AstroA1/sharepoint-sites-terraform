@@ -22,11 +22,12 @@ sharepoint-sites-terraform/
 ├── README.md                    # This file - main documentation
 ├── CONFIGURATION-GUIDE.md       # Detailed configuration instructions
 ├── PREREQUISITES.md             # What you need before starting
-├── requirements.txt             # Python dependencies (none required!)
+├── requirements.txt             # Python dependencies
 ├── .gitignore                   # Git ignore rules
 │
 ├── config/                      # Configuration files
 │   ├── sites.json               # ⭐ EDIT THIS FILE for custom sites
+│   ├── mailboxes.yaml           # ⭐ EDIT THIS FILE for email mailboxes
 │   └── environments.json        # ⭐ PRE-CONFIGURE YOUR ENVIRONMENTS HERE
 │
 ├── terraform/                   # Terraform configuration files
@@ -40,10 +41,14 @@ sharepoint-sites-terraform/
 │   ├── menu.py                  # ⭐ MAIN MENU (START HERE!)
 │   ├── deploy.py                # Step 1: Create SharePoint sites
 │   ├── populate_files.py        # Step 2: Populate sites with files
-│   └── cleanup.py               # Step 3: Delete files/sites
+│   ├── populate_emails.py       # Populate mailboxes with emails
+│   ├── cleanup.py               # Step 3: Delete files/sites
+│   ├── cleanup_emails.py        # Delete emails from mailboxes
+│   └── email_generator/         # Email generation modules
 │
 └── docs/                        # Additional documentation
-    └── TROUBLESHOOTING.md       # Common issues and solutions
+    ├── TROUBLESHOOTING.md       # Common issues and solutions
+    └── EMAIL_POPULATION.md      # Email population tool guide
 ```
 
 ---
@@ -61,11 +66,11 @@ This opens an interactive menu that guides you through all operations:
 
 ```
 ╔══════════════════════════════════════════════════════════════╗
-║   SharePoint Sites Management Tool                           ║
+║   M365 Environment Population Tool                           ║
 ╚══════════════════════════════════════════════════════════════╝
 
   [0] ✓ Check & Install Prerequisites    ← START HERE!
-      Azure CLI, Terraform, Azure Login
+      Azure CLI, Terraform, Azure Login, PyYAML
 
   ────────────────────────────────────────────────────────────
   [1] 🏗️  Create SharePoint Sites
@@ -75,8 +80,11 @@ This opens an interactive menu that guides you through all operations:
   ────────────────────────────────────────────────────────────
   [4] 📋 List SharePoint Sites
   [5] 📁 List Files in Sites
+  [6] 📧 Populate Mailboxes with Emails
+  [7] 🗑️  Delete Emails from Mailboxes
+  [8] 📬 List Mailboxes
 
-  [A] 🔐 Manage App Registration         ← For SharePoint permissions
+  [A] 🔐 Manage App Registration         ← For SharePoint/Mail permissions
   [C] ⚙️  Edit Configuration
   [H] ❓ Help & Documentation
   [Q] 🚪 Quit

@@ -1,0 +1,309 @@
+# =============================================================================
+# M365 Email Population - Mailboxes Configuration
+# =============================================================================
+# This file defines the mailboxes to populate with realistic emails.
+# 
+# INSTRUCTIONS:
+# 1. Add your users under the 'users' section with their UPN and role
+# 2. The domain should match your tenant in environments.json
+# 3. Adjust settings as needed for your scenario
+# =============================================================================
+
+# Global settings for email population
+settings:
+  # Default number of emails per mailbox (can be overridden per user)
+  default_email_count: 50
+  
+  # Date range for backdating emails (in months)
+  date_range_months: 12
+  
+  # Include Microsoft 365 sensitivity labels
+  include_sensitivity_labels: true
+  
+  # Email type distribution (must sum to 100)
+  email_distribution:
+    newsletters: 20
+    links: 20
+    attachments: 20
+    organisational: 20
+    interdepartmental: 20
+  
+  # Threading settings
+  threading:
+    enabled: true
+    single_email_percentage: 60
+    reply_chain_percentage: 25
+    forward_chain_percentage: 10
+    reply_all_percentage: 5
+    max_thread_depth: 5
+  
+  # Sender distribution
+  sender_distribution:
+    internal_users: 60
+    internal_system: 20
+    external: 20
+  
+  # Date distribution settings
+  date_settings:
+    business_hours_percentage: 85
+    weekday_percentage: 90
+    recent_bias: true  # More emails in recent months
+
+# =============================================================================
+# User Definitions
+# =============================================================================
+# Each user requires:
+#   - upn: User Principal Name (email address)
+#   - role: Job title
+# Optional:
+#   - department: Department name (auto-mapped if not specified)
+#   - email_volume: high/medium/low or specific number
+#   - receives_from: List of departments this user receives emails from
+# =============================================================================
+
+users:
+  # Example users - REPLACE WITH YOUR ACTUAL USERS
+  # The domain should match your M365 tenant
+  
+  - upn: hemal.desai@adaptgbmgthdfeb26.onmicrosoft.com
+    role: CEO
+    department: Executive Leadership
+    email_volume: high
+    receives_from:
+      - Executive Leadership
+      - Finance Department
+      - Human Resources
+      - IT Department
+      - All Departments
+    
+  - upn: ashley.kingscote@adaptgbmgthdfeb26.onmicrosoft.com
+    role: Head of IT
+    department: IT Department
+    email_volume: high
+    receives_from:
+      - IT Department
+      - Executive Leadership
+      - All Departments
+      - External Vendors
+
+  # Add more users following the same pattern:
+  # - upn: user@yourtenant.onmicrosoft.com
+  #   role: Job Title
+  #   department: Department Name
+  #   email_volume: high  # high, medium, low, or specific number
+
+# =============================================================================
+# Department Configuration
+# =============================================================================
+# Maps departments to SharePoint sites and defines internal senders
+# =============================================================================
+
+departments:
+  Executive Leadership:
+    sharepoint_site: executive-leadership
+    system_email: executive-office@{domain}
+    internal_senders:
+      - role: CEO
+        display_name: "{first_name} {last_name}"
+      - role: CFO
+        display_name: "{first_name} {last_name}"
+      - role: COO
+        display_name: "{first_name} {last_name}"
+    
+  IT Department:
+    sharepoint_site: it-department
+    system_email: it-support@{domain}
+    internal_senders:
+      - role: Head of IT
+        display_name: "{first_name} {last_name}"
+      - role: IT Manager
+        display_name: "{first_name} {last_name}"
+      - role: System Administrator
+        display_name: "{first_name} {last_name}"
+    
+  Human Resources:
+    sharepoint_site: human-resources
+    system_email: hr@{domain}
+    internal_senders:
+      - role: HR Director
+        display_name: "{first_name} {last_name}"
+      - role: HR Manager
+        display_name: "{first_name} {last_name}"
+      - role: Recruitment Specialist
+        display_name: "{first_name} {last_name}"
+    
+  Finance Department:
+    sharepoint_site: finance-department
+    system_email: finance@{domain}
+    internal_senders:
+      - role: Finance Director
+        display_name: "{first_name} {last_name}"
+      - role: Financial Controller
+        display_name: "{first_name} {last_name}"
+      - role: Accounts Manager
+        display_name: "{first_name} {last_name}"
+    
+  Marketing Department:
+    sharepoint_site: marketing-department
+    system_email: marketing@{domain}
+    internal_senders:
+      - role: Marketing Director
+        display_name: "{first_name} {last_name}"
+      - role: Marketing Manager
+        display_name: "{first_name} {last_name}"
+    
+  Sales Department:
+    sharepoint_site: sales-department
+    system_email: sales@{domain}
+    internal_senders:
+      - role: Sales Director
+        display_name: "{first_name} {last_name}"
+      - role: Sales Manager
+        display_name: "{first_name} {last_name}"
+    
+  Legal & Compliance:
+    sharepoint_site: legal-compliance
+    system_email: legal@{domain}
+    internal_senders:
+      - role: General Counsel
+        display_name: "{first_name} {last_name}"
+      - role: Compliance Officer
+        display_name: "{first_name} {last_name}"
+    
+  Operations Department:
+    sharepoint_site: operations-department
+    system_email: operations@{domain}
+    internal_senders:
+      - role: Operations Director
+        display_name: "{first_name} {last_name}"
+      - role: Operations Manager
+        display_name: "{first_name} {last_name}"
+    
+  Customer Service:
+    sharepoint_site: customer-service
+    system_email: support@{domain}
+    internal_senders:
+      - role: Customer Service Manager
+        display_name: "{first_name} {last_name}"
+
+  Training & Development:
+    sharepoint_site: training-development
+    system_email: training@{domain}
+    internal_senders:
+      - role: Training Manager
+        display_name: "{first_name} {last_name}"
+
+  Project Management Office:
+    sharepoint_site: project-management-office
+    system_email: pmo@{domain}
+    internal_senders:
+      - role: PMO Director
+        display_name: "{first_name} {last_name}"
+
+  Research & Development:
+    sharepoint_site: research-development
+    system_email: rnd@{domain}
+    internal_senders:
+      - role: R&D Director
+        display_name: "{first_name} {last_name}"
+
+# =============================================================================
+# External Senders Configuration
+# =============================================================================
+# Defines external email sources for newsletters and vendor communications
+# =============================================================================
+
+external_senders:
+  newsletters:
+    - name: "Tech Industry Weekly"
+      email: newsletter@techindustryweekly.com
+      type: industry_news
+      
+    - name: "HR Insights"
+      email: updates@hrinsights.com
+      type: hr_newsletter
+      
+    - name: "Financial Times"
+      email: newsletters@ft.com
+      type: finance_news
+      
+    - name: "Microsoft 365 Updates"
+      email: no-reply@microsoft.com
+      type: product_updates
+      
+    - name: "LinkedIn"
+      email: messages-noreply@linkedin.com
+      type: social_professional
+
+    - name: "Gartner Research"
+      email: research@gartner.com
+      type: industry_research
+
+    - name: "Harvard Business Review"
+      email: newsletters@hbr.org
+      type: business_insights
+      
+  vendors:
+    - name: "Acme Software Solutions"
+      email: support@acmesoftware.com
+      type: vendor_support
+      
+    - name: "CloudFirst Services"
+      email: accounts@cloudfirst.io
+      type: vendor_billing
+      
+    - name: "SecureIT Partners"
+      email: alerts@secureitpartners.com
+      type: security_vendor
+
+    - name: "DataPro Analytics"
+      email: notifications@datapro.com
+      type: analytics_vendor
+
+# =============================================================================
+# Sensitivity Labels
+# =============================================================================
+# Microsoft 365 sensitivity label configuration
+# =============================================================================
+
+sensitivity_labels:
+  general:
+    name: "General"
+    percentage: 50
+    applies_to:
+      - newsletters
+      - links
+      
+  internal:
+    name: "Internal"
+    percentage: 30
+    applies_to:
+      - organisational
+      - interdepartmental
+      
+  confidential:
+    name: "Confidential"
+    percentage: 15
+    applies_to:
+      - attachments
+    departments:
+      - Human Resources
+      - Finance Department
+      - Legal & Compliance
+      
+  highly_confidential:
+    name: "Highly Confidential"
+    percentage: 5
+    applies_to:
+      - attachments
+    departments:
+      - Executive Leadership
+
+# =============================================================================
+# Email Volume Mappings
+# =============================================================================
+
+volume_mappings:
+  high: 100
+  medium: 50
+  low: 25

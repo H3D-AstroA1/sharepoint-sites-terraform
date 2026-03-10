@@ -105,18 +105,19 @@ def clear_screen() -> None:
     os.system('cls' if os.name == 'nt' else 'clear')
 
 def print_logo() -> None:
-    """Print the SharePoint logo/banner."""
+    """Print the M365 management logo/banner."""
     print()
     print(f"  {Colors.CYAN}╔══════════════════════════════════════════════════════════════╗{Colors.NC}")
     print(f"  {Colors.CYAN}║{Colors.NC}                                                              {Colors.CYAN}║{Colors.NC}")
-    print(f"  {Colors.CYAN}║{Colors.NC}   {Colors.GREEN}███████╗{Colors.NC}{Colors.BLUE}██╗  ██╗{Colors.NC}{Colors.YELLOW}  █████╗ {Colors.NC}{Colors.MAGENTA}██████╗ {Colors.NC}{Colors.CYAN}███████╗{Colors.NC}              {Colors.CYAN}║{Colors.NC}")
-    print(f"  {Colors.CYAN}║{Colors.NC}   {Colors.GREEN}██╔════╝{Colors.NC}{Colors.BLUE}██║  ██║{Colors.NC}{Colors.YELLOW} ██╔══██╗{Colors.NC}{Colors.MAGENTA}██╔══██╗{Colors.NC}{Colors.CYAN}██╔════╝{Colors.NC}              {Colors.CYAN}║{Colors.NC}")
-    print(f"  {Colors.CYAN}║{Colors.NC}   {Colors.GREEN}███████╗{Colors.NC}{Colors.BLUE}███████║{Colors.NC}{Colors.YELLOW} ███████║{Colors.NC}{Colors.MAGENTA}██████╔╝{Colors.NC}{Colors.CYAN}█████╗  {Colors.NC}              {Colors.CYAN}║{Colors.NC}")
-    print(f"  {Colors.CYAN}║{Colors.NC}   {Colors.GREEN}╚════██║{Colors.NC}{Colors.BLUE}██╔══██║{Colors.NC}{Colors.YELLOW} ██╔══██║{Colors.NC}{Colors.MAGENTA}██╔══██╗{Colors.NC}{Colors.CYAN}██╔══╝  {Colors.NC}              {Colors.CYAN}║{Colors.NC}")
-    print(f"  {Colors.CYAN}║{Colors.NC}   {Colors.GREEN}███████║{Colors.NC}{Colors.BLUE}██║  ██║{Colors.NC}{Colors.YELLOW} ██║  ██║{Colors.NC}{Colors.MAGENTA}██║  ██║{Colors.NC}{Colors.CYAN}███████╗{Colors.NC}              {Colors.CYAN}║{Colors.NC}")
-    print(f"  {Colors.CYAN}║{Colors.NC}   {Colors.GREEN}╚══════╝{Colors.NC}{Colors.BLUE}╚═╝  ╚═╝{Colors.NC}{Colors.YELLOW} ╚═╝  ╚═╝{Colors.NC}{Colors.MAGENTA}╚═╝  ╚═╝{Colors.NC}{Colors.CYAN}╚══════╝{Colors.NC}              {Colors.CYAN}║{Colors.NC}")
+    print(f"  {Colors.CYAN}║{Colors.NC}   {Colors.GREEN}███╗   ███╗{Colors.NC}{Colors.BLUE}██████╗ {Colors.NC}{Colors.YELLOW} ██████╗ {Colors.NC}{Colors.MAGENTA}███████╗{Colors.NC}                  {Colors.CYAN}║{Colors.NC}")
+    print(f"  {Colors.CYAN}║{Colors.NC}   {Colors.GREEN}████╗ ████║{Colors.NC}{Colors.BLUE}╚════██╗{Colors.NC}{Colors.YELLOW}██╔════╝ {Colors.NC}{Colors.MAGENTA}██╔════╝{Colors.NC}                  {Colors.CYAN}║{Colors.NC}")
+    print(f"  {Colors.CYAN}║{Colors.NC}   {Colors.GREEN}██╔████╔██║{Colors.NC}{Colors.BLUE} █████╔╝{Colors.NC}{Colors.YELLOW}███████╗ {Colors.NC}{Colors.MAGENTA}███████╗{Colors.NC}                  {Colors.CYAN}║{Colors.NC}")
+    print(f"  {Colors.CYAN}║{Colors.NC}   {Colors.GREEN}██║╚██╔╝██║{Colors.NC}{Colors.BLUE} ╚═══██╗{Colors.NC}{Colors.YELLOW}██╔═══██╗{Colors.NC}{Colors.MAGENTA}╚════██║{Colors.NC}                  {Colors.CYAN}║{Colors.NC}")
+    print(f"  {Colors.CYAN}║{Colors.NC}   {Colors.GREEN}██║ ╚═╝ ██║{Colors.NC}{Colors.BLUE}██████╔╝{Colors.NC}{Colors.YELLOW}╚██████╔╝{Colors.NC}{Colors.MAGENTA}███████║{Colors.NC}                  {Colors.CYAN}║{Colors.NC}")
+    print(f"  {Colors.CYAN}║{Colors.NC}   {Colors.GREEN}╚═╝     ╚═╝{Colors.NC}{Colors.BLUE}╚═════╝ {Colors.NC}{Colors.YELLOW} ╚═════╝ {Colors.NC}{Colors.MAGENTA}╚══════╝{Colors.NC}                  {Colors.CYAN}║{Colors.NC}")
     print(f"  {Colors.CYAN}║{Colors.NC}                                                              {Colors.CYAN}║{Colors.NC}")
-    print(f"  {Colors.CYAN}║{Colors.NC}   {Colors.WHITE}{Colors.BOLD}SharePoint Sites Management Tool{Colors.NC}                         {Colors.CYAN}║{Colors.NC}")
+    print(f"  {Colors.CYAN}║{Colors.NC}   {Colors.WHITE}{Colors.BOLD}M365 Environment Population Tool{Colors.NC}                         {Colors.CYAN}║{Colors.NC}")
+    print(f"  {Colors.CYAN}║{Colors.NC}   {Colors.DIM}SharePoint Sites + Email Mailboxes{Colors.NC}                        {Colors.CYAN}║{Colors.NC}")
     print(f"  {Colors.CYAN}║{Colors.NC}   {Colors.DIM}Terraform + Microsoft Graph API{Colors.NC}                           {Colors.CYAN}║{Colors.NC}")
     print(f"  {Colors.CYAN}║{Colors.NC}                                                              {Colors.CYAN}║{Colors.NC}")
     print(f"  {Colors.CYAN}╚══════════════════════════════════════════════════════════════╝{Colors.NC}")
@@ -391,8 +392,8 @@ def install_terraform() -> bool:
 # Azure CLI App ID (first-party Microsoft app)
 AZURE_CLI_APP_ID = "04b07795-8ddb-461a-bbee-02f9e1bf7b46"
 
-# Our custom app name for SharePoint management
-CUSTOM_APP_NAME = "SharePoint-Sites-Terraform-Tool"
+# Our custom app name for M365 environment management (SharePoint + Email)
+CUSTOM_APP_NAME = "M365-Environment-Population-Tool"
 
 # Config file to store custom app details
 APP_CONFIG_FILE = SCRIPT_DIR / ".app_config.json"
@@ -403,20 +404,26 @@ MICROSOFT_GRAPH_API_ID = "00000003-0000-0000-c000-000000000000"
 # Microsoft Graph API permission IDs (Application permissions)
 # These are the GUIDs for the specific permissions we need
 GRAPH_PERMISSION_IDS = {
+    # SharePoint permissions
     "Sites.Read.All": "332a536c-c7ef-4017-ab91-336970924f0d",
     "Sites.ReadWrite.All": "9492366f-7969-46a4-8d15-ed1a20078fff",
     "Files.ReadWrite.All": "75359482-378d-4052-8f01-80520e7db3cd",
     "Group.Read.All": "5b567255-7703-4780-807c-7be8301ae99b",
-    "Group.ReadWrite.All": "62a82d76-70ea-41e2-9197-370581804d09"
+    "Group.ReadWrite.All": "62a82d76-70ea-41e2-9197-370581804d09",
+    # Mail permissions (for email population)
+    "Mail.ReadWrite": "e2a3a72e-5f79-4c64-b1b1-878b674786c9",
+    "User.Read.All": "df021288-bdef-4463-88db-98f22de89214"
 }
 
-# Required permissions for SharePoint operations
+# Required permissions for SharePoint and Email operations
 REQUIRED_GRAPH_PERMISSIONS = [
     "Sites.Read.All",
     "Sites.ReadWrite.All",
     "Files.ReadWrite.All",
     "Group.Read.All",
-    "Group.ReadWrite.All"
+    "Group.ReadWrite.All",
+    "Mail.ReadWrite",
+    "User.Read.All"
 ]
 
 def get_graph_access_token_via_client_credentials(app_config: Dict[str, Any]) -> Optional[str]:
@@ -907,6 +914,84 @@ def delete_custom_app() -> bool:
         print_error(f"Failed to delete app: {e}")
         return False
 
+def update_app_permissions() -> bool:
+    """Update permissions on an existing app registration."""
+    az_path = find_azure_cli_path()
+    if not az_path:
+        print_error("Azure CLI not found")
+        return False
+    
+    # Get app ID from config or find existing app
+    config = load_app_config()
+    if not config:
+        existing_app = find_existing_app()
+        if existing_app:
+            app_id = existing_app.get("appId")
+        else:
+            print_error("No existing app registration found. Use option [1] to create one.")
+            return False
+    else:
+        app_id = config.get("app_id")
+    
+    if not app_id:
+        print_error("Could not determine app ID")
+        return False
+    
+    print()
+    print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+    print(f"  {Colors.WHITE}{Colors.BOLD}Updating App Permissions{Colors.NC}")
+    print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+    print()
+    print(f"  {Colors.WHITE}App ID:{Colors.NC} {app_id}")
+    print()
+    print(f"  {Colors.WHITE}Adding permissions:{Colors.NC}")
+    
+    added_count = 0
+    skipped_count = 0
+    
+    for perm_name, perm_id in GRAPH_PERMISSION_IDS.items():
+        try:
+            add_perm_result = subprocess.run(
+                [az_path, "ad", "app", "permission", "add",
+                 "--id", app_id,
+                 "--api", MICROSOFT_GRAPH_API_ID,
+                 "--api-permissions", f"{perm_id}=Role"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if add_perm_result.returncode == 0:
+                print(f"    {Colors.GREEN}✓{Colors.NC} Added: {perm_name}")
+                added_count += 1
+            else:
+                # Check if permission already exists
+                if "already exists" in add_perm_result.stderr.lower() or "already been added" in add_perm_result.stderr.lower():
+                    print(f"    {Colors.DIM}○ Already exists: {perm_name}{Colors.NC}")
+                    skipped_count += 1
+                else:
+                    print(f"    {Colors.YELLOW}⚠{Colors.NC} {perm_name}: {add_perm_result.stderr.strip()[:50]}")
+        except Exception as e:
+            print(f"    {Colors.RED}✗{Colors.NC} {perm_name}: {str(e)[:50]}")
+    
+    print()
+    print(f"  {Colors.WHITE}Summary:{Colors.NC}")
+    print(f"    • Added: {added_count} permissions")
+    print(f"    • Already existed: {skipped_count} permissions")
+    
+    # Grant admin consent for the updated permissions
+    print()
+    print(f"  {Colors.WHITE}Granting admin consent for new permissions...{Colors.NC}")
+    
+    if grant_consent_for_custom_app(app_id):
+        print(f"  {Colors.GREEN}✓{Colors.NC} Admin consent granted!")
+        return True
+    else:
+        print(f"  {Colors.YELLOW}⚠{Colors.NC} Could not auto-grant consent.")
+        print(f"  {Colors.DIM}Opening browser for manual consent...{Colors.NC}")
+        open_consent_url_for_custom_app(app_id)
+        return True
+
 def grant_admin_consent_via_cli() -> bool:
     """Try to grant admin consent using Azure CLI (requires admin privileges)."""
     az_path = find_azure_cli_path()
@@ -1063,12 +1148,43 @@ def run_graph_permissions_check() -> None:
         else:
             print(f"  {Colors.DIM}Skipped. You can set up permissions later.{Colors.NC}")
 
+def check_pyyaml_installed() -> tuple:
+    """Check if PyYAML is installed and return (installed, version)."""
+    try:
+        import yaml
+        version = getattr(yaml, '__version__', 'unknown')
+        return True, version
+    except ImportError:
+        return False, None
+
+
+def install_pyyaml() -> bool:
+    """Install PyYAML using pip."""
+    try:
+        print(f"  {Colors.YELLOW}Installing PyYAML...{Colors.NC}")
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "pyyaml>=6.0"],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            print(f"  {Colors.GREEN}✓{Colors.NC} PyYAML installed successfully")
+            return True
+        else:
+            print(f"  {Colors.RED}✗{Colors.NC} Failed to install PyYAML: {result.stderr}")
+            return False
+    except Exception as e:
+        print(f"  {Colors.RED}✗{Colors.NC} Failed to install PyYAML: {e}")
+        return False
+
+
 def check_prerequisites(auto_install: bool = False) -> dict:
     """Check all prerequisites and optionally install missing ones."""
     results = {
         "python": {"installed": True, "version": f"Python {sys.version.split()[0]}"},
         "azure_cli": {"installed": False, "version": None},
         "terraform": {"installed": False, "version": None},
+        "pyyaml": {"installed": False, "version": None},
         "azure_login": {"logged_in": False, "account_info": None},
         "graph_permissions": {"has_permissions": False, "error": None}
     }
@@ -1098,6 +1214,17 @@ def check_prerequisites(auto_install: bool = False) -> dict:
             results["terraform"]["installed"] = True
             results["terraform"]["version"] = get_command_version("terraform")
     
+    # Check PyYAML (required for email population)
+    pyyaml_installed, pyyaml_version = check_pyyaml_installed()
+    if pyyaml_installed:
+        results["pyyaml"]["installed"] = True
+        results["pyyaml"]["version"] = pyyaml_version
+    elif auto_install:
+        if install_pyyaml():
+            pyyaml_installed, pyyaml_version = check_pyyaml_installed()
+            results["pyyaml"]["installed"] = pyyaml_installed
+            results["pyyaml"]["version"] = pyyaml_version
+    
     return results
 
 def display_prerequisites_status(results: dict) -> None:
@@ -1121,6 +1248,12 @@ def display_prerequisites_status(results: dict) -> None:
         print(f"  {Colors.GREEN}✓{Colors.NC} Terraform: {results['terraform']['version']}")
     else:
         print(f"  {Colors.RED}✗{Colors.NC} Terraform: Not installed")
+    
+    # PyYAML (for email population)
+    if results.get("pyyaml", {}).get("installed"):
+        print(f"  {Colors.GREEN}✓{Colors.NC} PyYAML: {results['pyyaml']['version']} (for email population)")
+    else:
+        print(f"  {Colors.YELLOW}⚠{Colors.NC} PyYAML: Not installed (required for email population)")
     
     # Azure Login
     if results["azure_cli"]["installed"]:
@@ -1157,14 +1290,18 @@ def display_prerequisites_status(results: dict) -> None:
         results["azure_cli"]["installed"] and
         results["terraform"]["installed"]
     )
+    pyyaml_ok = results.get("pyyaml", {}).get("installed", False)
     
     graph_ok = results.get("graph_permissions", {}).get("has_permissions", False)
     
-    if all_installed and results["azure_login"]["logged_in"] and graph_ok:
+    if all_installed and pyyaml_ok and results["azure_login"]["logged_in"] and graph_ok:
         print(f"  {Colors.GREEN}{Colors.BOLD}✓ All prerequisites met! Ready to proceed.{Colors.NC}")
     elif all_installed and results["azure_login"]["logged_in"] and not graph_ok:
         print(f"  {Colors.YELLOW}{Colors.BOLD}⚠ Graph API permissions missing.{Colors.NC}")
         print(f"  {Colors.DIM}  Setup will be offered below, or use [A] from main menu.{Colors.NC}")
+    elif all_installed and not pyyaml_ok:
+        print(f"  {Colors.YELLOW}{Colors.BOLD}⚠ PyYAML not installed (required for email population).{Colors.NC}")
+        print(f"  {Colors.DIM}  Run 'pip install pyyaml' or select auto-install below.{Colors.NC}")
     elif all_installed:
         print(f"  {Colors.YELLOW}{Colors.BOLD}⚠ Tools installed but not logged into Azure.{Colors.NC}")
         print(f"  {Colors.DIM}  Run 'az login' to authenticate.{Colors.NC}")
@@ -1237,6 +1374,32 @@ def run_prerequisites_check_menu() -> None:
                 except Exception as e:
                     print_error(f"Azure login failed: {e}")
     
+    # Check PyYAML and offer to install if missing
+    pyyaml_status = results.get("pyyaml", {})
+    if not pyyaml_status.get("installed", False):
+        print()
+        print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
+        print(f"  {Colors.WHITE}{Colors.BOLD}PyYAML Installation{Colors.NC}")
+        print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
+        print()
+        print(f"  {Colors.YELLOW}⚠{Colors.NC} PyYAML is required for email population features.")
+        print()
+        print(f"  {Colors.WHITE}Would you like to install PyYAML now?{Colors.NC}")
+        print()
+        print(f"    {Colors.GREEN}[Y]{Colors.NC} Yes, install PyYAML automatically")
+        print(f"    {Colors.RED}[N]{Colors.NC} No, I'll install it later")
+        print()
+        
+        choice = input(f"  {Colors.YELLOW}Choice:{Colors.NC} ").strip().lower()
+        
+        if choice == 'y':
+            print()
+            if install_pyyaml():
+                print_success("PyYAML installed successfully!")
+                results["pyyaml"] = {"installed": True, "version": "installed"}
+            else:
+                print_error("Failed to install PyYAML. Try manually: pip install pyyaml")
+    
     # Check Graph API permissions and automatically grant consent if needed
     if results["azure_login"]["logged_in"]:
         graph_perms = results.get("graph_permissions", {})
@@ -1307,6 +1470,15 @@ def print_menu(prereq_status: dict) -> None:
     print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.MAGENTA}[5]{Colors.NC} {Colors.WHITE}📁 List Files in Sites{Colors.NC}                                {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}View files in SharePoint sites{Colors.NC}                        {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.CYAN}[6]{Colors.NC} {Colors.WHITE}📧 Populate Mailboxes with Emails{Colors.NC}                     {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Add realistic emails to M365 mailboxes{Colors.NC}                 {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.RED}[7]{Colors.NC} {Colors.WHITE}🗑️  Delete Emails from Mailboxes{Colors.NC}                      {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Clean up emails from M365 mailboxes{Colors.NC}                    {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.YELLOW}[8]{Colors.NC} {Colors.WHITE}📬 List Mailboxes{Colors.NC}                                     {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}View configured mailboxes and status{Colors.NC}                   {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}├──────────────────────────────────────────────────────────────┤{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.CYAN}[C]{Colors.NC} {Colors.WHITE}⚙️  Edit Configuration{Colors.NC}                                 {Colors.CYAN}│{Colors.NC}")
@@ -1358,10 +1530,38 @@ def print_help() -> None:
     print(f"    • Purge M365 Groups recycle bin (Azure AD)")
     print(f"    • Purge SharePoint site recycle bin")
     print()
+    print(f"  {Colors.CYAN}{Colors.BOLD}Option 6: Populate Mailboxes with Emails{Colors.NC}")
+    print(f"  {Colors.DIM}─────────────────────────────────────────{Colors.NC}")
+    print(f"  Add realistic emails to M365 mailboxes:")
+    print(f"    • Newsletters, organizational communications, project updates")
+    print(f"    • Emails with attachments (Word, Excel, PowerPoint, PDF)")
+    print(f"    • Email threads (replies, forwards, reply-all)")
+    print(f"    • Backdated over 6-12 months with business hours bias")
+    print(f"    • Microsoft 365 sensitivity labels")
+    print(f"  Configure mailboxes in {Colors.YELLOW}config/mailboxes.yaml{Colors.NC}")
+    print()
+    print(f"  {Colors.RED}{Colors.BOLD}Option 7: Delete Emails from Mailboxes{Colors.NC}")
+    print(f"  {Colors.DIM}───────────────────────────────────────{Colors.NC}")
+    print(f"  Clean up emails from M365 mailboxes:")
+    print(f"    • Delete from specific folders (inbox, sent, drafts)")
+    print(f"    • Delete from specific mailboxes or all mailboxes")
+    print(f"    • Soft delete (to Deleted Items) or permanent delete")
+    print(f"    • Empty Deleted Items folder")
+    print()
+    print(f"  {Colors.YELLOW}{Colors.BOLD}Option 8: List Mailboxes{Colors.NC}")
+    print(f"  {Colors.DIM}─────────────────────────{Colors.NC}")
+    print(f"  View configured mailboxes and their status:")
+    print(f"    • Shows all mailboxes from {Colors.YELLOW}config/mailboxes.yaml{Colors.NC}")
+    print(f"    • Optional validation against Azure AD")
+    print(f"    • Shows email count per mailbox")
+    print(f"    • Department summary")
+    print()
     print(f"  {Colors.YELLOW}{Colors.BOLD}Quick Commands:{Colors.NC}")
     print(f"  {Colors.DIM}────────────────{Colors.NC}")
     print(f"    {Colors.CYAN}python deploy.py --random 10{Colors.NC}     Create 10 random sites")
     print(f"    {Colors.CYAN}python populate_files.py --files 50{Colors.NC}  Add 50 files")
+    print(f"    {Colors.CYAN}python populate_emails.py --all --emails 100{Colors.NC}")
+    print(f"                                      Add 100 emails per mailbox")
     print(f"    {Colors.CYAN}python cleanup.py --list-sites{Colors.NC}    List all sites")
     print(f"    {Colors.CYAN}python cleanup.py --select-files{Colors.NC}  Delete specific files")
     print(f"    {Colors.CYAN}python cleanup.py --delete-sites{Colors.NC}  Delete SharePoint sites")
@@ -1432,6 +1632,9 @@ def manage_app_registration_menu() -> None:
         print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.RED}[3]{Colors.NC} {Colors.WHITE}🗑️  Delete App Registration{Colors.NC}                            {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Remove the custom app from Azure AD{Colors.NC}                   {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.BLUE}[4]{Colors.NC} {Colors.WHITE}🔄 Update Permissions{Colors.NC}                                  {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Add Mail permissions to existing app{Colors.NC}                  {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}├──────────────────────────────────────────────────────────────┤{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.WHITE}[B]{Colors.NC} {Colors.WHITE}← Back to Main Menu{Colors.NC}                                  {Colors.CYAN}│{Colors.NC}")
@@ -1489,16 +1692,24 @@ def manage_app_registration_menu() -> None:
             
             print(f"  {Colors.RED}{Colors.BOLD}⚠️  WARNING: This will delete the app registration!{Colors.NC}")
             print()
+            print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
+            print(f"  {Colors.WHITE}App Details:{Colors.NC}")
             if app_config:
-                print(f"  App to delete: {app_config.get('app_id', 'Unknown')}")
+                print(f"    • Name:      {Colors.YELLOW}{app_config.get('display_name', CUSTOM_APP_NAME)}{Colors.NC}")
+                print(f"    • App ID:    {app_config.get('app_id', 'Unknown')}")
+                print(f"    • Tenant:    {app_config.get('tenant_id', 'Unknown')}")
             elif existing_app:
-                print(f"  App to delete: {existing_app.get('appId', 'Unknown')}")
+                print(f"    • Name:      {Colors.YELLOW}{existing_app.get('displayName', CUSTOM_APP_NAME)}{Colors.NC}")
+                print(f"    • App ID:    {existing_app.get('appId', 'Unknown')}")
+            print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
             print()
             print(f"  {Colors.YELLOW}This action cannot be undone.{Colors.NC}")
-            print(f"  {Colors.DIM}You will need to set up the app again to use SharePoint features.{Colors.NC}")
+            print(f"  {Colors.DIM}You will need to set up the app again to use SharePoint/Email features.{Colors.NC}")
+            print()
+            print(f"  Type '{Colors.RED}DELETE{Colors.NC}' to confirm, or '{Colors.GREEN}C{Colors.NC}' to cancel:")
             print()
             
-            confirm = input(f"  Type 'DELETE' to confirm: ").strip()
+            confirm = input(f"  {Colors.YELLOW}Your choice:{Colors.NC} ").strip()
             
             if confirm == 'DELETE':
                 if delete_custom_app():
@@ -1507,9 +1718,66 @@ def manage_app_registration_menu() -> None:
                 else:
                     print()
                     print(f"  {Colors.RED}✗{Colors.NC} Failed to delete app registration.")
+            elif confirm.upper() == 'C':
+                print()
+                print(f"  {Colors.GREEN}✓{Colors.NC} Operation cancelled. No changes made.")
             else:
                 print()
-                print(f"  {Colors.DIM}Deletion cancelled.{Colors.NC}")
+                print(f"  {Colors.DIM}Deletion cancelled. (Type 'DELETE' to confirm or 'C' to cancel){Colors.NC}")
+            
+            input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            
+        elif choice == '4':
+            # Update permissions on existing app
+            print()
+            if not check_azure_login():
+                print_error("Please log into Azure first")
+                input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+                continue
+            
+            # Check if app exists
+            app_config = load_app_config()
+            existing_app = find_existing_app()
+            
+            if not app_config and not existing_app:
+                print_error("No existing app registration found.")
+                print_info("Use option [1] to create a new app registration first.")
+                input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+                continue
+            
+            print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
+            print(f"  {Colors.WHITE}App to Update:{Colors.NC}")
+            if app_config:
+                print(f"    • Name:      {Colors.YELLOW}{app_config.get('display_name', CUSTOM_APP_NAME)}{Colors.NC}")
+                print(f"    • App ID:    {app_config.get('app_id', 'Unknown')}")
+                print(f"    • Tenant:    {app_config.get('tenant_id', 'Unknown')}")
+            elif existing_app:
+                print(f"    • Name:      {Colors.YELLOW}{existing_app.get('displayName', CUSTOM_APP_NAME)}{Colors.NC}")
+                print(f"    • App ID:    {existing_app.get('appId', 'Unknown')}")
+            print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
+            print()
+            print(f"  {Colors.WHITE}This will add the following permissions:{Colors.NC}")
+            print(f"    • {Colors.GREEN}Mail.ReadWrite{Colors.NC} - Read and write mail in all mailboxes")
+            print(f"    • {Colors.GREEN}User.Read.All{Colors.NC} - Read all users' profiles")
+            print()
+            print(f"  {Colors.DIM}These permissions are required for email population features.{Colors.NC}")
+            print()
+            
+            confirm = input(f"  {Colors.YELLOW}Proceed? (Y/N/C to cancel):{Colors.NC} ").strip().lower()
+            
+            if confirm == 'y':
+                if update_app_permissions():
+                    print()
+                    print(f"  {Colors.GREEN}✓{Colors.NC} Permissions updated successfully!")
+                else:
+                    print()
+                    print(f"  {Colors.YELLOW}⚠{Colors.NC} Some permissions may need manual consent.")
+            elif confirm in ['n', 'c']:
+                print()
+                print(f"  {Colors.GREEN}✓{Colors.NC} Operation cancelled. No changes made.")
+            else:
+                print()
+                print(f"  {Colors.DIM}Update cancelled. (Enter Y to proceed, N or C to cancel){Colors.NC}")
             
             input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
             
@@ -1999,12 +2267,223 @@ def list_files_in_sites_menu() -> None:
 
 
 # ============================================================================
+# MAILBOX LISTING
+# ============================================================================
+
+def list_mailboxes_menu() -> None:
+    """List mailboxes from configuration with validation status."""
+    import urllib.request
+    import urllib.error
+    
+    clear_screen()
+    print()
+    print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+    print(f"  {Colors.CYAN}{'📬 CONFIGURED MAILBOXES':^60}{Colors.NC}")
+    print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+    print()
+    
+    # Check if PyYAML is installed
+    yaml_installed, _ = check_pyyaml_installed()
+    if not yaml_installed:
+        print(f"  {Colors.RED}✗{Colors.NC} PyYAML is not installed")
+        print(f"  {Colors.YELLOW}ℹ{Colors.NC} Run option [0] to install prerequisites")
+        input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        return
+    
+    import yaml
+    
+    # Load mailboxes configuration
+    mailboxes_file = SCRIPT_DIR.parent / "config" / "mailboxes.yaml"
+    if not mailboxes_file.exists():
+        print(f"  {Colors.RED}✗{Colors.NC} Mailboxes configuration not found")
+        print(f"  {Colors.DIM}Expected: {mailboxes_file}{Colors.NC}")
+        input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        return
+    
+    try:
+        with open(mailboxes_file, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+    except Exception as e:
+        print(f"  {Colors.RED}✗{Colors.NC} Failed to load mailboxes.yaml: {e}")
+        input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        return
+    
+    users = config.get("users", [])
+    if not users:
+        print(f"  {Colors.YELLOW}ℹ{Colors.NC} No mailboxes configured in mailboxes.yaml")
+        input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        return
+    
+    print(f"  {Colors.WHITE}Found {len(users)} mailboxes in configuration{Colors.NC}")
+    print()
+    
+    # Ask if user wants to validate against Azure AD
+    print(f"  {Colors.WHITE}Would you like to validate mailboxes against Azure AD?{Colors.NC}")
+    print(f"  {Colors.DIM}(This will check if mailboxes exist and are accessible){Colors.NC}")
+    print()
+    print(f"    {Colors.GREEN}[1]{Colors.NC} Yes, validate mailboxes")
+    print(f"    {Colors.BLUE}[2]{Colors.NC} No, just show configuration")
+    print()
+    
+    validate_choice = input(f"  {Colors.YELLOW}Enter your choice:{Colors.NC} ").strip()
+    validate = validate_choice == '1'
+    
+    clear_screen()
+    print()
+    print(f"  {Colors.CYAN}{'═' * 70}{Colors.NC}")
+    print(f"  {Colors.CYAN}{'📬 MAILBOX LIST':^70}{Colors.NC}")
+    print(f"  {Colors.CYAN}{'═' * 70}{Colors.NC}")
+    print()
+    
+    # Get access token if validating
+    token = None
+    if validate:
+        print(f"  {Colors.WHITE}Connecting to Microsoft Graph...{Colors.NC}")
+        token = get_graph_access_token()
+        
+        if not token:
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} Could not get access token - showing config only")
+            validate = False
+        else:
+            print(f"  {Colors.GREEN}✓{Colors.NC} Connected to Microsoft Graph")
+        print()
+    
+    # Display mailboxes - different headers for validation vs config-only
+    if validate:
+        print(f"  {Colors.WHITE}{'#':<4} {'UPN':<35} {'Department':<15} {'Status':<15}{Colors.NC}")
+    else:
+        print(f"  {Colors.WHITE}{'#':<4} {'UPN':<35} {'Department':<15} {'Role':<20}{Colors.NC}")
+    print(f"  {Colors.DIM}{'─' * 70}{Colors.NC}")
+    
+    valid_count = 0
+    invalid_count = 0
+    
+    for idx, user in enumerate(users, 1):
+        upn = user.get("upn", "Unknown")
+        department = user.get("department", "N/A")
+        role = user.get("role", "N/A")
+        
+        # Truncate long values
+        if len(upn) > 33:
+            upn_display = upn[:30] + "..."
+        else:
+            upn_display = upn
+        
+        if len(department) > 13:
+            dept_display = department[:10] + "..."
+        else:
+            dept_display = department
+        
+        if validate and token:
+            # Validate mailbox against Azure AD
+            status = validate_mailbox_status(upn, token)
+            if status["valid"]:
+                valid_count += 1
+                status_display = f"{Colors.GREEN}✓ Valid{Colors.NC}"
+                if status.get("email_count", 0) > 0:
+                    status_display += f" ({status['email_count']} emails)"
+            else:
+                invalid_count += 1
+                status_display = f"{Colors.RED}✗ {status.get('error', 'Invalid')}{Colors.NC}"
+            print(f"  {idx:<4} {upn_display:<35} {dept_display:<15} {status_display}")
+        else:
+            # Show role instead of status when not validating
+            if len(role) > 18:
+                role_display = role[:15] + "..."
+            else:
+                role_display = role
+            print(f"  {idx:<4} {upn_display:<35} {dept_display:<15} {role_display}")
+    
+    print(f"  {Colors.DIM}{'─' * 70}{Colors.NC}")
+    print()
+    
+    # Summary
+    if validate:
+        print(f"  {Colors.WHITE}Summary:{Colors.NC}")
+        print(f"    {Colors.GREEN}✓{Colors.NC} Valid mailboxes: {valid_count}")
+        print(f"    {Colors.RED}✗{Colors.NC} Invalid mailboxes: {invalid_count}")
+        print(f"    {Colors.DIM}Total configured: {len(users)}{Colors.NC}")
+    else:
+        print(f"  {Colors.WHITE}Total configured mailboxes: {len(users)}{Colors.NC}")
+    
+    # Show departments summary
+    departments: Dict[str, int] = {}
+    for user in users:
+        dept = user.get("department", "Unknown")
+        departments[dept] = departments.get(dept, 0) + 1
+    
+    if departments:
+        print()
+        print(f"  {Colors.WHITE}Departments:{Colors.NC}")
+        for dept, count in sorted(departments.items()):
+            print(f"    • {dept}: {count} mailbox{'es' if count > 1 else ''}")
+    
+    print()
+    input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+
+
+def validate_mailbox_status(upn: str, token: str) -> Dict[str, Any]:
+    """Validate a mailbox against Azure AD and get email count."""
+    import urllib.request
+    import urllib.error
+    
+    result: Dict[str, Any] = {"valid": False, "error": None, "email_count": 0}
+    
+    try:
+        # Check if user exists
+        user_url = f"https://graph.microsoft.com/v1.0/users/{upn}"
+        req = urllib.request.Request(user_url)
+        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Content-Type", "application/json")
+        
+        with urllib.request.urlopen(req, timeout=10) as response:
+            # User exists, now check mailbox
+            pass
+        
+        # Try to get email count
+        try:
+            mail_url = f"https://graph.microsoft.com/v1.0/users/{upn}/mailFolders/inbox/messages?$count=true&$top=1"
+            mail_req = urllib.request.Request(mail_url)
+            mail_req.add_header("Authorization", f"Bearer {token}")
+            mail_req.add_header("Content-Type", "application/json")
+            mail_req.add_header("ConsistencyLevel", "eventual")
+            
+            with urllib.request.urlopen(mail_req, timeout=10) as mail_response:
+                mail_data = json.loads(mail_response.read().decode())
+                result["email_count"] = mail_data.get("@odata.count", len(mail_data.get("value", [])))
+                result["valid"] = True
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                result["error"] = "No mailbox"
+            elif e.code == 403:
+                result["valid"] = True  # User exists but no mail permission
+                result["error"] = None
+            else:
+                result["valid"] = True  # User exists
+        except Exception:
+            result["valid"] = True  # User exists, mail check failed
+            
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            result["error"] = "Not found"
+        elif e.code == 403:
+            result["error"] = "No access"
+        else:
+            result["error"] = f"Error {e.code}"
+    except Exception as e:
+        result["error"] = str(e)[:20]
+    
+    return result
+
+
+# ============================================================================
 # CONFIGURATION EDITING
 # ============================================================================
 
 CONFIG_DIR = SCRIPT_DIR.parent / "config"
 ENVIRONMENTS_FILE = CONFIG_DIR / "environments.json"
 SITES_FILE = CONFIG_DIR / "sites.json"
+MAILBOXES_FILE = CONFIG_DIR / "mailboxes.yaml"
 
 def open_file_in_editor(file_path: Path) -> bool:
     """Open a file in the system's default editor."""
@@ -2083,14 +2562,18 @@ def edit_configuration_menu() -> None:
         print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.BLUE}[2]{Colors.NC} {Colors.WHITE}📋 Edit sites.json{Colors.NC}                                    {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Define custom SharePoint sites to create{Colors.NC}             {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
-        print(f"  {Colors.CYAN}├──────────────────────────────────────────────────────────────┤{Colors.NC}")
-        print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
-        print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.YELLOW}[3]{Colors.NC} {Colors.WHITE}👁️  View environments.json{Colors.NC}                            {Colors.CYAN}│{Colors.NC}")
-        print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.YELLOW}[4]{Colors.NC} {Colors.WHITE}👁️  View sites.json{Colors.NC}                                   {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.MAGENTA}[3]{Colors.NC} {Colors.WHITE}📧 Edit mailboxes.yaml{Colors.NC}                                {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Configure email mailboxes for population{Colors.NC}             {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}├──────────────────────────────────────────────────────────────┤{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
-        print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.MAGENTA}[5]{Colors.NC} {Colors.WHITE}➕ Add new environment{Colors.NC}                               {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.YELLOW}[4]{Colors.NC} {Colors.WHITE}👁️  View environments.json{Colors.NC}                            {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.YELLOW}[5]{Colors.NC} {Colors.WHITE}👁️  View sites.json{Colors.NC}                                   {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.YELLOW}[6]{Colors.NC} {Colors.WHITE}👁️  View mailboxes.yaml{Colors.NC}                               {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}├──────────────────────────────────────────────────────────────┤{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.CYAN}[7]{Colors.NC} {Colors.WHITE}➕ Add new environment{Colors.NC}                               {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Interactive wizard to add a tenant{Colors.NC}                   {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.RED}[B]{Colors.NC} {Colors.WHITE}← Back to main menu{Colors.NC}                                 {Colors.CYAN}│{Colors.NC}")
@@ -2115,14 +2598,25 @@ def edit_configuration_menu() -> None:
             input(f"  {Colors.YELLOW}Press Enter when done editing...{Colors.NC}")
             
         elif choice == '3':
+            print()
+            print_info(f"Opening {MAILBOXES_FILE.name} in editor...")
+            if open_file_in_editor(MAILBOXES_FILE):
+                print_success("File opened in editor")
+            input(f"  {Colors.YELLOW}Press Enter when done editing...{Colors.NC}")
+            
+        elif choice == '4':
             view_file_contents(ENVIRONMENTS_FILE)
             input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
             
-        elif choice == '4':
+        elif choice == '5':
             view_file_contents(SITES_FILE)
             input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
             
-        elif choice == '5':
+        elif choice == '6':
+            view_file_contents(MAILBOXES_FILE)
+            input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            
+        elif choice == '7':
             add_environment_wizard()
             
         elif choice == 'b':
@@ -2454,6 +2948,115 @@ def main() -> None:
         elif choice == '5':
             # List Files in Sites
             list_files_in_sites_menu()
+            
+        elif choice == '6':
+            # Populate Mailboxes with Emails
+            clear_screen()
+            print()
+            print(f"  {Colors.CYAN}{Colors.BOLD}📧 Populate Mailboxes with Emails{Colors.NC}")
+            print(f"  {Colors.CYAN}{'─' * 40}{Colors.NC}")
+            print()
+            print(f"  {Colors.WHITE}How would you like to populate emails?{Colors.NC}")
+            print()
+            print(f"    {Colors.GREEN}[1]{Colors.NC} Interactive mode (guided setup)")
+            print(f"    {Colors.BLUE}[2]{Colors.NC} Quick: 50 emails per mailbox (all mailboxes)")
+            print(f"    {Colors.YELLOW}[3]{Colors.NC} Quick: 100 emails per mailbox (all mailboxes)")
+            print(f"    {Colors.MAGENTA}[4]{Colors.NC} Custom: Specify number of emails")
+            print(f"    {Colors.CYAN}[5]{Colors.NC} Custom: Select specific mailboxes")
+            print(f"    {Colors.RED}[B]{Colors.NC} Back to main menu")
+            print()
+            
+            sub_choice = input(f"  {Colors.YELLOW}Enter your choice:{Colors.NC} ").strip().lower()
+            
+            if sub_choice == '1':
+                run_script("populate_emails.py")
+            elif sub_choice == '2':
+                run_script("populate_emails.py", ["--all", "--emails", "50"])
+            elif sub_choice == '3':
+                run_script("populate_emails.py", ["--all", "--emails", "100"])
+            elif sub_choice == '4':
+                print()
+                count = input(f"  {Colors.YELLOW}Number of emails per mailbox (1-500):{Colors.NC} ").strip()
+                if count.isdigit() and 1 <= int(count) <= 500:
+                    run_script("populate_emails.py", ["--all", "--emails", count])
+                else:
+                    print(f"  {Colors.RED}✗{Colors.NC} Invalid number. Must be between 1 and 500.")
+                    input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            elif sub_choice == '5':
+                print()
+                print(f"  {Colors.WHITE}Enter mailbox UPNs (comma-separated):{Colors.NC}")
+                print(f"  {Colors.DIM}Example: user1@contoso.com, user2@contoso.com{Colors.NC}")
+                print()
+                mailboxes = input(f"  {Colors.YELLOW}Mailboxes:{Colors.NC} ").strip()
+                if mailboxes:
+                    print()
+                    count = input(f"  {Colors.YELLOW}Number of emails per mailbox (1-500):{Colors.NC} ").strip()
+                    if count.isdigit() and 1 <= int(count) <= 500:
+                        run_script("populate_emails.py", ["--mailboxes", mailboxes, "--emails", count])
+                    else:
+                        print(f"  {Colors.RED}✗{Colors.NC} Invalid number. Must be between 1 and 500.")
+                        input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+                else:
+                    print(f"  {Colors.RED}✗{Colors.NC} No mailboxes specified.")
+                    input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            # else: back to menu
+            
+        elif choice == '7':
+            # Delete Emails from Mailboxes
+            clear_screen()
+            print()
+            print(f"  {Colors.RED}{Colors.BOLD}🗑️  Delete Emails from Mailboxes{Colors.NC}")
+            print(f"  {Colors.CYAN}{'─' * 40}{Colors.NC}")
+            print()
+            print(f"  {Colors.YELLOW}⚠ WARNING: This will DELETE emails!{Colors.NC}")
+            print()
+            print(f"  {Colors.WHITE}How would you like to delete emails?{Colors.NC}")
+            print()
+            print(f"    {Colors.GREEN}[1]{Colors.NC} Interactive mode (guided setup)")
+            print(f"    {Colors.BLUE}[2]{Colors.NC} Delete from all mailboxes (inbox)")
+            print(f"    {Colors.YELLOW}[3]{Colors.NC} Delete from specific mailboxes")
+            print(f"    {Colors.MAGENTA}[4]{Colors.NC} Empty Deleted Items (all mailboxes)")
+            print(f"    {Colors.RED}[B]{Colors.NC} Back to main menu")
+            print()
+            
+            sub_choice = input(f"  {Colors.YELLOW}Enter your choice:{Colors.NC} ").strip().lower()
+            
+            if sub_choice == '1':
+                run_script("cleanup_emails.py")
+            elif sub_choice == '2':
+                print()
+                print(f"  {Colors.RED}⚠ This will delete ALL emails from inbox in ALL mailboxes!{Colors.NC}")
+                confirm = input(f"  {Colors.YELLOW}Type 'DELETE' to confirm:{Colors.NC} ").strip()
+                if confirm == 'DELETE':
+                    run_script("cleanup_emails.py", ["--all", "--folder", "inbox"])
+                else:
+                    print(f"  {Colors.YELLOW}Operation cancelled{Colors.NC}")
+                    input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            elif sub_choice == '3':
+                print()
+                print(f"  {Colors.WHITE}Enter mailbox UPNs (comma-separated):{Colors.NC}")
+                print(f"  {Colors.DIM}Example: user1@contoso.com, user2@contoso.com{Colors.NC}")
+                print()
+                mailboxes = input(f"  {Colors.YELLOW}Mailboxes:{Colors.NC} ").strip()
+                if mailboxes:
+                    run_script("cleanup_emails.py", ["--mailboxes", mailboxes])
+                else:
+                    print(f"  {Colors.RED}✗{Colors.NC} No mailboxes specified.")
+                    input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            elif sub_choice == '4':
+                print()
+                print(f"  {Colors.RED}⚠ This will PERMANENTLY delete all items in Deleted Items!{Colors.NC}")
+                confirm = input(f"  {Colors.YELLOW}Type 'EMPTY' to confirm:{Colors.NC} ").strip()
+                if confirm == 'EMPTY':
+                    run_script("cleanup_emails.py", ["--all", "--folder", "deleteditems", "--permanent"])
+                else:
+                    print(f"  {Colors.YELLOW}Operation cancelled{Colors.NC}")
+                    input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            # else: back to menu
+            
+        elif choice == '8':
+            # List Mailboxes
+            list_mailboxes_menu()
             
         elif choice == 'c':
             # Edit Configuration
