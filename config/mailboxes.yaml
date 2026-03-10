@@ -21,12 +21,24 @@ settings:
   include_sensitivity_labels: true
   
   # Email type distribution (must sum to 100)
+  # Categories:
+  #   - newsletters: Internal company newsletters
+  #   - links: Emails with SharePoint/web links
+  #   - attachments: Emails with file attachments
+  #   - organisational: Company-wide announcements
+  #   - interdepartmental: Cross-department communications
+  #   - security: Security alerts and notifications
+  #   - spam: Junk/promotional emails (for realism)
+  #   - external_business: Legitimate external business communications
   email_distribution:
-    newsletters: 20
-    links: 20
-    attachments: 20
-    organisational: 20
-    interdepartmental: 20
+    newsletters: 10
+    links: 15
+    attachments: 15
+    organisational: 15
+    interdepartmental: 15
+    security: 8
+    spam: 7
+    external_business: 15
   
   # Threading settings
   threading:
@@ -37,11 +49,19 @@ settings:
     reply_all_percentage: 5
     max_thread_depth: 5
   
-  # Sender distribution
+  # Sender distribution (must sum to 100)
+  # Types:
+  #   - internal_users: Emails from colleagues within the organization
+  #   - internal_system: System notifications (IT, HR systems, etc.)
+  #   - external: Generic external senders (newsletters, vendors)
+  #   - external_spam: Spam/junk emails
+  #   - external_business: Legitimate external business communications
   sender_distribution:
-    internal_users: 60
-    internal_system: 20
-    external: 20
+    internal_users: 50
+    internal_system: 15
+    external: 10
+    external_spam: 10
+    external_business: 15
   
   # Date distribution settings
   date_settings:

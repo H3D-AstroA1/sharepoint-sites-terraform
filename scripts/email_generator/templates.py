@@ -70,6 +70,12 @@ from .templates.spam_templates import (
     SPAM_SENDER_NAMES,
 )
 
+from .templates.external_business_templates import (
+    EXTERNAL_BUSINESS_TEMPLATES,
+    EXTERNAL_BUSINESS_DOMAINS,
+    EXTERNAL_SENDER_PROFILES,
+)
+
 from typing import Dict, List, Any
 
 # =============================================================================
@@ -85,6 +91,7 @@ EMAIL_TEMPLATES: Dict[str, List[Dict[str, Any]]] = {
     "interdepartmental": INTERDEPARTMENTAL_TEMPLATES,
     "security": SECURITY_TEMPLATES,
     "spam": SPAM_TEMPLATES,
+    "external_business": EXTERNAL_BUSINESS_TEMPLATES,
 }
 
 # All templates that support email threading
@@ -147,6 +154,11 @@ __all__ = [
     "SPAM_TEMPLATES",
     "SPAM_SENDER_DOMAINS",
     "SPAM_SENDER_NAMES",
+    
+    # External business templates
+    "EXTERNAL_BUSINESS_TEMPLATES",
+    "EXTERNAL_BUSINESS_DOMAINS",
+    "EXTERNAL_SENDER_PROFILES",
     
     # Combined collections
     "ALL_THREADABLE_TEMPLATES",

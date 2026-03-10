@@ -207,6 +207,8 @@ class EmailContentGenerator:
         
         if sender_type == "external_spam":
             return self._get_spam_sender()
+        elif sender_type == "external_business":
+            return self._get_external_business_sender()
         elif sender_type == "external":
             return self._get_external_sender(template)
         elif sender_type == "internal_system":
@@ -330,6 +332,41 @@ class EmailContentGenerator:
             "title": "External",
             "department": "External",
             "first_name": name.split()[0],
+        }
+    
+    def _get_external_business_sender(self) -> Dict[str, str]:
+        """Get a legitimate external business sender for realistic business communications."""
+        from .templates.external_business_templates import (
+            EXTERNAL_BUSINESS_DOMAINS,
+            EXTERNAL_SENDER_PROFILES,
+        )
+        
+        # Select a random domain and sender profile
+        domain = random.choice(EXTERNAL_BUSINESS_DOMAINS)
+        # Profile is a tuple: (first_name, last_name, title)
+        profile = random.choice(EXTERNAL_SENDER_PROFILES)
+        first_name, last_name, title = profile
+        
+        # Various email formats used by businesses
+        email_formats = [
+            f"{first_name.lower()}.{last_name.lower()}@{domain}",
+            f"{first_name.lower()[0]}{last_name.lower()}@{domain}",
+            f"{first_name.lower()}@{domain}",
+            f"{first_name.lower()}{last_name.lower()[0]}@{domain}",
+        ]
+        email = random.choice(email_formats)
+        
+        # Extract company name from domain (capitalize and clean up)
+        company_parts = domain.split(".")[0].replace("-", " ").replace("_", " ")
+        company_name = " ".join(word.capitalize() for word in company_parts.split())
+        
+        return {
+            "email": email,
+            "name": f"{first_name} {last_name}",
+            "title": title,
+            "department": "External",
+            "first_name": first_name,
+            "company": company_name,
         }
     
     def _generate_date(self) -> datetime:
@@ -672,6 +709,84 @@ class EmailContentGenerator:
         if "{quoted_thread}" in body:
             body = body.replace("{quoted_thread}", "")  # Will be filled by ThreadManager
         
+        # External business content placeholders
+        if "{followup_intro}" in body:
+            body = body.replace("{followup_intro}", self._generate_followup_intro())
+        if "{followup_body}" in body:
+            body = body.replace("{followup_body}", self._generate_followup_body())
+        if "{followup_action}" in body:
+            body = body.replace("{followup_action}", self._generate_followup_action())
+        if "{sender_company}" in body:
+            body = body.replace("{sender_company}", sender.get("company", "Our Company"))
+        if "{sender_phone}" in body:
+            body = body.replace("{sender_phone}", self._generate_phone())
+        if "{proposal_summary}" in body:
+            body = body.replace("{proposal_summary}", self._generate_proposal_summary())
+        if "{proposal_highlights}" in body:
+            body = body.replace("{proposal_highlights}", self._generate_proposal_highlights())
+        if "{proposal_next_steps}" in body:
+            body = body.replace("{proposal_next_steps}", self._generate_proposal_next_steps())
+        if "{meeting_intro}" in body:
+            body = body.replace("{meeting_intro}", self._generate_meeting_intro())
+        if "{meeting_duration}" in body:
+            body = body.replace("{meeting_duration}", random.choice(["15-minute", "30-minute", "45-minute", "1-hour"]))
+        if "{meeting_agenda}" in body:
+            body = body.replace("{meeting_agenda}", self._generate_external_meeting_agenda())
+        if "{meeting_times}" in body:
+            body = body.replace("{meeting_times}", self._generate_meeting_times())
+        if "{project_summary}" in body:
+            body = body.replace("{project_summary}", self._generate_project_summary())
+        if "{project_notes}" in body:
+            body = body.replace("{project_notes}", self._generate_project_notes())
+        if "{invoice_number}" in body:
+            body = body.replace("{invoice_number}", f"{random.randint(10000, 99999)}")
+        if "{month}" in body:
+            body = body.replace("{month}", random.choice(["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]))
+        if "{invoice_details}" in body:
+            body = body.replace("{invoice_details}", self._generate_invoice_details())
+        if "{payment_terms}" in body:
+            body = body.replace("{payment_terms}", self._generate_payment_terms())
+        if "{contract_summary}" in body:
+            body = body.replace("{contract_summary}", self._generate_contract_summary())
+        if "{contract_terms}" in body:
+            body = body.replace("{contract_terms}", self._generate_contract_terms())
+        if "{contract_next_steps}" in body:
+            body = body.replace("{contract_next_steps}", self._generate_contract_next_steps())
+        if "{introduction_context}" in body:
+            body = body.replace("{introduction_context}", self._generate_introduction_context())
+        if "{introduction_body}" in body:
+            body = body.replace("{introduction_body}", self._generate_introduction_body())
+        if "{introduction_cta}" in body:
+            body = body.replace("{introduction_cta}", self._generate_introduction_cta())
+        if "{thank_you_context}" in body:
+            body = body.replace("{thank_you_context}", self._generate_thank_you_context())
+        if "{thank_you_body}" in body:
+            body = body.replace("{thank_you_body}", self._generate_thank_you_body())
+        if "{support_context}" in body:
+            body = body.replace("{support_context}", self._generate_support_context())
+        if "{support_details}" in body:
+            body = body.replace("{support_details}", self._generate_support_details())
+        if "{support_resolution}" in body:
+            body = body.replace("{support_resolution}", self._generate_support_resolution())
+        if "{event_details}" in body:
+            body = body.replace("{event_details}", self._generate_event_details())
+        if "{event_agenda}" in body:
+            body = body.replace("{event_agenda}", self._generate_event_agenda())
+        if "{event_registration}" in body:
+            body = body.replace("{event_registration}", self._generate_event_registration())
+        if "{product_intro}" in body:
+            body = body.replace("{product_intro}", self._generate_product_intro())
+        if "{product_features}" in body:
+            body = body.replace("{product_features}", self._generate_product_features())
+        if "{product_cta}" in body:
+            body = body.replace("{product_cta}", self._generate_product_cta())
+        if "{feedback_intro}" in body:
+            body = body.replace("{feedback_intro}", self._generate_feedback_intro())
+        if "{feedback_questions}" in body:
+            body = body.replace("{feedback_questions}", self._generate_feedback_questions())
+        if "{feedback_cta}" in body:
+            body = body.replace("{feedback_cta}", self._generate_feedback_cta())
+        
         return body
     
     def _select_sensitivity(self, category: str, recipient: Dict) -> str:
@@ -737,8 +852,13 @@ class EmailContentGenerator:
     # ==========================================================================
     
     def _generate_phone(self) -> str:
-        """Generate a realistic phone number."""
-        return f"+1 ({random.randint(200, 999)}) {random.randint(200, 999)}-{random.randint(1000, 9999)}"
+        """Generate a realistic phone number with international variety."""
+        formats = [
+            f"+1 ({random.randint(200, 999)}) {random.randint(200, 999)}-{random.randint(1000, 9999)}",
+            f"+44 {random.randint(20, 79)} {random.randint(1000, 9999)} {random.randint(1000, 9999)}",
+            f"+1-{random.randint(200, 999)}-{random.randint(200, 999)}-{random.randint(1000, 9999)}",
+        ]
+        return random.choice(formats)
     
     def _generate_document_name(self, department: str) -> str:
         """Generate a realistic document name using variations module."""
@@ -2031,3 +2151,510 @@ class EmailContentGenerator:
             <p>Keep pushing boundaries and exploring new possibilities. The future we're building together is bright.</p>""",
         ]
         return random.choice(messages)
+    
+    # =========================================================================
+    # External Business Content Generators
+    # =========================================================================
+    
+    def _generate_followup_intro(self) -> str:
+        """Generate follow-up email introduction."""
+        intros = [
+            "I wanted to follow up on our recent conversation and see how things are progressing on your end.",
+            "Thank you for taking the time to meet with me last week. I've been thinking about our discussion.",
+            "I hope this email finds you well. I wanted to touch base regarding our recent discussions.",
+            "Following up on our call, I wanted to share some additional thoughts and next steps.",
+            "It was great connecting with you recently. I wanted to continue our conversation.",
+            "I hope you had a chance to review the materials I sent over. I wanted to check in.",
+            "Thank you for your time during our meeting. I wanted to follow up on a few items.",
+            "I wanted to reach out and see if you had any questions about what we discussed.",
+            "Following our productive conversation, I wanted to provide some additional information.",
+            "I hope you're doing well. I wanted to circle back on our previous discussion.",
+        ]
+        return random.choice(intros)
+    
+    def _generate_followup_body(self) -> str:
+        """Generate follow-up email body content."""
+        bodies = [
+            "Based on our discussion, I believe there's a strong opportunity for us to work together. I've outlined some initial thoughts on how we might proceed.",
+            "I've had a chance to review the requirements you shared, and I'm confident we can deliver a solution that meets your needs.",
+            "After reflecting on our conversation, I wanted to highlight a few key points that I think are particularly relevant to your situation.",
+            "I've discussed your requirements with our team, and we're excited about the possibility of partnering with you on this initiative.",
+            "I wanted to share some additional resources that might be helpful as you evaluate your options.",
+            "Our team has been working on some ideas based on your feedback, and I'd love to share them with you.",
+            "I've put together some preliminary recommendations that I think could address the challenges you mentioned.",
+            "After our meeting, I did some additional research and found some interesting insights that might be valuable.",
+            "I wanted to provide an update on the items we discussed and outline potential next steps.",
+            "Based on your feedback, I've refined our approach and would like to walk you through the updated proposal.",
+        ]
+        return random.choice(bodies)
+    
+    def _generate_followup_action(self) -> str:
+        """Generate follow-up email call to action."""
+        actions = [
+            "Would you be available for a follow-up call this week to discuss further?",
+            "I'd love to schedule a brief call to answer any questions you might have.",
+            "Please let me know if you'd like me to send over more detailed information.",
+            "I'm happy to arrange a demo or presentation at your convenience.",
+            "Would it be helpful to set up a meeting with our technical team?",
+            "Let me know if you'd like to proceed with the next steps we discussed.",
+            "I'm available to discuss this further whenever works best for your schedule.",
+            "Please feel free to reach out if you need any additional information.",
+            "I'd be happy to provide references or case studies if that would be helpful.",
+            "Let me know how you'd like to proceed, and I'll make the necessary arrangements.",
+        ]
+        return random.choice(actions)
+    
+    def _generate_proposal_summary(self) -> str:
+        """Generate proposal summary content."""
+        summaries = [
+            "Our proposal outlines a comprehensive solution designed to address your specific requirements while maximizing value and minimizing risk.",
+            "We've developed a tailored approach that leverages our expertise and proven methodologies to deliver measurable results.",
+            "This proposal presents a strategic partnership opportunity that aligns with your business objectives and growth plans.",
+            "Our solution combines industry best practices with innovative approaches to help you achieve your goals efficiently.",
+            "We've designed a flexible engagement model that can scale with your needs and adapt to changing requirements.",
+            "The proposed solution addresses the key challenges you've identified while providing a foundation for future growth.",
+            "Our approach focuses on delivering quick wins while building toward long-term strategic objectives.",
+            "This proposal outlines a phased implementation plan that minimizes disruption while maximizing impact.",
+        ]
+        return random.choice(summaries)
+    
+    def _generate_proposal_highlights(self) -> str:
+        """Generate proposal highlights as list items."""
+        highlight_pool = [
+            "Proven track record with similar implementations",
+            "Dedicated project team with relevant expertise",
+            "Flexible pricing options to fit your budget",
+            "Comprehensive training and support included",
+            "Clear milestones and deliverables",
+            "Risk mitigation strategies built into the approach",
+            "Scalable solution that grows with your needs",
+            "Integration with your existing systems",
+            "Ongoing support and maintenance options",
+            "Measurable ROI within the first year",
+            "Industry-leading security and compliance",
+            "Customizable to your specific requirements",
+            "Accelerated timeline with parallel workstreams",
+            "Knowledge transfer to your internal team",
+        ]
+        selected = random.sample(highlight_pool, random.randint(3, 5))
+        return "".join([f"<li>{highlight}</li>" for highlight in selected])
+    
+    def _generate_proposal_next_steps(self) -> str:
+        """Generate proposal next steps content."""
+        next_steps = [
+            "Once you've had a chance to review, I'd suggest we schedule a call to discuss any questions and finalize the scope.",
+            "The next step would be to arrange a meeting with key stakeholders to align on priorities and timeline.",
+            "I recommend we set up a discovery session to dive deeper into your requirements before finalizing the proposal.",
+            "Please review the proposal and let me know if you'd like any modifications before we proceed.",
+            "I'm available to present this proposal to your team and address any questions they might have.",
+            "Once approved, we can begin the onboarding process and kick off the project within two weeks.",
+            "I suggest we schedule a follow-up meeting to discuss the proposal in detail and address any concerns.",
+            "Please share this with your team, and let me know when you'd like to discuss next steps.",
+        ]
+        return random.choice(next_steps)
+    
+    def _generate_meeting_intro(self) -> str:
+        """Generate external meeting request introduction."""
+        intros = [
+            "I hope this message finds you well. I'm reaching out to schedule some time to discuss a potential collaboration.",
+            "I wanted to connect with you regarding an opportunity that I believe could be mutually beneficial.",
+            "Following up on our previous correspondence, I'd like to schedule a call to explore this further.",
+            "I've been following your company's work and would love the opportunity to discuss how we might work together.",
+            "I'm reaching out to see if you'd be available for a brief conversation about your upcoming initiatives.",
+            "I wanted to introduce myself and explore whether there might be an opportunity for us to collaborate.",
+            "Based on our mutual connections, I thought it would be valuable to connect and share ideas.",
+            "I'm reaching out because I believe there's a strong alignment between our organizations.",
+        ]
+        return random.choice(intros)
+    
+    def _generate_external_meeting_agenda(self) -> str:
+        """Generate external meeting agenda items."""
+        agenda_pool = [
+            "Introductions and company overviews",
+            "Discussion of your current challenges and priorities",
+            "Overview of our relevant capabilities and experience",
+            "Exploration of potential collaboration opportunities",
+            "Review of timeline and next steps",
+            "Q&A and open discussion",
+            "Partnership structure and engagement models",
+            "Case studies and success stories",
+            "Technical deep-dive on specific solutions",
+            "Budget and resource considerations",
+            "Implementation approach and methodology",
+            "Support and ongoing relationship",
+        ]
+        selected = random.sample(agenda_pool, random.randint(3, 5))
+        return "".join([f"<li>{item}</li>" for item in selected])
+    
+    def _generate_meeting_times(self) -> str:
+        """Generate proposed meeting times."""
+        from datetime import datetime, timedelta
+        
+        now = datetime.now()
+        times = []
+        
+        # Generate 3 proposed times in the next 2 weeks
+        for i in range(3):
+            days_ahead = random.randint(2, 10)
+            proposed_date = now + timedelta(days=days_ahead)
+            # Skip weekends
+            while proposed_date.weekday() >= 5:
+                proposed_date += timedelta(days=1)
+            
+            hour = random.choice([9, 10, 11, 14, 15, 16])
+            time_str = proposed_date.strftime(f"%A, %B %d at {hour}:00 AM" if hour < 12 else f"%A, %B %d at {hour-12 if hour > 12 else hour}:00 PM")
+            times.append(f"<li>{time_str}</li>")
+        
+        return "".join(times)
+    
+    def _generate_project_summary(self) -> str:
+        """Generate project update summary."""
+        summaries = [
+            "The project is progressing well and we're on track to meet our key milestones. The team has been working diligently to address the priorities we identified.",
+            "We've made significant progress this period and are pleased to report that we're ahead of schedule on several deliverables.",
+            "The project continues to move forward as planned. We've successfully completed the current phase and are preparing for the next stage.",
+            "Overall, the project is in good shape. We've encountered some minor challenges but have implemented solutions to keep us on track.",
+            "We're pleased to report strong progress across all workstreams. The team's collaboration has been excellent.",
+            "The project is proceeding according to plan with all major milestones on schedule. Quality metrics remain strong.",
+            "We've achieved several important milestones this period and are well-positioned for the upcoming phase.",
+            "The project team has been highly productive, and we're confident in our ability to deliver on our commitments.",
+        ]
+        return random.choice(summaries)
+    
+    def _generate_project_notes(self) -> str:
+        """Generate project notes/additional information."""
+        notes = [
+            "Please note that we may need to adjust the timeline slightly based on resource availability. I'll keep you informed of any changes.",
+            "I'd like to schedule a brief call to discuss some items that require your input before we proceed.",
+            "If you have any questions or concerns about the progress, please don't hesitate to reach out.",
+            "We're planning a stakeholder review session next week and would appreciate your participation.",
+            "The team has identified some opportunities for optimization that we'd like to discuss with you.",
+            "Please review the attached documentation and let me know if you need any clarification.",
+            "We're on track for the upcoming milestone and will provide a detailed update upon completion.",
+            "I'll be sending a more detailed report by end of week with supporting documentation.",
+        ]
+        return random.choice(notes)
+    
+    def _generate_invoice_details(self) -> str:
+        """Generate invoice details content."""
+        services = [
+            "Professional Services - Project Implementation",
+            "Consulting Services - Strategic Advisory",
+            "Software License - Annual Subscription",
+            "Support Services - Premium Support Package",
+            "Training Services - Team Enablement Program",
+            "Development Services - Custom Solution Development",
+            "Managed Services - Monthly Retainer",
+            "Integration Services - System Integration",
+        ]
+        
+        service = random.choice(services)
+        amount = random.randint(5, 50) * 1000
+        
+        return f"""<table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+        <tr style="background-color: #f5f5f5;">
+            <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Description</th>
+            <th style="padding: 10px; text-align: right; border: 1px solid #ddd;">Amount</th>
+        </tr>
+        <tr>
+            <td style="padding: 10px; border: 1px solid #ddd;">{service}</td>
+            <td style="padding: 10px; text-align: right; border: 1px solid #ddd;">${amount:,}.00</td>
+        </tr>
+        <tr style="font-weight: bold;">
+            <td style="padding: 10px; border: 1px solid #ddd;">Total Due</td>
+            <td style="padding: 10px; text-align: right; border: 1px solid #ddd;">${amount:,}.00</td>
+        </tr>
+        </table>"""
+    
+    def _generate_payment_terms(self) -> str:
+        """Generate payment terms content."""
+        terms = [
+            "Payment is due within 30 days of invoice date. Please reference the invoice number when making payment.",
+            "Net 30 terms apply. Early payment discounts available - contact us for details.",
+            "Payment due upon receipt. Please ensure payment is made within 15 business days.",
+            "Standard payment terms of Net 45 apply. Wire transfer details are included below.",
+            "Payment is due within 30 days. Multiple payment options are available for your convenience.",
+            "Please process payment within 30 days. Contact our accounts team if you have any questions.",
+        ]
+        return random.choice(terms)
+    
+    def _generate_contract_summary(self) -> str:
+        """Generate contract summary content."""
+        summaries = [
+            "Please find attached the contract documents for your review. This agreement outlines the terms of our engagement and the scope of services to be provided.",
+            "I'm pleased to share the finalized contract for our partnership. The document reflects the terms we discussed and agreed upon.",
+            "Attached is the service agreement for your signature. Please review the terms carefully and let me know if you have any questions.",
+            "The enclosed contract formalizes our business relationship and sets forth the mutual obligations of both parties.",
+            "Please review the attached agreement which details the scope, timeline, and commercial terms of our engagement.",
+            "I've attached the contract documents for your review and signature. This represents the culmination of our negotiations.",
+        ]
+        return random.choice(summaries)
+    
+    def _generate_contract_terms(self) -> str:
+        """Generate contract key terms as list items."""
+        terms_pool = [
+            "Initial term of 12 months with automatic renewal",
+            "30-day notice period for termination",
+            "Quarterly business reviews included",
+            "Service level agreements with defined metrics",
+            "Confidentiality and data protection provisions",
+            "Intellectual property rights clearly defined",
+            "Liability limitations and indemnification",
+            "Dispute resolution procedures",
+            "Change management process",
+            "Payment terms and invoicing schedule",
+            "Warranty and support commitments",
+            "Compliance with applicable regulations",
+        ]
+        selected = random.sample(terms_pool, random.randint(4, 6))
+        return "".join([f"<li>{term}</li>" for term in selected])
+    
+    def _generate_contract_next_steps(self) -> str:
+        """Generate contract next steps content."""
+        next_steps = [
+            "Please review the contract and return a signed copy at your earliest convenience. Once executed, we can begin the onboarding process.",
+            "If you have any questions or require modifications, please let me know. Otherwise, please sign and return the agreement.",
+            "I'm available to discuss any aspects of the contract. Once signed, we'll schedule a kickoff meeting to begin our engagement.",
+            "Please have your legal team review the document. I'm happy to address any questions or concerns they may have.",
+            "Once you've reviewed and signed the agreement, please return it via email. We'll then proceed with the next steps.",
+            "Let me know if you need any clarification on the terms. We're excited to formalize our partnership.",
+        ]
+        return random.choice(next_steps)
+    
+    def _generate_introduction_context(self) -> str:
+        """Generate introduction/networking email context."""
+        contexts = [
+            "I came across your profile and was impressed by your work in the industry. I thought it would be valuable to connect.",
+            "We met briefly at the conference last month, and I wanted to follow up and introduce myself properly.",
+            "A mutual colleague suggested I reach out to you given our shared interests in this space.",
+            "I've been following your company's growth and would love the opportunity to learn more about your work.",
+            "I'm reaching out because I believe there could be some interesting synergies between our organizations.",
+            "Your recent article caught my attention, and I wanted to connect to discuss some of the ideas you shared.",
+            "I was referred to you by a colleague who thought we might benefit from connecting.",
+            "I noticed we share several connections and thought it would be worthwhile to introduce myself.",
+        ]
+        return random.choice(contexts)
+    
+    def _generate_introduction_body(self) -> str:
+        """Generate introduction email body content."""
+        bodies = [
+            "I lead business development at our company, where we specialize in helping organizations like yours achieve their strategic objectives. I'd love to learn more about your current priorities and explore whether there might be opportunities to collaborate.",
+            "Our company has been working with several organizations in your industry, and I thought there might be some valuable insights we could share. I'm always interested in connecting with forward-thinking professionals.",
+            "I'm passionate about building meaningful professional relationships and believe that connecting with people like yourself can lead to mutually beneficial opportunities.",
+            "We've recently launched some initiatives that I think could be relevant to your work. I'd welcome the chance to share more and hear about what you're working on.",
+            "I'm always looking to expand my network with talented professionals. I believe that great things happen when the right people connect.",
+            "Our paths seem to cross in several areas, and I thought it would be valuable to have a conversation and explore potential areas of collaboration.",
+        ]
+        return random.choice(bodies)
+    
+    def _generate_introduction_cta(self) -> str:
+        """Generate introduction email call to action."""
+        ctas = [
+            "Would you be open to a brief call to introduce ourselves and explore potential synergies?",
+            "I'd love to buy you a coffee (virtual or in-person) and learn more about your work.",
+            "Would you have 15 minutes for a quick introductory call sometime this week or next?",
+            "I'd welcome the opportunity to connect and share ideas. Let me know if you'd be interested.",
+            "Please feel free to reach out if you'd like to connect. I'm always happy to make time for a conversation.",
+            "I'd be grateful for the opportunity to learn from your experience. Would you be open to a brief chat?",
+        ]
+        return random.choice(ctas)
+    
+    def _generate_thank_you_context(self) -> str:
+        """Generate thank you email context."""
+        contexts = [
+            "I wanted to take a moment to express my sincere gratitude for your time and support.",
+            "Thank you so much for meeting with me yesterday. I really appreciated the opportunity to connect.",
+            "I wanted to follow up with a note of thanks for your assistance with our recent project.",
+            "I'm writing to express my appreciation for your partnership and collaboration.",
+            "Thank you for your continued support and for being such a valued partner.",
+            "I wanted to reach out personally to thank you for everything you've done.",
+            "Your support has been invaluable, and I wanted to make sure you know how much it's appreciated.",
+            "I'm grateful for the opportunity to work with you and wanted to express my thanks.",
+        ]
+        return random.choice(contexts)
+    
+    def _generate_thank_you_body(self) -> str:
+        """Generate thank you email body content."""
+        bodies = [
+            "Your insights and guidance have been incredibly valuable. The perspective you shared has helped shape our approach and will undoubtedly contribute to our success.",
+            "The time you invested in our discussion was truly appreciated. Your expertise and willingness to share your knowledge made a real difference.",
+            "Working with you has been a pleasure. Your professionalism and dedication to excellence are evident in everything you do.",
+            "Your contribution to this project has been outstanding. The results we've achieved are a direct reflection of your hard work and commitment.",
+            "I'm continually impressed by your expertise and the value you bring to our partnership. Thank you for being such a reliable partner.",
+            "Your support during this initiative has been exceptional. We couldn't have achieved these results without your involvement.",
+        ]
+        return random.choice(bodies)
+    
+    def _generate_support_context(self) -> str:
+        """Generate support/service email context."""
+        contexts = [
+            "Thank you for contacting our support team. I'm writing to provide an update on your recent inquiry.",
+            "I wanted to follow up on the issue you reported and share the steps we've taken to address it.",
+            "Thank you for bringing this matter to our attention. We take all customer feedback seriously.",
+            "I'm reaching out regarding your recent support request. I have some good news to share.",
+            "Thank you for your patience while we investigated the issue you reported.",
+            "I wanted to personally follow up on your case and ensure you have all the information you need.",
+            "Following up on our recent conversation, I wanted to provide a comprehensive update.",
+            "Thank you for being a valued customer. I'm writing to address the concerns you raised.",
+        ]
+        return random.choice(contexts)
+    
+    def _generate_support_details(self) -> str:
+        """Generate support details content."""
+        details = [
+            "Our technical team has thoroughly investigated the issue and identified the root cause. We've implemented a fix that should resolve the problem.",
+            "After reviewing your account, we've made the necessary adjustments. You should see the changes reflected within 24-48 hours.",
+            "We've escalated your request to our specialized team, who are working on a solution. We expect to have this resolved shortly.",
+            "The issue you experienced was related to a system update. We've rolled back the changes and confirmed that everything is now working correctly.",
+            "We've reviewed your feedback and have taken steps to improve our processes. Your input helps us serve you better.",
+            "Our team has completed the requested changes. Please review and let us know if everything meets your expectations.",
+        ]
+        return random.choice(details)
+    
+    def _generate_support_resolution(self) -> str:
+        """Generate support resolution content."""
+        resolutions = [
+            "The issue has been fully resolved, and you should now have full access to all features. Please let us know if you experience any further difficulties.",
+            "We've credited your account as a gesture of goodwill for any inconvenience caused. Thank you for your understanding.",
+            "Your request has been completed successfully. If you have any questions, please don't hesitate to reach out.",
+            "We've implemented a permanent fix to prevent this issue from recurring. Thank you for your patience during this process.",
+            "The matter has been resolved to your satisfaction, we hope. Please contact us if you need any further assistance.",
+            "We've taken steps to ensure this doesn't happen again. Your feedback has been valuable in improving our service.",
+        ]
+        return random.choice(resolutions)
+    
+    def _generate_event_details(self) -> str:
+        """Generate event invitation details."""
+        from datetime import datetime, timedelta
+        
+        event_types = [
+            ("Annual Industry Conference", "Conference Center"),
+            ("Executive Roundtable", "Private Dining Room"),
+            ("Product Launch Event", "Innovation Hub"),
+            ("Networking Reception", "Rooftop Lounge"),
+            ("Workshop: Best Practices", "Training Center"),
+            ("Customer Appreciation Event", "Grand Ballroom"),
+            ("Thought Leadership Summit", "Convention Center"),
+            ("Partner Kickoff Meeting", "Corporate Headquarters"),
+        ]
+        
+        event_name, venue = random.choice(event_types)
+        event_date = datetime.now() + timedelta(days=random.randint(14, 60))
+        
+        return f"""<p><strong>Event:</strong> {event_name}</p>
+        <p><strong>Date:</strong> {event_date.strftime("%A, %B %d, %Y")}</p>
+        <p><strong>Time:</strong> {random.choice(["9:00 AM - 5:00 PM", "2:00 PM - 6:00 PM", "6:00 PM - 9:00 PM"])}</p>
+        <p><strong>Venue:</strong> {venue}</p>"""
+    
+    def _generate_event_agenda(self) -> str:
+        """Generate event agenda items."""
+        agenda_pool = [
+            "Welcome and opening remarks",
+            "Keynote presentation",
+            "Panel discussion with industry experts",
+            "Networking break",
+            "Breakout sessions",
+            "Product demonstrations",
+            "Q&A session",
+            "Closing remarks and next steps",
+            "Cocktail reception",
+            "Awards ceremony",
+            "Workshop sessions",
+            "Executive fireside chat",
+        ]
+        selected = random.sample(agenda_pool, random.randint(4, 6))
+        return "".join([f"<li>{item}</li>" for item in selected])
+    
+    def _generate_event_registration(self) -> str:
+        """Generate event registration call to action."""
+        registrations = [
+            "Space is limited, so please RSVP by clicking the link below. We look forward to seeing you there!",
+            "Please confirm your attendance by responding to this email. We'll send detailed logistics closer to the date.",
+            "Register now to secure your spot. Early registration includes exclusive benefits.",
+            "Click here to register and add the event to your calendar. Don't miss this opportunity!",
+            "Please let us know if you'll be attending so we can finalize arrangements. We hope to see you there!",
+            "RSVP required. Please respond by the end of the week to confirm your participation.",
+        ]
+        return random.choice(registrations)
+    
+    def _generate_product_intro(self) -> str:
+        """Generate product announcement introduction."""
+        intros = [
+            "We're excited to announce the launch of our latest innovation, designed to help you achieve more.",
+            "I'm thrilled to share some exciting news about a new solution that we've been working on.",
+            "We've been listening to your feedback, and today we're proud to introduce something special.",
+            "After months of development, we're ready to unveil our newest offering to valued partners like you.",
+            "I wanted to personally share some exciting news about our latest product release.",
+            "We're pleased to announce a significant enhancement to our product lineup.",
+        ]
+        return random.choice(intros)
+    
+    def _generate_product_features(self) -> str:
+        """Generate product features as list items."""
+        feature_pool = [
+            "Enhanced performance and reliability",
+            "Intuitive user interface",
+            "Advanced analytics and reporting",
+            "Seamless integration capabilities",
+            "Enterprise-grade security",
+            "Scalable architecture",
+            "24/7 customer support",
+            "Mobile-friendly design",
+            "Customizable workflows",
+            "Real-time collaboration features",
+            "Automated processes",
+            "Comprehensive documentation",
+        ]
+        selected = random.sample(feature_pool, random.randint(4, 6))
+        return "".join([f"<li>{feature}</li>" for feature in selected])
+    
+    def _generate_product_cta(self) -> str:
+        """Generate product announcement call to action."""
+        ctas = [
+            "Schedule a demo today to see how this can benefit your organization.",
+            "Contact us to learn more and take advantage of our early adopter pricing.",
+            "Visit our website to explore the full feature set and request a trial.",
+            "Reply to this email to schedule a personalized walkthrough.",
+            "Click here to access exclusive resources and get started today.",
+            "Let's schedule a call to discuss how this can address your specific needs.",
+        ]
+        return random.choice(ctas)
+    
+    def _generate_feedback_intro(self) -> str:
+        """Generate feedback request introduction."""
+        intros = [
+            "We value your opinion and would love to hear about your experience working with us.",
+            "Your feedback is important to us, and we'd appreciate a few minutes of your time.",
+            "We're always looking for ways to improve, and your input would be invaluable.",
+            "As a valued partner, your perspective matters to us. We'd love to hear your thoughts.",
+            "We're committed to continuous improvement and would appreciate your honest feedback.",
+            "Your satisfaction is our priority, and we'd like to know how we're doing.",
+        ]
+        return random.choice(intros)
+    
+    def _generate_feedback_questions(self) -> str:
+        """Generate feedback questions as list items."""
+        question_pool = [
+            "How would you rate your overall experience?",
+            "What aspects of our service do you find most valuable?",
+            "Are there areas where we could improve?",
+            "Would you recommend us to colleagues?",
+            "How responsive have we been to your needs?",
+            "What additional services would you find helpful?",
+            "How does our solution compare to alternatives?",
+            "What would make your experience even better?",
+        ]
+        selected = random.sample(question_pool, random.randint(3, 4))
+        return "".join([f"<li>{question}</li>" for question in selected])
+    
+    def _generate_feedback_cta(self) -> str:
+        """Generate feedback request call to action."""
+        ctas = [
+            "Please take a moment to complete our brief survey. Your input helps us serve you better.",
+            "Click here to share your feedback. It only takes a few minutes.",
+            "Reply to this email with your thoughts, or schedule a call if you'd prefer to discuss in person.",
+            "We'd love to hear from you. Please share your feedback at your convenience.",
+            "Your response would be greatly appreciated. Thank you for helping us improve.",
+            "Please let us know your thoughts. Every piece of feedback helps us grow.",
+        ]
+        return random.choice(ctas)
