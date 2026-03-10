@@ -65,7 +65,7 @@ users:
   # Example users - REPLACE WITH YOUR ACTUAL USERS
   # The domain should match your M365 tenant
   
-  - upn: hemal.desai@adaptgbmgthdfeb26.onmicrosoft.com
+  - upn: user@yourtenant.onmicrosoft.com
     role: CEO
     department: Executive Leadership
     email_volume: high
@@ -76,7 +76,7 @@ users:
       - IT Department
       - All Departments
     
-  - upn: ashley.kingscote@adaptgbmgthdfeb26.onmicrosoft.com
+  - upn: user1@yourtenant.onmicrosoft.com
     role: Head of IT
     department: IT Department
     email_volume: high
