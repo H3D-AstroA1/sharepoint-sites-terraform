@@ -589,8 +589,64 @@ def create_file_content(file_type: str, file_name: str = "", site_type: str = ""
 # SHAREPOINT OPERATIONS
 # ============================================================================
 
+# App config file path (same as menu.py)
+APP_CONFIG_FILE = SCRIPT_DIR / ".app_config.json"
+
+
+def load_app_config() -> Optional[Dict[str, Any]]:
+    """Load the custom app configuration from file."""
+    if APP_CONFIG_FILE.exists():
+        try:
+            with open(APP_CONFIG_FILE, 'r') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return None
+
+
+def get_graph_access_token_via_client_credentials(app_config: Dict[str, Any]) -> Optional[str]:
+    """Get Microsoft Graph access token using client credentials flow."""
+    tenant_id = app_config.get("tenant_id")
+    client_id = app_config.get("app_id")
+    client_secret = app_config.get("client_secret")
+    
+    if not all([tenant_id, client_id, client_secret]):
+        return None
+    
+    token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    
+    data = urllib.parse.urlencode({
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "scope": "https://graph.microsoft.com/.default",
+        "grant_type": "client_credentials"
+    }).encode()
+    
+    try:
+        req = urllib.request.Request(token_url, data=data)
+        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode())
+            return result.get("access_token")
+    except Exception:
+        return None
+
+
 def get_access_token() -> Optional[str]:
-    """Get Microsoft Graph access token using Azure CLI."""
+    """Get Microsoft Graph access token.
+    
+    First tries to use custom app credentials if available,
+    then falls back to Azure CLI.
+    """
+    # Try custom app credentials first
+    app_config = load_app_config()
+    if app_config and app_config.get("client_secret"):
+        token = get_graph_access_token_via_client_credentials(app_config)
+        if token:
+            return token
+    
+    # Fall back to Azure CLI
     try:
         result = run_command([
             "az", "account", "get-access-token",
@@ -624,10 +680,54 @@ def azure_login() -> bool:
     except subprocess.CalledProcessError:
         return False
 
+def get_m365_groups_with_sites(access_token: str) -> List[Dict[str, Any]]:
+    """Get Microsoft 365 Groups that have SharePoint sites (fallback method)."""
+    sites = []
+    url = "https://graph.microsoft.com/v1.0/groups?$filter=groupTypes/any(c:c eq 'Unified')&$select=id,displayName,createdDateTime,visibility&$top=100"
+    
+    try:
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {access_token}")
+        req.add_header("Content-Type", "application/json")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode())
+            groups = data.get("value", [])
+            
+            for group in groups:
+                try:
+                    # Get the SharePoint site for this group
+                    site_url = f"https://graph.microsoft.com/v1.0/groups/{group['id']}/sites/root"
+                    site_req = urllib.request.Request(site_url)
+                    site_req.add_header("Authorization", f"Bearer {access_token}")
+                    
+                    with urllib.request.urlopen(site_req, timeout=10) as site_response:
+                        site_data = json.loads(site_response.read().decode())
+                        sites.append({
+                            "id": site_data.get("id", ""),
+                            "name": group.get("displayName", "Unknown"),
+                            "displayName": group.get("displayName", "Unknown"),
+                            "webUrl": site_data.get("webUrl", ""),
+                            "groupId": group.get("id", ""),
+                            "isGroupSite": True
+                        })
+                except Exception:
+                    # Group might not have a SharePoint site
+                    pass
+    except Exception as e:
+        print_error(f"Error getting M365 groups: {e}")
+    
+    return sites
+
+
 def get_sharepoint_sites(access_token: str) -> List[Dict[str, Any]]:
-    """Get list of SharePoint sites using Microsoft Graph API."""
+    """Get list of SharePoint sites using Microsoft Graph API.
+    
+    Falls back to M365 Groups API if Sites API returns 403.
+    """
     sites = []
     url = "https://graph.microsoft.com/v1.0/sites?search=*"
+    use_groups_fallback = False
     
     try:
         req = urllib.request.Request(url)
@@ -638,34 +738,20 @@ def get_sharepoint_sites(access_token: str) -> List[Dict[str, Any]]:
             data = json.loads(response.read().decode())
             sites = data.get("value", [])
     except urllib.error.HTTPError as e:
-        print_error(f"Failed to get sites: {e.code} - {e.reason}")
         if e.code == 403:
-            print()
-            print(f"  {Colors.YELLOW}{'─' * 60}{Colors.NC}")
-            print(f"  {Colors.YELLOW}PERMISSION ERROR - Admin Consent Required{Colors.NC}")
-            print(f"  {Colors.YELLOW}{'─' * 60}{Colors.NC}")
-            print()
-            print(f"  The Azure CLI app needs admin consent for SharePoint permissions.")
-            print()
-            print(f"  {Colors.WHITE}Option 1: Grant admin consent (recommended){Colors.NC}")
-            print(f"  A tenant admin must grant the Azure CLI app these permissions:")
-            print(f"    • Sites.Read.All")
-            print(f"    • Sites.ReadWrite.All")
-            print(f"    • Files.ReadWrite.All")
-            print()
-            print(f"  {Colors.CYAN}Steps:{Colors.NC}")
-            print(f"  1. Go to Azure Portal > Microsoft Entra ID > Enterprise Applications")
-            print(f"  2. Search for 'Azure CLI' (App ID: 04b07795-8ddb-461a-bbee-02f9e1bf7b46)")
-            print(f"  3. Go to Permissions > Grant admin consent")
-            print()
-            print(f"  {Colors.WHITE}Option 2: Use PowerShell with PnP{Colors.NC}")
-            print(f"  Install PnP.PowerShell and use Connect-PnPOnline with interactive login")
-            print()
-            print(f"  {Colors.WHITE}Option 3: Re-login with correct scope{Colors.NC}")
-            print(f"  Try: az login --scope https://graph.microsoft.com/.default")
-            print()
+            print_warning("Sites API returned 403, trying M365 Groups API...")
+            use_groups_fallback = True
+        else:
+            print_error(f"Failed to get sites: {e.code} - {e.reason}")
     except Exception as e:
         print_error(f"Error getting sites: {e}")
+    
+    # Fall back to M365 Groups if Sites API failed with 403
+    if use_groups_fallback or not sites:
+        groups_sites = get_m365_groups_with_sites(access_token)
+        if groups_sites:
+            print_success(f"Found {len(groups_sites)} sites via M365 Groups API")
+            return groups_sites
     
     return sites
 
