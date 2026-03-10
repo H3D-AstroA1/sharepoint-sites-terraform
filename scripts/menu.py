@@ -1640,6 +1640,42 @@ def list_sharepoint_sites_menu() -> None:
     input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
 
 
+def get_folder_contents_recursive(site_id: str, folder_id: str, token: str, path: str = "") -> list:
+    """Recursively get all files from a folder."""
+    import urllib.request
+    import urllib.error
+    
+    all_items = []
+    try:
+        if folder_id:
+            url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/items/{folder_id}/children"
+        else:
+            url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root/children"
+        
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Content-Type", "application/json")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode())
+            items = data.get("value", [])
+            
+            for item in items:
+                item_path = f"{path}/{item.get('name', '')}" if path else item.get('name', '')
+                item['_path'] = item_path
+                
+                if "folder" in item:
+                    # Recursively get contents of this folder
+                    sub_items = get_folder_contents_recursive(site_id, item.get('id', ''), token, item_path)
+                    all_items.extend(sub_items)
+                else:
+                    all_items.append(item)
+    except Exception:
+        pass
+    
+    return all_items
+
+
 def list_files_in_sites_menu() -> None:
     """List files in SharePoint sites with a clean, friendly interface."""
     import urllib.request
@@ -1722,10 +1758,39 @@ def list_files_in_sites_menu() -> None:
     print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(sites)} SharePoint sites")
     print()
     
-    # Let user select a site or all sites
-    print(f"  {Colors.WHITE}Select a site to view files:{Colors.NC}")
+    # Ask what to show
+    print(f"  {Colors.WHITE}What would you like to view?{Colors.NC}")
     print()
-    print(f"    [{Colors.GREEN}*{Colors.NC}]  {Colors.GREEN}All sites (show files from all sites){Colors.NC}")
+    print(f"    [1] 📁 Folders only (top-level)")
+    print(f"    [2] 📄 Files only (top-level)")
+    print(f"    [3] 📋 All items (folders + files, top-level)")
+    print(f"    [4] 📄 All files recursively (includes files in subfolders)")
+    print()
+    print(f"    [{Colors.RED}B{Colors.NC}]  Back to main menu")
+    print()
+    
+    view_choice = input(f"  {Colors.YELLOW}Enter choice (1-4):{Colors.NC} ").strip().lower()
+    
+    if view_choice == 'b' or not view_choice:
+        return
+    
+    try:
+        view_mode = int(view_choice)
+        if view_mode < 1 or view_mode > 4:
+            view_mode = 3  # Default to all items
+    except ValueError:
+        view_mode = 3  # Default to all items
+    
+    # Let user select a site or all sites
+    clear_screen()
+    print()
+    print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+    print(f"  {Colors.CYAN}{'📁 SELECT SITE':^60}{Colors.NC}")
+    print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+    print()
+    print(f"  {Colors.WHITE}Select a site to view:{Colors.NC}")
+    print()
+    print(f"    [{Colors.GREEN}*{Colors.NC}]  {Colors.GREEN}All sites{Colors.NC}")
     print()
     for i, site in enumerate(sites, 1):
         name = site.get("displayName", site.get("name", "Unknown"))
@@ -1739,17 +1804,61 @@ def list_files_in_sites_menu() -> None:
     if choice == 'b' or not choice:
         return
     
+    # Helper function to display items based on view mode
+    def display_items(items: list, view_mode: int, indent: str = "      ") -> int:
+        """Display items based on view mode. Returns count of displayed items."""
+        count = 0
+        for item in items:
+            name = item.get("name", "Unknown")
+            is_folder = "folder" in item
+            size = item.get("size", 0)
+            path = item.get("_path", "")
+            
+            # Filter based on view mode
+            if view_mode == 1 and not is_folder:  # Folders only
+                continue
+            if view_mode == 2 and is_folder:  # Files only
+                continue
+            # view_mode 3 and 4 show everything
+            
+            if is_folder:
+                icon = "📁"
+                size_str = ""
+            else:
+                icon = "📄"
+                if size < 1024:
+                    size_str = f"({size} B)"
+                elif size < 1024 * 1024:
+                    size_str = f"({size // 1024} KB)"
+                else:
+                    size_str = f"({size // (1024 * 1024)} MB)"
+            
+            # Show path for recursive mode
+            if view_mode == 4 and path:
+                print(f"{indent}{icon} {path} {Colors.DIM}{size_str}{Colors.NC}")
+            else:
+                print(f"{indent}{icon} {name} {Colors.DIM}{size_str}{Colors.NC}")
+            count += 1
+        return count
+    
+    # View mode labels
+    mode_labels = {
+        1: "FOLDERS",
+        2: "FILES",
+        3: "ALL ITEMS",
+        4: "ALL FILES (RECURSIVE)"
+    }
+    
     # Handle "all sites" option
     if choice == '*':
-        # Show files from all sites
         clear_screen()
         print()
         print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
-        print(f"  {Colors.CYAN}{'📁 FILES IN ALL SHAREPOINT SITES':^60}{Colors.NC}")
+        print(f"  {Colors.CYAN}{f'📁 {mode_labels[view_mode]} IN ALL SITES':^60}{Colors.NC}")
         print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
         print()
         
-        total_files = 0
+        total_items = 0
         for site in sites:
             site_id = site.get("id", "")
             site_name = site.get("displayName", "Unknown")
@@ -1758,45 +1867,41 @@ def list_files_in_sites_menu() -> None:
                 continue
             
             try:
-                drive_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root/children"
-                req = urllib.request.Request(drive_url)
-                req.add_header("Authorization", f"Bearer {token}")
-                req.add_header("Content-Type", "application/json")
-                
-                with urllib.request.urlopen(req, timeout=30) as response:
-                    data = json.loads(response.read().decode())
-                    files = data.get("value", [])
+                if view_mode == 4:
+                    # Recursive mode - get all files from all folders
+                    items = get_folder_contents_recursive(site_id, "", token)
+                else:
+                    # Top-level only
+                    drive_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root/children"
+                    req = urllib.request.Request(drive_url)
+                    req.add_header("Authorization", f"Bearer {token}")
+                    req.add_header("Content-Type", "application/json")
                     
-                    if files:
-                        print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
-                        print(f"  {Colors.WHITE}{Colors.BOLD}📁 {site_name}{Colors.NC} ({len(files)} items)")
-                        print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
-                        
-                        for item in files:
-                            name = item.get("name", "Unknown")
-                            is_folder = "folder" in item
-                            size = item.get("size", 0)
-                            
-                            if is_folder:
-                                icon = "📁"
-                                size_str = ""
-                            else:
-                                icon = "📄"
-                                if size < 1024:
-                                    size_str = f"({size} B)"
-                                elif size < 1024 * 1024:
-                                    size_str = f"({size // 1024} KB)"
-                                else:
-                                    size_str = f"({size // (1024 * 1024)} MB)"
-                            
-                            print(f"      {icon} {name} {Colors.DIM}{size_str}{Colors.NC}")
-                            total_files += 1
-                        print()
+                    with urllib.request.urlopen(req, timeout=30) as response:
+                        data = json.loads(response.read().decode())
+                        items = data.get("value", [])
+                
+                # Filter items based on view mode for counting
+                if view_mode == 1:
+                    filtered_items = [i for i in items if "folder" in i]
+                elif view_mode == 2 or view_mode == 4:
+                    filtered_items = [i for i in items if "folder" not in i]
+                else:
+                    filtered_items = items
+                
+                if filtered_items:
+                    print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+                    print(f"  {Colors.WHITE}{Colors.BOLD}📁 {site_name}{Colors.NC} ({len(filtered_items)} items)")
+                    print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+                    
+                    count = display_items(items, view_mode)
+                    total_items += count
+                    print()
             except Exception:
                 pass
         
         print(f"  {Colors.WHITE}{'═' * 60}{Colors.NC}")
-        print(f"  {Colors.GREEN}Total: {total_files} items across {len(sites)} sites{Colors.NC}")
+        print(f"  {Colors.GREEN}Total: {total_items} items across {len(sites)} sites{Colors.NC}")
         print()
         input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
         return
@@ -1823,19 +1928,23 @@ def list_files_in_sites_menu() -> None:
     
     # Get files from the site's document library
     print()
-    print(f"  {Colors.WHITE}Loading files from '{site_name}'...{Colors.NC}")
+    print(f"  {Colors.WHITE}Loading from '{site_name}'...{Colors.NC}")
     
-    files = []
+    items = []
     try:
-        # Get the default document library (drive)
-        drive_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root/children"
-        req = urllib.request.Request(drive_url)
-        req.add_header("Authorization", f"Bearer {token}")
-        req.add_header("Content-Type", "application/json")
-        
-        with urllib.request.urlopen(req, timeout=30) as response:
-            data = json.loads(response.read().decode())
-            files = data.get("value", [])
+        if view_mode == 4:
+            # Recursive mode - get all files from all folders
+            items = get_folder_contents_recursive(site_id, "", token)
+        else:
+            # Top-level only
+            drive_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root/children"
+            req = urllib.request.Request(drive_url)
+            req.add_header("Authorization", f"Bearer {token}")
+            req.add_header("Content-Type", "application/json")
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                data = json.loads(response.read().decode())
+                items = data.get("value", [])
     except urllib.error.HTTPError as e:
         print(f"  {Colors.RED}✗{Colors.NC} Error accessing files: {e.code} - {e.reason}")
         input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
@@ -1845,40 +1954,32 @@ def list_files_in_sites_menu() -> None:
         input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
         return
     
-    # Display files
+    # Display items
     clear_screen()
     print()
     print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
-    print(f"  {Colors.CYAN}{'📁 FILES IN: ' + site_name[:45]:^60}{Colors.NC}")
+    title = f"📁 {mode_labels[view_mode]} IN: {site_name[:35]}"
+    print(f"  {Colors.CYAN}{title:^60}{Colors.NC}")
     print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
     print()
     
-    if not files:
-        print(f"  {Colors.YELLOW}No files found in this site's document library.{Colors.NC}")
+    # Filter items based on view mode for counting
+    if view_mode == 1:
+        filtered_items = [i for i in items if "folder" in i]
+    elif view_mode == 2 or view_mode == 4:
+        filtered_items = [i for i in items if "folder" not in i]
     else:
-        print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(files)} items")
+        filtered_items = items
+    
+    if not filtered_items:
+        print(f"  {Colors.YELLOW}No items found matching the selected filter.{Colors.NC}")
+    else:
+        print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(filtered_items)} items")
         print()
         print(f"  {Colors.WHITE}{'─' * 70}{Colors.NC}")
         print()
         
-        for i, item in enumerate(files, 1):
-            name = item.get("name", "Unknown")
-            is_folder = "folder" in item
-            size = item.get("size", 0)
-            
-            if is_folder:
-                icon = "📁"
-                size_str = ""
-            else:
-                icon = "📄"
-                if size < 1024:
-                    size_str = f"({size} B)"
-                elif size < 1024 * 1024:
-                    size_str = f"({size // 1024} KB)"
-                else:
-                    size_str = f"({size // (1024 * 1024)} MB)"
-            
-            print(f"  [{i:3}] {icon} {name} {Colors.DIM}{size_str}{Colors.NC}")
+        display_items(items, view_mode, indent="  ")
         
         print()
         print(f"  {Colors.WHITE}{'─' * 70}{Colors.NC}")
