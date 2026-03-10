@@ -162,20 +162,21 @@ python scripts/populate_emails.py --list-mailboxes
 | `deleteditems` | Deleted Items folder |
 | `drafts` | Drafts folder |
 
-Use `--folders all` to populate all folders, or specify individual folders like `--folders inbox,sentitems`.
+Use `--folders all` to populate all folders, or specify individual folders like `--folders inbox,sentitems,junkemail`.
 
 ## Email Types
 
-The tool generates six types of emails with configurable distribution:
+The tool generates seven types of emails with configurable distribution:
 
 | Category | Default % | Description |
 |----------|-----------|-------------|
-| 📰 Newsletters | 15% | Company and industry newsletters |
-| 🔗 SharePoint Links | 20% | Document sharing and collaboration |
+| 📰 Newsletters | 12% | Company and industry newsletters |
+| 🔗 SharePoint Links | 18% | Document sharing and collaboration |
 | 📎 Attachments | 15% | Emails with file attachments |
 | 📢 Organisational | 15% | Company-wide communications |
-| 💬 Inter-departmental | 20% | Team and project communications |
-| 🔒 Security | 15% | Account and password notifications |
+| 💬 Inter-departmental | 18% | Team and project communications |
+| 🔒 Security | 12% | Account and password notifications |
+| 🗑️ Spam | 10% | Promotional spam, phishing simulations, scams |
 
 ### 1. Newsletters (📰)
 - Company newsletters with updates and announcements
@@ -226,16 +227,32 @@ These emails are useful for testing:
 - Incident response procedures
 - User education about phishing
 
+### 7. Spam/Junk Emails (🗑️)
+- **Promotional Spam** - Flash sales, discount offers, limited-time deals
+- **Phishing Simulations** - Fake security alerts, account verification requests
+- **Lottery Scams** - Prize notifications, winner announcements
+- **Fake Invoices** - Fraudulent billing notices, payment demands
+- **Newsletter Spam** - Clickbait articles, unsolicited digests
+
+Spam emails are useful for testing:
+- Junk mail filtering rules
+- Security awareness training
+- Phishing detection systems
+- User education about scams
+
+**Spam Routing**: 85% of spam emails go to the Junk folder, while 15% "slip through" to the Inbox (simulating real-world spam filter behavior).
+
 ## Folder Distribution
 
-When using the `--folders` option, emails are distributed randomly across selected folders:
+When using the `--folders` option, emails are distributed using **weighted distribution** to simulate realistic mailbox patterns:
 
-| Folder | Graph API Name | Description |
-|--------|----------------|-------------|
-| 📥 Inbox | `inbox` | Received emails |
-| 📤 Sent Items | `sentitems` | Sent emails |
-| 🗑️ Deleted Items | `deleteditems` | Deleted emails |
-| 📝 Drafts | `drafts` | Draft emails |
+| Folder | Graph API Name | Weight | Description |
+|--------|----------------|--------|-------------|
+| 📥 Inbox | `inbox` | 55% | Received emails |
+| 📤 Sent Items | `sentitems` | 20% | Sent emails |
+| 📝 Drafts | `drafts` | 10% | Draft emails |
+| 🗑️ Deleted Items | `deleteditems` | 10% | Deleted emails |
+| 🗑️ Junk Email | `junkemail` | 5% | Spam/junk emails |
 
 ### Interactive Mode
 
@@ -245,22 +262,24 @@ When running in interactive mode, you'll be prompted to select folders:
 Which folders should receive emails?
 
   [1] Inbox only (default)
-  [2] All folders (inbox, sent items, deleted items, drafts)
+  [2] All folders (inbox, sent items, deleted items, drafts, junk)
   [3] Select specific folders
 ```
 
-### Distribution Behavior
+### Weighted Distribution Behavior
 
-- Emails are distributed **randomly** across selected folders
-- Each email has an equal chance of being placed in any selected folder
+- Emails are distributed using **weighted probabilities** to simulate realistic mailbox patterns
+- Inbox receives the most emails (55%), followed by Sent Items (20%)
+- Spam emails are automatically routed: 85% to Junk, 15% to Inbox
 - The final summary shows the distribution breakdown:
 
 ```
 Folder Distribution:
-  📥 inbox: 25 (25%)
-  📤 sentitems: 26 (26%)
-  🗑️ deleteditems: 24 (24%)
-  📝 drafts: 25 (25%)
+  📥 inbox: 55 (55%)
+  📤 sentitems: 20 (20%)
+  📝 drafts: 10 (10%)
+  🗑️ deleteditems: 10 (10%)
+  🗑️ junkemail: 5 (5%)
 ```
 
 ## Email Threading
@@ -466,18 +485,39 @@ scripts/
 └── email_generator/
     ├── __init__.py
     ├── config.py               # Configuration loader
-    ├── templates.py            # Email HTML templates
+    ├── templates.py            # Template re-exports (backward compatibility)
     ├── content_generator.py    # Dynamic content generation
     ├── attachments.py          # File attachment creation
     ├── threading.py            # Email thread management
     ├── graph_client.py         # Microsoft Graph API client
-    └── utils.py                # Utility functions
+    ├── utils.py                # Utility functions
+    └── templates/              # Email template modules
+        ├── __init__.py                    # Exports all templates
+        ├── newsletter_templates.py        # Company & industry newsletters
+        ├── sharepoint_templates.py        # Document sharing & site activity
+        ├── attachment_templates.py        # Reports & documents for review
+        ├── organisational_templates.py    # Announcements, HR, leadership
+        ├── interdepartmental_templates.py # Project updates, meetings, status
+        ├── security_templates.py          # Account blocked, password reset
+        └── spam_templates.py              # Promotional, phishing, scams
 
 config/
 ├── mailboxes.yaml              # Mailbox configuration
 ├── environments.json           # Tenant configuration
 └── sites.json                  # SharePoint sites (for links)
 ```
+
+### Template Categories
+
+| Category | File | Templates | Description |
+|----------|------|-----------|-------------|
+| Newsletters | `newsletter_templates.py` | 2 | Company and industry newsletters |
+| SharePoint | `sharepoint_templates.py` | 2 | Document sharing, site activity |
+| Attachments | `attachment_templates.py` | 2 | Reports, documents for review |
+| Organisational | `organisational_templates.py` | 3 | Announcements, HR policies, leadership |
+| Interdepartmental | `interdepartmental_templates.py` | 4 | Project updates, meetings, status reports |
+| Security | `security_templates.py` | 5 | Account blocked, password reset, suspicious activity |
+| Spam | `spam_templates.py` | 5 | Promotional, phishing, lottery scams |
 
 ## Security Considerations
 
