@@ -861,6 +861,13 @@ from .security_templates import (
     SECURITY_TEMPLATES,
 )
 
+# Import spam templates
+from .spam_templates import (
+    SPAM_TEMPLATES,
+    SPAM_SENDER_DOMAINS,
+    SPAM_SENDER_NAMES,
+)
+
 # All templates organized by category
 EMAIL_TEMPLATES = {
     "newsletters": [COMPANY_NEWSLETTER, INDUSTRY_NEWSLETTER],
@@ -869,6 +876,7 @@ EMAIL_TEMPLATES = {
     "organisational": [COMPANY_ANNOUNCEMENT, HR_POLICY_UPDATE, LEADERSHIP_MESSAGE],
     "interdepartmental": [PROJECT_UPDATE, MEETING_REQUEST, STATUS_REPORT, COLLABORATION_REQUEST],
     "security": SECURITY_TEMPLATES,
+    "spam": SPAM_TEMPLATES,
 }
 
 # Templates that support threading

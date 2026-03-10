@@ -100,12 +100,13 @@ class EmailContentGenerator:
     def _select_category(self) -> str:
         """Select email category based on configured distribution."""
         distribution = self.settings.get("email_distribution", {
-            "newsletters": 15,
-            "links": 20,
+            "newsletters": 12,
+            "links": 18,
             "attachments": 15,
             "organisational": 15,
-            "interdepartmental": 20,
-            "security": 15,
+            "interdepartmental": 18,
+            "security": 12,
+            "spam": 10,  # Realistic spam percentage
         })
         
         categories = list(distribution.keys())
@@ -134,7 +135,9 @@ class EmailContentGenerator:
                 weights=list(distribution.values())
             )[0]
         
-        if sender_type == "external":
+        if sender_type == "external_spam":
+            return self._get_spam_sender()
+        elif sender_type == "external":
             return self._get_external_sender(template)
         elif sender_type == "internal_system":
             return self._get_system_sender(recipient)
@@ -238,6 +241,25 @@ class EmailContentGenerator:
             "title": "Newsletter",
             "department": "External",
             "first_name": "Team",
+        }
+    
+    def _get_spam_sender(self) -> Dict[str, str]:
+        """Get a spam/junk email sender."""
+        from .spam_templates import SPAM_SENDER_DOMAINS, SPAM_SENDER_NAMES
+        
+        domain = random.choice(SPAM_SENDER_DOMAINS)
+        name = random.choice(SPAM_SENDER_NAMES)
+        
+        # Generate a random-looking email prefix
+        prefixes = ["info", "noreply", "support", "team", "admin", "service", "contact", "help"]
+        prefix = random.choice(prefixes)
+        
+        return {
+            "email": f"{prefix}@{domain}",
+            "name": name,
+            "title": "External",
+            "department": "External",
+            "first_name": name.split()[0],
         }
     
     def _generate_date(self) -> datetime:

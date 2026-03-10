@@ -228,6 +228,61 @@ class EmailPopulator:
         
         return users
     
+    def _select_folder_weighted(self, folders: List[str], category: str) -> str:
+        """
+        Select a folder using weighted distribution for realism.
+        
+        Spam emails go to junkemail folder if available.
+        Other emails use realistic distribution:
+        - inbox: 55% (most emails land here)
+        - sentitems: 20% (sent emails)
+        - drafts: 10% (unfinished emails)
+        - deleteditems: 10% (deleted emails)
+        - junkemail: 5% (spam that wasn't caught)
+        
+        Args:
+            folders: List of available folders.
+            category: Email category (spam, newsletters, etc.).
+            
+        Returns:
+            Selected folder name.
+        """
+        import random
+        
+        # Spam emails should go to junk folder if available
+        if category == "spam" and "junkemail" in folders:
+            # 85% of spam goes to junk, 15% slips through to inbox
+            if random.random() < 0.85:
+                return "junkemail"
+            elif "inbox" in folders:
+                return "inbox"
+        
+        # Define realistic folder weights
+        folder_weights = {
+            "inbox": 55,
+            "sentitems": 20,
+            "drafts": 10,
+            "deleteditems": 10,
+            "junkemail": 5,
+        }
+        
+        # Filter to only available folders and get their weights
+        available_weights = []
+        available_folders = []
+        for folder in folders:
+            if folder in folder_weights:
+                available_folders.append(folder)
+                available_weights.append(folder_weights[folder])
+            else:
+                # Unknown folder gets default weight
+                available_folders.append(folder)
+                available_weights.append(10)
+        
+        if not available_folders:
+            return folders[0] if folders else "inbox"
+        
+        return random.choices(available_folders, weights=available_weights)[0]
+    
     def populate_mailbox(
         self,
         user: Dict[str, Any],
@@ -280,8 +335,8 @@ class EmailPopulator:
                 category = email.get("category", "other")
                 self.stats["by_category"][category] = self.stats["by_category"].get(category, 0) + 1
                 
-                # Select folder for this email (distribute evenly)
-                folder = random.choice(folders)
+                # Select folder for this email (weighted distribution)
+                folder = self._select_folder_weighted(folders, category)
                 folder_counts[folder] += 1
                 
                 # Create email (or simulate in dry run)
@@ -786,14 +841,14 @@ Available folders:
         print(f"  {Colors.WHITE}Which folders should receive emails?{Colors.NC}")
         print()
         print(f"    [1] Inbox only (default)")
-        print(f"    [2] All folders (inbox, sent items, deleted items, drafts)")
+        print(f"    [2] All folders (inbox, sent, deleted, drafts, junk)")
         print(f"    [3] Select specific folders")
         print()
         
         choice = input(f"  {Colors.YELLOW}Enter choice (1-3):{Colors.NC} ").strip()
         
         if choice == '2':
-            folders = ALL_FOLDERS
+            folders = ALL_FOLDERS + ["junkemail"]  # Add junk folder
         elif choice == '3':
             print()
             print(f"  {Colors.WHITE}Available folders:{Colors.NC}")
@@ -801,10 +856,11 @@ Available folders:
             print(f"    [2] sentitems (Sent Items)")
             print(f"    [3] deleteditems (Deleted Items)")
             print(f"    [4] drafts")
+            print(f"    [5] junkemail (Junk/Spam)")
             print()
             folder_input = input(f"  {Colors.YELLOW}Enter folder numbers (comma-separated, e.g., 1,2,3):{Colors.NC} ").strip()
             
-            folder_map = {"1": "inbox", "2": "sentitems", "3": "deleteditems", "4": "drafts"}
+            folder_map = {"1": "inbox", "2": "sentitems", "3": "deleteditems", "4": "drafts", "5": "junkemail"}
             selected = []
             for num in folder_input.split(","):
                 num = num.strip()

@@ -172,7 +172,7 @@ class EmailCleaner:
         
         # Determine folders to clean
         if all_folders:
-            folders_to_clean = ["inbox", "sentitems", "drafts", "deleteditems"]
+            folders_to_clean = ["inbox", "sentitems", "drafts", "deleteditems", "junkemail"]
             folder_display = "ALL FOLDERS"
         else:
             folders_to_clean = [folder]
@@ -358,18 +358,20 @@ def interactive_mode():
     print(f"    {Colors.BLUE}[2]{Colors.NC} Sent Items only")
     print(f"    {Colors.YELLOW}[3]{Colors.NC} Drafts only")
     print(f"    {Colors.CYAN}[4]{Colors.NC} Deleted Items only")
-    print(f"    {Colors.MAGENTA}[5]{Colors.NC} 🗑️  ALL FOLDERS (inbox, sent, drafts, deleted) - Full cleanup")
+    print(f"    {Colors.RED}[5]{Colors.NC} Junk/Spam only")
+    print(f"    {Colors.MAGENTA}[6]{Colors.NC} 🗑️  ALL FOLDERS (inbox, sent, drafts, deleted, junk) - Full cleanup")
     print()
     
     folder_choice = input(f"  {Colors.YELLOW}Enter your choice:{Colors.NC} ").strip()
     
-    all_folders = folder_choice == '5'
+    all_folders = folder_choice == '6'
     folder_map = {
         '1': 'inbox',
         '2': 'sentitems',
         '3': 'drafts',
         '4': 'deleteditems',
-        '5': 'inbox',  # Will use all_folders flag
+        '5': 'junkemail',
+        '6': 'inbox',  # Will use all_folders flag
     }
     folder = folder_map.get(folder_choice, 'inbox')
     
