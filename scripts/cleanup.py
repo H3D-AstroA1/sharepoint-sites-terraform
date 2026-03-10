@@ -1878,13 +1878,23 @@ Selection Syntax (for --select-sites and --select-files):
     
     args = parser.parse_args()
     
-    # Clear screen and show banner
-    os.system('cls' if os.name == 'nt' else 'clear')
-    print_banner("⚠️  SHAREPOINT CLEANUP  ⚠️")
+    # Determine if this is a read-only operation
+    is_read_only = (args.list_sites or args.list_files or args.list_groups or args.list_deleted) and not (
+        args.delete_files or args.delete_sites or args.delete_all or
+        args.delete_groups or args.purge_deleted or args.purge_spo_recycle or args.select_files
+    )
     
-    print_danger("This script performs DESTRUCTIVE operations!")
-    print_danger("Deleted files and sites may not be recoverable!")
-    print()
+    # Clear screen and show appropriate banner
+    os.system('cls' if os.name == 'nt' else 'clear')
+    
+    if is_read_only:
+        print_banner("📋 SHAREPOINT SITES")
+        print()
+    else:
+        print_banner("⚠️  SHAREPOINT CLEANUP  ⚠️")
+        print_danger("This script performs DESTRUCTIVE operations!")
+        print_danger("Deleted files and sites may not be recoverable!")
+        print()
     
     # Step 1: Select Environment (auto-detect from environments.json)
     print_step(1, "Select Environment")
@@ -2037,6 +2047,11 @@ Selection Syntax (for --select-sites and --select-files):
             
             # Convert groups to a sites-like format for display
             display_groups_for_selection(groups)
+            
+            # If --list-sites was passed, just list and exit (don't prompt for deletion)
+            if args.list_sites or args.list_files:
+                print()
+                sys.exit(0)
             
             print()
             print(f"  {Colors.WHITE}Would you like to delete any of these groups (and their SharePoint sites)?{Colors.NC}")
