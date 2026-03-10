@@ -1675,8 +1675,10 @@ def list_files_in_sites_menu() -> None:
     print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(sites)} SharePoint sites")
     print()
     
-    # Let user select a site
+    # Let user select a site or all sites
     print(f"  {Colors.WHITE}Select a site to view files:{Colors.NC}")
+    print()
+    print(f"    [{Colors.GREEN}*{Colors.NC}]  {Colors.GREEN}All sites (show files from all sites){Colors.NC}")
     print()
     for i, site in enumerate(sites, 1):
         name = site.get("displayName", site.get("name", "Unknown"))
@@ -1685,9 +1687,71 @@ def list_files_in_sites_menu() -> None:
     print(f"    [{Colors.RED}B{Colors.NC}]  Back to main menu")
     print()
     
-    choice = input(f"  {Colors.YELLOW}Enter site number:{Colors.NC} ").strip().lower()
+    choice = input(f"  {Colors.YELLOW}Enter site number or * for all:{Colors.NC} ").strip().lower()
     
     if choice == 'b' or not choice:
+        return
+    
+    # Handle "all sites" option
+    if choice == '*':
+        # Show files from all sites
+        clear_screen()
+        print()
+        print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+        print(f"  {Colors.CYAN}{'📁 FILES IN ALL SHAREPOINT SITES':^60}{Colors.NC}")
+        print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+        print()
+        
+        total_files = 0
+        for site in sites:
+            site_id = site.get("id", "")
+            site_name = site.get("displayName", "Unknown")
+            
+            if not site_id:
+                continue
+            
+            try:
+                drive_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root/children"
+                req = urllib.request.Request(drive_url)
+                req.add_header("Authorization", f"Bearer {token}")
+                req.add_header("Content-Type", "application/json")
+                
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    data = json.loads(response.read().decode())
+                    files = data.get("value", [])
+                    
+                    if files:
+                        print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+                        print(f"  {Colors.WHITE}{Colors.BOLD}📁 {site_name}{Colors.NC} ({len(files)} items)")
+                        print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+                        
+                        for item in files:
+                            name = item.get("name", "Unknown")
+                            is_folder = "folder" in item
+                            size = item.get("size", 0)
+                            
+                            if is_folder:
+                                icon = "📁"
+                                size_str = ""
+                            else:
+                                icon = "📄"
+                                if size < 1024:
+                                    size_str = f"({size} B)"
+                                elif size < 1024 * 1024:
+                                    size_str = f"({size // 1024} KB)"
+                                else:
+                                    size_str = f"({size // (1024 * 1024)} MB)"
+                            
+                            print(f"      {icon} {name} {Colors.DIM}{size_str}{Colors.NC}")
+                            total_files += 1
+                        print()
+            except Exception:
+                pass
+        
+        print(f"  {Colors.WHITE}{'═' * 60}{Colors.NC}")
+        print(f"  {Colors.GREEN}Total: {total_files} items across {len(sites)} sites{Colors.NC}")
+        print()
+        input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
         return
     
     try:
