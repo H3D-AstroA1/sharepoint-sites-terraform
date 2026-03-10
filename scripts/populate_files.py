@@ -720,10 +720,58 @@ def get_m365_groups_with_sites(access_token: str) -> List[Dict[str, Any]]:
     return sites
 
 
+# Sites to exclude (system sites, personal sites, etc. that typically cause 403 errors)
+EXCLUDED_SITE_PATTERNS = [
+    "my workspace",
+    "designer",
+    "team site",
+    "communication site",
+    "contenttypehub",
+    "appcatalog",
+    "search",
+    "portal",
+    "root",
+]
+
+
+def filter_writable_sites(sites: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Filter out system/personal sites that typically cause 403 errors."""
+    filtered = []
+    excluded_count = 0
+    
+    for site in sites:
+        site_name = site.get("displayName", site.get("name", "")).lower()
+        web_url = site.get("webUrl", "").lower()
+        
+        # Check if site matches any excluded pattern
+        is_excluded = False
+        for pattern in EXCLUDED_SITE_PATTERNS:
+            if pattern in site_name or pattern in web_url:
+                is_excluded = True
+                excluded_count += 1
+                break
+        
+        # Also exclude sites that are clearly personal OneDrive sites
+        if "/personal/" in web_url:
+            is_excluded = True
+            excluded_count += 1
+        
+        # Only include group-connected sites (these are the ones we created)
+        # or sites that don't match excluded patterns
+        if not is_excluded:
+            filtered.append(site)
+    
+    if excluded_count > 0:
+        print_info(f"Filtered out {excluded_count} system/personal sites (not writable)")
+    
+    return filtered
+
+
 def get_sharepoint_sites(access_token: str) -> List[Dict[str, Any]]:
     """Get list of SharePoint sites using Microsoft Graph API.
     
     Falls back to M365 Groups API if Sites API returns 403.
+    Filters out system/personal sites that typically cause 403 errors.
     """
     sites = []
     url = "https://graph.microsoft.com/v1.0/sites?search=*"
@@ -751,9 +799,11 @@ def get_sharepoint_sites(access_token: str) -> List[Dict[str, Any]]:
         groups_sites = get_m365_groups_with_sites(access_token)
         if groups_sites:
             print_success(f"Found {len(groups_sites)} sites via M365 Groups API")
-            return groups_sites
+            # Filter out system/personal sites
+            return filter_writable_sites(groups_sites)
     
-    return sites
+    # Filter out system/personal sites
+    return filter_writable_sites(sites)
 
 def create_folder_in_sharepoint(
     site_id: str,
