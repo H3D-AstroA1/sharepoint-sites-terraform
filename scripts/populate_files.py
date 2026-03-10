@@ -721,16 +721,12 @@ def get_m365_groups_with_sites(access_token: str) -> List[Dict[str, Any]]:
 
 
 # Sites to exclude (system sites, personal sites, etc. that typically cause 403 errors)
+# Note: We only exclude exact system site names, not patterns that might match user-created sites
 EXCLUDED_SITE_PATTERNS = [
-    "my workspace",
-    "designer",
-    "team site",
-    "communication site",
-    "contenttypehub",
-    "appcatalog",
-    "search",
-    "portal",
-    "root",
+    "my workspace",      # Personal OneDrive-like workspace
+    "designer",          # Microsoft Designer integration site
+    "contenttypehub",    # SharePoint content type hub
+    "appcatalog",        # SharePoint app catalog
 ]
 
 

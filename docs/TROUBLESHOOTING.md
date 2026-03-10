@@ -939,16 +939,11 @@ The `populate_files.py` and `menu.py` scripts now automatically filter out these
 - Listing files in sites
 
 **Filtered Site Patterns:**
-- `my workspace`
-- `designer`
-- `team site`
-- `communication site`
-- `contenttypehub`
-- `appcatalog`
-- `search`
-- `portal`
-- `root`
-- URLs containing `/personal/`
+- `my workspace` - Personal OneDrive-like workspace
+- `designer` - Microsoft Designer integration site
+- `contenttypehub` - SharePoint content type hub
+- `appcatalog` - SharePoint app catalog
+- URLs containing `/personal/` - Personal OneDrive sites
 
 **Manual Workaround:**
 
