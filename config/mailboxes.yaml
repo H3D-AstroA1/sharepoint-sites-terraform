@@ -68,6 +68,21 @@ settings:
     business_hours_percentage: 85
     weekday_percentage: 90
     recent_bias: true  # More emails in recent months
+  
+  # Rate limiting settings (to prevent API throttling)
+  # Adjust these if you experience failures due to rate limiting
+  rate_limiting:
+    # Delay between individual API requests (milliseconds)
+    # Higher values = slower but more reliable
+    request_delay_ms: 100
+    
+    # Delay between batches of requests (milliseconds)
+    # Helps prevent hitting rate limits on large batches
+    batch_delay_ms: 500
+    
+    # Maximum retry attempts for failed requests
+    # Uses exponential backoff (1s, 2s, 4s, 8s, 16s)
+    max_retries: 5
 
 # =============================================================================
 # User Definitions

@@ -35,10 +35,29 @@ class GraphClient:
     
     GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
     
-    def __init__(self):
-        """Initialize the Graph client."""
+    # Rate limiting defaults
+    DEFAULT_REQUEST_DELAY_MS = 100  # Delay between individual requests (ms)
+    DEFAULT_BATCH_DELAY_MS = 500    # Delay between batches (ms)
+    DEFAULT_MAX_RETRIES = 5         # Maximum retry attempts
+    
+    def __init__(self, rate_limit_config: Optional[Dict[str, Any]] = None):
+        """
+        Initialize the Graph client.
+        
+        Args:
+            rate_limit_config: Optional rate limiting configuration with keys:
+                - request_delay_ms: Delay between requests in milliseconds
+                - batch_delay_ms: Delay between batches in milliseconds
+                - max_retries: Maximum retry attempts for failed requests
+        """
         self.access_token: Optional[str] = None
         self._az_path: Optional[str] = None
+        
+        # Configure rate limiting
+        config = rate_limit_config or {}
+        self.request_delay_ms = config.get("request_delay_ms", self.DEFAULT_REQUEST_DELAY_MS)
+        self.batch_delay_ms = config.get("batch_delay_ms", self.DEFAULT_BATCH_DELAY_MS)
+        self.max_retries = config.get("max_retries", self.DEFAULT_MAX_RETRIES)
     
     def authenticate(self, app_config: Optional[Dict] = None) -> bool:
         """
@@ -73,29 +92,36 @@ class GraphClient:
         """
         Create an email in a user's mailbox.
         
-        Uses the messages endpoint to create emails directly in the specified folder
-        with backdated timestamps.
+        Creates emails using the Graph API messages endpoint. Note that Graph API
+        creates messages as drafts by default, but we set isDraft=False and configure
+        other properties to make them appear as received messages.
         
         Args:
             mailbox: User's email address (UPN).
             email: Email data dictionary.
-            folder: Target folder (inbox, drafts, sentitems). Default is inbox.
+            folder: Target folder (inbox, drafts, sentitems, junkemail). Default is inbox.
             
         Returns:
             True if email created successfully, False otherwise.
         """
+        import time
+        
         if not self.access_token:
             return False
         
-        # Create in specific folder to avoid Drafts
-        # Using mailFolders/{folder}/messages puts the email directly in that folder
+        # Apply rate limiting delay before request
+        if self.request_delay_ms > 0:
+            time.sleep(self.request_delay_ms / 1000.0)
+        
+        # Build message payload using JSON format
+        # Pass folder so we can handle sentitems differently (swap From/To)
+        message = self._build_message_payload(mailbox, email, folder)
+        
+        # Use standard messages endpoint
         url = f"{self.GRAPH_BASE_URL}/users/{mailbox}/mailFolders/{folder}/messages"
         
-        # Build message payload
-        message = self._build_message_payload(mailbox, email)
-        
         try:
-            # Create the message
+            # Create the message using JSON payload
             response = self._make_request("POST", url, message)
             message_id = response.get("id")
             
@@ -114,6 +140,8 @@ class GraphClient:
                 print(f"  Permission denied for mailbox: {mailbox}")
             elif e.code == 404:
                 print(f"  Mailbox not found: {mailbox}")
+            elif e.code == 429:
+                print(f"  Rate limited - will retry on next attempt")
             return False
         except Exception as e:
             print(f"  Error creating email: {e}")
@@ -128,6 +156,8 @@ class GraphClient:
         """
         Create multiple emails using batch requests.
         
+        Includes rate limiting between batches to prevent API throttling.
+        
         Args:
             mailbox: User's email address (UPN).
             emails: List of email data dictionaries.
@@ -136,10 +166,17 @@ class GraphClient:
         Returns:
             Dictionary with success and failure counts.
         """
-        results = {"success": 0, "failed": 0}
+        import time
         
-        # Process in batches
-        for i in range(0, len(emails), batch_size):
+        results = {"success": 0, "failed": 0}
+        total_batches = (len(emails) + batch_size - 1) // batch_size
+        
+        # Process in batches with rate limiting
+        for batch_num, i in enumerate(range(0, len(emails), batch_size)):
+            # Add delay between batches (not before the first batch)
+            if batch_num > 0 and self.batch_delay_ms > 0:
+                time.sleep(self.batch_delay_ms / 1000.0)
+            
             batch = emails[i:i + batch_size]
             batch_results = self._process_batch(mailbox, batch)
             results["success"] += batch_results["success"]
@@ -464,13 +501,251 @@ class GraphClient:
         """
         return self.delete_all_emails(mailbox, "deleteditems", permanent=True)
     
-    def _build_message_payload(self, mailbox: str, email: Dict[str, Any]) -> Dict[str, Any]:
+    def purge_recoverable_items(self, mailbox: str) -> Dict[str, int]:
         """
-        Build the message payload for Graph API.
+        Purge all items from the Recoverable Items folder.
+        
+        This permanently deletes items that were "soft deleted" and are
+        still recoverable. Uses the recoverableitemsdeletions folder.
+        
+        Note: Requires Mail.ReadWrite.All permission and may require
+        additional admin consent for compliance-related operations.
+        
+        Args:
+            mailbox: User's email address (UPN).
+            
+        Returns:
+            Dictionary with success and failed counts.
+        """
+        import time as time_module
+        
+        results = {"success": 0, "failed": 0}
+        
+        if not self.access_token:
+            return results
+        
+        # The Recoverable Items folder has several subfolders:
+        # - recoverableitemsdeletions: Soft-deleted items
+        # - recoverableitemsversions: Previous versions
+        # - recoverableitemspurges: Items pending purge
+        
+        recoverable_folders = [
+            "recoverableitemsdeletions",
+            "recoverableitemsversions",
+            "recoverableitemspurges"
+        ]
+        
+        for folder in recoverable_folders:
+            try:
+                # Get items from the recoverable folder
+                url: Optional[str] = f"{self.GRAPH_BASE_URL}/users/{mailbox}/mailFolders/{folder}/messages?$top=100&$select=id"
+                max_iterations = 100  # Safety limit to prevent infinite loops
+                iteration = 0
+                
+                while url and iteration < max_iterations:
+                    iteration += 1
+                    try:
+                        response = self._make_request("GET", url)
+                        messages = response.get("value", [])
+                        
+                        if not messages:
+                            break
+                        
+                        # Permanently delete each message using permanentDelete action
+                        for msg in messages:
+                            msg_id = msg.get("id")
+                            if msg_id:
+                                try:
+                                    # Use permanentDelete action for true purge
+                                    delete_url = f"{self.GRAPH_BASE_URL}/users/{mailbox}/messages/{msg_id}/permanentDelete"
+                                    self._make_request("POST", delete_url)
+                                    results["success"] += 1
+                                except Exception:
+                                    # Fall back to regular DELETE
+                                    try:
+                                        delete_url = f"{self.GRAPH_BASE_URL}/users/{mailbox}/messages/{msg_id}"
+                                        self._make_request("DELETE", delete_url)
+                                        results["success"] += 1
+                                    except Exception:
+                                        results["failed"] += 1
+                                
+                                # Small delay to avoid rate limiting
+                                if self.request_delay_ms > 0:
+                                    time_module.sleep(self.request_delay_ms / 1000.0)
+                        
+                        # Check for next page
+                        next_link = response.get("@odata.nextLink")
+                        # Prevent infinite loop if same URL is returned
+                        if next_link and next_link != url:
+                            url = next_link
+                        else:
+                            url = None
+                        
+                    except urllib.error.HTTPError as e:
+                        if e.code == 404:
+                            # Folder doesn't exist or is empty
+                            break
+                        elif e.code == 403:
+                            # Permission denied - skip this folder
+                            break
+                        else:
+                            # Other error - stop processing this folder
+                            break
+                        
+            except Exception:
+                # Folder may not exist or we don't have permission
+                continue
+        
+        return results
+    
+    def _build_mime_message(self, mailbox: str, email: Dict[str, Any]) -> str:
+        """
+        Build a MIME message for import via Graph API.
+        
+        MIME import allows creating messages that appear as "received" emails
+        (not drafts) with proper backdated timestamps.
         
         Args:
             mailbox: Recipient mailbox.
             email: Email data dictionary.
+            
+        Returns:
+            MIME message as string.
+        """
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+        from email.utils import formatdate, formataddr, make_msgid
+        import time as time_module
+        
+        sender = email.get("sender", {})
+        recipient = email.get("recipient", {})
+        email_date = email.get("date", datetime.now())
+        
+        # Create MIME message
+        msg = MIMEMultipart('alternative')
+        
+        # Set headers
+        msg['Subject'] = email.get("subject", "No Subject")
+        msg['From'] = formataddr((sender.get("name", "Sender"), sender.get("email", f"sender@{mailbox.split('@')[-1]}")))
+        msg['To'] = formataddr((self._format_recipient_name(recipient.get("name", ""), mailbox), mailbox))
+        
+        # Set date header with backdated timestamp
+        # formatdate expects a Unix timestamp
+        timestamp = time_module.mktime(email_date.timetuple())
+        msg['Date'] = formatdate(timestamp, localtime=True)
+        
+        # Generate a unique Message-ID
+        domain = mailbox.split('@')[-1] if '@' in mailbox else 'local'
+        msg['Message-ID'] = make_msgid(domain=domain)
+        
+        # Add CC recipients if present
+        if email.get("cc_recipients"):
+            cc_list = [formataddr((cc.get("name", ""), cc.get("email", ""))) for cc in email["cc_recipients"]]
+            msg['Cc'] = ", ".join(cc_list)
+        
+        # Add HTML body
+        html_body = email.get("body", "")
+        html_part = MIMEText(html_body, 'html', 'utf-8')
+        msg.attach(html_part)
+        
+        # Also add plain text version
+        # Strip HTML tags for plain text (simple approach)
+        import re
+        plain_text = re.sub(r'<[^>]+>', '', html_body)
+        plain_text = re.sub(r'\s+', ' ', plain_text).strip()
+        text_part = MIMEText(plain_text, 'plain', 'utf-8')
+        msg.attach(text_part)
+        
+        return msg.as_string()
+    
+    def _make_mime_request(self, method: str, url: str, mime_content: str) -> Dict[str, Any]:
+        """
+        Make a MIME import request to Graph API.
+        
+        Uses the $value endpoint to import MIME content.
+        
+        Args:
+            method: HTTP method (POST).
+            url: Base URL for the messages endpoint.
+            mime_content: MIME message content as string.
+            
+        Returns:
+            Response dictionary with message ID.
+        """
+        import json
+        import time as time_module
+        
+        # Use the $value endpoint for MIME import
+        mime_url = f"{url}/$value"
+        
+        retries = self.max_retries
+        last_exception: Optional[Exception] = None
+        
+        for attempt in range(retries + 1):
+            try:
+                req = urllib.request.Request(mime_url, method=method)
+                req.add_header("Authorization", f"Bearer {self.access_token}")
+                req.add_header("Content-Type", "text/plain")
+                
+                # Encode MIME content
+                data = mime_content.encode('utf-8')
+                
+                with urllib.request.urlopen(req, data=data, timeout=60) as response:
+                    response_data = response.read().decode('utf-8')
+                    if response_data:
+                        return json.loads(response_data)
+                    return {"id": "created"}
+                    
+            except urllib.error.HTTPError as e:
+                last_exception = e
+                
+                # Handle rate limiting (429)
+                if e.code == 429:
+                    retry_header = e.headers.get("Retry-After")
+                    retry_after = int(retry_header) if retry_header else (2 ** attempt)
+                    time_module.sleep(retry_after)
+                    continue
+                
+                # Handle transient server errors
+                elif e.code in [500, 502, 503, 504]:
+                    if attempt < retries:
+                        time_module.sleep(2 ** attempt)
+                        continue
+                
+                raise
+                
+            except (urllib.error.URLError, TimeoutError) as e:
+                last_exception = e
+                if attempt < retries:
+                    time_module.sleep(2 ** attempt)
+                    continue
+                raise
+        
+        if last_exception:
+            raise last_exception
+        
+        return {}
+    
+    def _build_message_payload(self, mailbox: str, email: Dict[str, Any], folder: str = "inbox") -> Dict[str, Any]:
+        """
+        Build the message payload for Graph API.
+        
+        Uses singleValueExtendedProperties to set MAPI properties for backdated
+        timestamps since receivedDateTime and sentDateTime are read-only.
+        
+        For sentitems folder, the From/To are swapped so the mailbox owner appears
+        as the sender and the original sender appears as the recipient.
+        
+        MAPI Properties used:
+        - PR_MESSAGE_DELIVERY_TIME (0x0E06): When message was delivered
+        - PR_CLIENT_SUBMIT_TIME (0x0039): When message was submitted/sent
+        - PR_CREATION_TIME (0x3007): When message was created
+        - PR_MESSAGE_FLAGS (0x0E07): Message flags (0 = read, not draft)
+        
+        Args:
+            mailbox: Recipient mailbox (the user's email address).
+            email: Email data dictionary.
+            folder: Target folder (inbox, sentitems, etc.). Default is inbox.
             
         Returns:
             Message payload dictionary.
@@ -479,30 +754,81 @@ class GraphClient:
         recipient = email.get("recipient", {})
         email_date = email.get("date", datetime.now())
         
+        # Format date for Graph API (ISO 8601 format with timezone)
+        date_str = email_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+        
+        # For sent items, swap From and To:
+        # - From should be the mailbox owner (they sent it)
+        # - To should be the original sender (they received it)
+        if folder == "sentitems":
+            # Mailbox owner is the sender
+            from_address = {
+                "emailAddress": {
+                    "name": self._format_recipient_name(recipient.get("name", ""), mailbox),
+                    "address": mailbox,
+                }
+            }
+            # Original sender becomes the recipient
+            to_recipients = [
+                {
+                    "emailAddress": {
+                        "name": sender.get("name", "Recipient"),
+                        "address": sender.get("email", f"recipient@external.com"),
+                    }
+                }
+            ]
+        else:
+            # Normal case: sender is From, mailbox owner is To
+            from_address = {
+                "emailAddress": {
+                    "name": sender.get("name", "Sender"),
+                    "address": sender.get("email", f"sender@{mailbox.split('@')[-1]}"),
+                }
+            }
+            to_recipients = [
+                {
+                    "emailAddress": {
+                        "name": self._format_recipient_name(recipient.get("name", ""), mailbox),
+                        "address": mailbox,
+                    }
+                }
+            ]
+        
         message = {
             "subject": email.get("subject", "No Subject"),
             "body": {
                 "contentType": "HTML",
                 "content": email.get("body", ""),
             },
-            "from": {
-                "emailAddress": {
-                    "name": sender.get("name", "Sender"),
-                    "address": sender.get("email", f"sender@{mailbox.split('@')[-1]}"),
-                }
-            },
-            "toRecipients": [
+            "from": from_address,
+            "toRecipients": to_recipients,
+            # Note: receivedDateTime and sentDateTime are read-only in Graph API
+            # We use singleValueExtendedProperties to set MAPI timestamps instead
+            "isRead": self._should_be_read(email_date),
+            # Use extended properties to set timestamps and message flags
+            "singleValueExtendedProperties": [
                 {
-                    "emailAddress": {
-                        "name": recipient.get("name", ""),
-                        "address": mailbox,
-                    }
+                    # PR_MESSAGE_DELIVERY_TIME - When the message was delivered
+                    "id": "SystemTime 0x0E06",
+                    "value": date_str
+                },
+                {
+                    # PR_CLIENT_SUBMIT_TIME - When the message was sent
+                    "id": "SystemTime 0x0039",
+                    "value": date_str
+                },
+                {
+                    # PR_CREATION_TIME - When the message was created
+                    "id": "SystemTime 0x3007",
+                    "value": date_str
+                },
+                {
+                    # PR_MESSAGE_FLAGS - Set to MSGFLAG_READ (1) to mark as read, not draft
+                    # Bit 0 (MSGFLAG_READ) = 1, Bit 3 (MSGFLAG_UNSENT/draft) = 0
+                    "id": "Integer 0x0E07",
+                    "value": "1" if self._should_be_read(email_date) else "0"
                 }
             ],
-            "receivedDateTime": email_date.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "sentDateTime": email_date.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "isRead": self._should_be_read(email_date),
-            "isDraft": False,
         }
         
         # Add CC recipients if present
@@ -510,7 +836,7 @@ class GraphClient:
             message["ccRecipients"] = [
                 {
                     "emailAddress": {
-                        "name": cc.get("name", ""),
+                        "name": self._format_recipient_name(cc.get("name", ""), cc.get("email", "")),
                         "address": cc.get("email", ""),
                     }
                 }
@@ -522,7 +848,7 @@ class GraphClient:
             message["bccRecipients"] = [
                 {
                     "emailAddress": {
-                        "name": bcc.get("name", ""),
+                        "name": self._format_recipient_name(bcc.get("name", ""), bcc.get("email", "")),
                         "address": bcc.get("email", ""),
                     }
                 }
@@ -686,7 +1012,7 @@ class GraphClient:
         method: str,
         url: str,
         data: Optional[Dict] = None,
-        max_retries: int = 3
+        max_retries: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Make an HTTP request to the Graph API with retry logic.
@@ -698,7 +1024,7 @@ class GraphClient:
             method: HTTP method (GET, POST, etc.).
             url: Request URL.
             data: Optional request body data.
-            max_retries: Maximum number of retry attempts.
+            max_retries: Maximum number of retry attempts. Uses instance default if not specified.
             
         Returns:
             Response data dictionary.
@@ -708,9 +1034,12 @@ class GraphClient:
         """
         import time
         
+        # Use instance default if not specified
+        retries: int = max_retries if max_retries is not None else self.max_retries
+        
         last_exception = None
         
-        for attempt in range(max_retries + 1):
+        for attempt in range(retries + 1):
             try:
                 req = urllib.request.Request(url, method=method)
                 req.add_header("Authorization", f"Bearer {self.access_token}")
@@ -737,15 +1066,15 @@ class GraphClient:
                         except ValueError:
                             wait_time = 2 ** attempt  # Exponential backoff
                     else:
-                        wait_time = 2 ** attempt  # Exponential backoff: 1, 2, 4 seconds
+                        wait_time = 2 ** attempt  # Exponential backoff: 1, 2, 4, 8, 16 seconds
                     
-                    if attempt < max_retries:
+                    if attempt < retries:
                         time.sleep(wait_time)
                         continue
                 
                 # Handle transient server errors (500, 502, 503, 504)
                 elif e.code in [500, 502, 503, 504]:
-                    if attempt < max_retries:
+                    if attempt < retries:
                         wait_time = 2 ** attempt
                         time.sleep(wait_time)
                         continue
@@ -755,7 +1084,7 @@ class GraphClient:
                 
             except (urllib.error.URLError, TimeoutError) as e:
                 last_exception = e
-                if attempt < max_retries:
+                if attempt < retries:
                     wait_time = 2 ** attempt
                     time.sleep(wait_time)
                     continue
@@ -766,6 +1095,31 @@ class GraphClient:
             raise last_exception
         
         return {}
+    
+    def _format_recipient_name(self, name: str, email: str) -> str:
+        """
+        Format recipient name to include email address for better visibility.
+        
+        If the name appears to be incomplete (single word, no spaces),
+        format it as "Name <email@domain.com>" for better display in mail clients.
+        
+        Args:
+            name: Display name of the recipient.
+            email: Email address of the recipient.
+            
+        Returns:
+            Formatted name string.
+        """
+        if not name:
+            return email
+        
+        # If name has no spaces (likely just first name), include email
+        # This helps mail clients display the full identity
+        if " " not in name.strip():
+            return f"{name} <{email}>"
+        
+        # If name already looks complete (has spaces), use as-is
+        return name
     
     def _should_be_read(self, email_date: datetime) -> bool:
         """

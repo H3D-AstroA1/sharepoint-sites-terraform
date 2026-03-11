@@ -143,6 +143,13 @@ class EmailCleaner:
         
         return self.graph_client.empty_deleted_items(mailbox)
     
+    def purge_recoverable_items(self, mailbox: str) -> Dict[str, int]:
+        """Purge items from the Recoverable Items folder (truly unrecoverable)."""
+        if not self.graph_client:
+            return {"success": 0, "failed": 0}
+        
+        return self.graph_client.purge_recoverable_items(mailbox)
+    
     def run(
         self,
         all_mailboxes: bool = False,
@@ -383,10 +390,12 @@ def interactive_mode():
     print()
     print(f"    {Colors.GREEN}[1]{Colors.NC} Move to Deleted Items (recoverable)")
     print(f"    {Colors.RED}[2]{Colors.NC} Permanently delete (not recoverable)")
+    print(f"    {Colors.MAGENTA}[3]{Colors.NC} 🔥 FULL PURGE (delete + purge Recoverable Items - truly unrecoverable)")
     print()
     
     mode_choice = input(f"  {Colors.YELLOW}Enter your choice:{Colors.NC} ").strip()
-    permanent = mode_choice == '2'
+    permanent = mode_choice in ['2', '3']
+    purge_recoverable = mode_choice == '3'
     
     # Empty trash option (only if not cleaning all folders which includes deleteditems)
     empty_trash = False
@@ -410,6 +419,25 @@ def interactive_mode():
         dry_run=False,
         all_folders=all_folders
     )
+    
+    # If full purge was selected, also purge recoverable items
+    if purge_recoverable:
+        print()
+        print_step(6, "Purging Recoverable Items")
+        print()
+        print(f"  {Colors.YELLOW}⚠️  Purging items from Recoverable Items folder...{Colors.NC}")
+        print(f"  {Colors.YELLOW}   This makes items truly unrecoverable.{Colors.NC}")
+        print()
+        
+        mailboxes = cleaner.get_mailboxes(all_mailboxes, specific)
+        for user in mailboxes:
+            upn = user.get("upn", "Unknown")
+            print(f"  {Colors.CYAN}Purging recoverable items for:{Colors.NC} {upn}")
+            results = cleaner.purge_recoverable_items(upn)
+            print(f"    {Colors.GREEN}✓{Colors.NC} Purged: {results['success']}, Failed: {results['failed']}")
+        
+        print()
+        print(f"  {Colors.GREEN}✓{Colors.NC} Recoverable items purge complete")
 
 
 def main():

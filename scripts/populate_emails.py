@@ -148,8 +148,18 @@ class EmailPopulator:
     def initialize_components(self) -> bool:
         """Initialize all components."""
         try:
-            # Initialize Graph client
-            self.graph_client = GraphClient()
+            # Get rate limiting configuration
+            settings = self.config.get("settings", {})
+            rate_limit_config = settings.get("rate_limiting", {})
+            
+            # Initialize Graph client with rate limiting
+            self.graph_client = GraphClient(rate_limit_config=rate_limit_config)
+            
+            # Log rate limiting settings if configured
+            if rate_limit_config:
+                print_info(f"Rate limiting: {rate_limit_config.get('request_delay_ms', 100)}ms between requests, "
+                          f"{rate_limit_config.get('batch_delay_ms', 500)}ms between batches, "
+                          f"{rate_limit_config.get('max_retries', 5)} max retries")
             
             # Initialize user pool for CC/BCC support
             # This uses the cc_bcc configuration from mailboxes.yaml
@@ -243,13 +253,12 @@ class EmailPopulator:
         """
         Select a folder using weighted distribution for realism.
         
-        Spam emails go to junkemail folder if available.
-        Other emails use realistic distribution:
+        ONLY spam emails go to junkemail folder.
+        Legitimate emails use realistic distribution:
         - inbox: 55% (most emails land here)
-        - sentitems: 20% (sent emails)
+        - sentitems: 25% (sent emails)
         - drafts: 10% (unfinished emails)
         - deleteditems: 10% (deleted emails)
-        - junkemail: 5% (spam that wasn't caught)
         
         Args:
             folders: List of available folders.
@@ -260,37 +269,47 @@ class EmailPopulator:
         """
         import random
         
-        # Spam emails should go to junk folder if available
-        if category == "spam" and "junkemail" in folders:
-            # 85% of spam goes to junk, 15% slips through to inbox
-            if random.random() < 0.85:
-                return "junkemail"
-            elif "inbox" in folders:
-                return "inbox"
+        # SPAM emails: ONLY go to junkemail or inbox (if slipping through)
+        # They should NEVER go to sentitems, drafts, or deleteditems
+        if category == "spam":
+            if "junkemail" in folders:
+                # 85% of spam goes to junk, 15% slips through to inbox
+                if random.random() < 0.85:
+                    return "junkemail"
+            # Spam that slips through goes to inbox only
+            return "inbox" if "inbox" in folders else "junkemail"
         
-        # Define realistic folder weights
+        # For legitimate emails, exclude junkemail from available folders
+        # Legitimate emails should NEVER go to junk folder
+        legitimate_folders = [f for f in folders if f != "junkemail"]
+        
+        # If no legitimate folders available, fall back to inbox
+        if not legitimate_folders:
+            return "inbox" if "inbox" in folders else folders[0]
+        
+        # Define realistic folder weights (no junkemail for legitimate emails)
         folder_weights = {
             "inbox": 55,
-            "sentitems": 20,
+            "sentitems": 25,
             "drafts": 10,
             "deleteditems": 10,
-            "junkemail": 5,
         }
         
-        # Filter to only available folders and get their weights
+        # Filter to only available legitimate folders and get their weights
         available_weights = []
         available_folders = []
-        for folder in folders:
+        for folder in legitimate_folders:
             if folder in folder_weights:
                 available_folders.append(folder)
                 available_weights.append(folder_weights[folder])
             else:
-                # Unknown folder gets default weight
-                available_folders.append(folder)
-                available_weights.append(10)
+                # Unknown folder gets default weight (but not junkemail)
+                if folder != "junkemail":
+                    available_folders.append(folder)
+                    available_weights.append(10)
         
         if not available_folders:
-            return folders[0] if folders else "inbox"
+            return "inbox" if "inbox" in folders else (folders[0] if folders else "inbox")
         
         return random.choices(available_folders, weights=available_weights)[0]
     

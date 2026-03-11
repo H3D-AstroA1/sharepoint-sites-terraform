@@ -197,17 +197,23 @@ class EmailContentGenerator:
         """Select appropriate sender based on template and recipient."""
         sender_type = template.get("sender_type", "internal_users")
         
-        # Override with distribution-based selection sometimes
-        distribution = self.settings.get("sender_distribution", {})
-        if distribution and random.random() < 0.3:  # 30% chance to use distribution
-            sender_type = random.choices(
-                list(distribution.keys()),
-                weights=list(distribution.values())
-            )[0]
-        
+        # IMPORTANT: Spam templates MUST always use spam senders
+        # Never override spam sender type with internal users
         if sender_type == "external_spam":
             return self._get_spam_sender()
-        elif sender_type == "external_business":
+        
+        # Override with distribution-based selection sometimes (but not for spam)
+        distribution = self.settings.get("sender_distribution", {})
+        if distribution and random.random() < 0.3:  # 30% chance to use distribution
+            # Exclude external_spam from random selection to prevent internal users sending spam
+            non_spam_distribution = {k: v for k, v in distribution.items() if k != "external_spam"}
+            if non_spam_distribution:
+                sender_type = random.choices(
+                    list(non_spam_distribution.keys()),
+                    weights=list(non_spam_distribution.values())
+                )[0]
+        
+        if sender_type == "external_business":
             return self._get_external_business_sender()
         elif sender_type == "external":
             return self._get_external_sender(template)

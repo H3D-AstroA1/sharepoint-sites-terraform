@@ -4,16 +4,20 @@ This tool populates Microsoft 365 mailboxes with realistic organizational emails
 
 ## Features
 
-- **Multiple Email Types**: Newsletters, organizational communications, project updates, meeting requests, inter-departmental emails, security alerts, and spam
+- **Multiple Email Types**: Newsletters, organizational communications, project updates, meeting requests, inter-departmental emails, security alerts, external business communications, and spam
 - **Realistic Content**: Department-specific content with professional HTML formatting
 - **Comprehensive Variation System**: Extensive content pools for greetings, closings, project names, document names, meeting topics, and more - ensuring each email is unique
+- **Azure AD Auto-Discovery**: Automatically discover users and groups from Azure AD for realistic CC/BCC recipients
+- **CC/BCC Support**: Emails include realistic CC and BCC recipients from your organization
+- **External Business Emails**: Legitimate external communications from vendors, partners, and clients
 - **Attachments**: Word, Excel, PowerPoint, and PDF documents with relevant content
 - **Email Threading**: Reply chains, forward chains, and reply-all conversations
-- **Backdated Emails**: Distributed over 6-12 months with business hours bias
+- **Backdated Emails**: Distributed over 6-12 months with business hours bias using MIME import
 - **Sensitivity Labels**: Microsoft 365 sensitivity labels (General, Internal, Confidential, Highly Confidential)
 - **SharePoint Integration**: Links to SharePoint sites from your configuration
 - **Multi-Folder Support**: Populate emails in inbox, sent items, deleted items, drafts, and junk folders with weighted distribution
 - **Realistic Email Properties**: Read/unread status, importance levels, flags, and color categories
+- **Rate Limiting**: Configurable delays to prevent API throttling with automatic retry
 
 ## Prerequisites
 
@@ -168,17 +172,18 @@ Use `--folders all` to populate all folders, or specify individual folders like 
 
 ## Email Types
 
-The tool generates seven types of emails with configurable distribution:
+The tool generates eight types of emails with configurable distribution:
 
 | Category | Default % | Description |
 |----------|-----------|-------------|
-| 📰 Newsletters | 12% | Company and industry newsletters |
-| 🔗 SharePoint Links | 18% | Document sharing and collaboration |
+| 📰 Newsletters | 10% | Company and industry newsletters |
+| 🔗 SharePoint Links | 15% | Document sharing and collaboration |
 | 📎 Attachments | 15% | Emails with file attachments |
 | 📢 Organisational | 15% | Company-wide communications |
-| 💬 Inter-departmental | 18% | Team and project communications |
-| 🔒 Security | 12% | Account and password notifications |
-| 🗑️ Spam | 10% | Promotional spam, phishing simulations, scams |
+| 💬 Inter-departmental | 15% | Team and project communications |
+| 🔒 Security | 8% | Account and password notifications |
+| 🏢 External Business | 15% | Legitimate external communications (vendors, partners, clients) |
+| 🗑️ Spam | 7% | Promotional spam, phishing simulations, scams |
 
 ### 1. Newsletters (📰)
 - Company newsletters with updates and announcements
@@ -229,7 +234,29 @@ These emails are useful for testing:
 - Incident response procedures
 - User education about phishing
 
-### 7. Spam/Junk Emails (🗑️)
+### 7. External Business Emails (🏢)
+
+Legitimate external communications from vendors, partners, and clients:
+
+- **Follow-up Emails** - Post-meeting follow-ups, action items
+- **Proposals** - Business proposals, partnership opportunities
+- **Meeting Requests** - External meeting scheduling
+- **Project Updates** - Status updates from external partners
+- **Invoices** - Legitimate billing and payment communications
+- **Contract Discussions** - Contract reviews, negotiations
+- **Introductions** - Business introductions, networking
+- **Thank You Notes** - Appreciation for business relationships
+- **Support Tickets** - Customer support communications
+- **Event Invitations** - Conference invites, webinar registrations
+- **Product Updates** - Vendor product announcements
+- **Feedback Requests** - Survey and feedback requests
+
+External business emails come from realistic external domains like:
+- `acme-consulting.com`, `globaltech-solutions.com`
+- `premier-services.net`, `innovate-partners.com`
+- `enterprise-systems.io`, `strategic-advisors.com`
+
+### 8. Spam/Junk Emails (🗑️)
 - **Promotional Spam** - Flash sales, discount offers, limited-time deals
 - **Phishing Simulations** - Fake security alerts, account verification requests
 - **Lottery Scams** - Prize notifications, winner announcements
@@ -243,6 +270,8 @@ Spam emails are useful for testing:
 - User education about scams
 
 **Spam Routing**: 85% of spam emails go to the Junk folder, while 15% "slip through" to the Inbox (simulating real-world spam filter behavior).
+
+**Important**: Spam emails ALWAYS use external spam senders. Internal users will never appear as spam senders.
 
 ## Folder Distribution
 
@@ -308,6 +337,91 @@ Emails are assigned Microsoft 365 sensitivity labels:
 | Confidential | 20% | Sensitive business data |
 | Highly Confidential | 5% | Restricted access |
 
+## Azure AD Auto-Discovery
+
+The tool can automatically discover users and groups from Azure AD to populate realistic CC/BCC recipients.
+
+### Enabling Azure AD Discovery
+
+Add the following to your `mailboxes.yaml`:
+
+```yaml
+azure_ad:
+  enabled: true
+  discover_users: true
+  discover_groups: true
+  cache:
+    enabled: true
+    ttl_minutes: 60
+    path: ".azure_ad_cache.json"
+  user_filter:
+    include_guests: false
+    require_mail: true
+  group_filter:
+    types:
+      - unified  # Microsoft 365 Groups
+      - security
+    max_members: 50
+```
+
+### CC/BCC Configuration
+
+Configure how CC and BCC recipients are selected:
+
+```yaml
+cc_bcc:
+  enabled: true
+  cc_probability: 0.3      # 30% of emails have CC
+  bcc_probability: 0.1     # 10% of emails have BCC
+  max_cc_recipients: 3
+  max_bcc_recipients: 2
+  prefer_same_department: true
+  include_managers: true
+```
+
+### Using Azure AD Discovery
+
+Run the menu and select option `[9] Azure AD Discovery` to:
+- Discover users and groups from your tenant
+- View discovery statistics
+- Clear the cache
+
+Or use the command line:
+```bash
+python scripts/populate_emails.py --all --auto-discover
+```
+
+## Rate Limiting
+
+The tool includes configurable rate limiting to prevent API throttling.
+
+### Configuration
+
+Add to your `mailboxes.yaml`:
+
+```yaml
+rate_limiting:
+  request_delay_ms: 100    # Delay between individual requests (ms)
+  batch_delay_ms: 500      # Delay between batches (ms)
+  max_retries: 5           # Maximum retry attempts with exponential backoff
+```
+
+### Automatic Retry
+
+When rate limited (HTTP 429), the tool automatically:
+1. Reads the `Retry-After` header
+2. Waits the specified time
+3. Retries the request
+4. Uses exponential backoff (1s, 2s, 4s, 8s, 16s)
+
+### Recommendations
+
+| Scenario | request_delay_ms | batch_delay_ms | max_retries |
+|----------|------------------|----------------|-------------|
+| Small batches (<50 emails) | 50 | 200 | 3 |
+| Medium batches (50-200) | 100 | 500 | 5 |
+| Large batches (200+) | 200 | 1000 | 7 |
+
 ## Date Distribution
 
 Emails are backdated over 6-12 months with:
@@ -315,6 +429,7 @@ Emails are backdated over 6-12 months with:
 - **Business Hours Bias**: 80% during 8 AM - 6 PM
 - **Weekday Bias**: 90% on weekdays
 - **Realistic Gaps**: Natural distribution, not uniform
+- **MIME Import**: Uses MIME message format for proper date handling
 
 ## Attachments
 
@@ -412,10 +527,33 @@ python scripts/cleanup_emails.py --all --dry-run
 | `--empty-trash` | Also empty Deleted Items folder |
 | `--dry-run` | Preview without deleting |
 
+### Cleanup Modes (Interactive)
+
+When running in interactive mode, you can choose from three deletion modes:
+
+| Mode | Description |
+|------|-------------|
+| `[1] Move to Deleted Items` | Emails can be recovered from Deleted Items |
+| `[2] Permanently delete` | Emails are deleted but may be in Recoverable Items |
+| `[3] 🔥 FULL PURGE` | Truly unrecoverable - also purges Recoverable Items folder |
+
+### Full Purge
+
+The **Full Purge** option (mode 3) performs a complete cleanup:
+
+1. Permanently deletes emails from selected folders
+2. Purges items from the Recoverable Items folder:
+   - `recoverableitemsdeletions` - Soft-deleted items
+   - `recoverableitemsversions` - Previous versions
+   - `recoverableitemspurges` - Items pending purge
+
+⚠️ **Warning**: Items purged from Recoverable Items cannot be recovered by any means.
+
 ### Cleanup Behavior
 
 - **Default**: Moves emails to Deleted Items (recoverable)
-- **Permanent**: Permanently deletes emails (not recoverable)
+- **Permanent**: Permanently deletes emails (may still be in Recoverable Items)
+- **Full Purge**: Truly unrecoverable deletion including Recoverable Items
 - **Validation**: Validates mailboxes before deletion
 - **Confirmation**: Requires confirmation for destructive operations
 
@@ -483,26 +621,29 @@ When listing mailboxes, you can choose to:
 ```
 scripts/
 ├── populate_emails.py          # Main population script
-├── cleanup_emails.py           # Email cleanup script
+├── cleanup_emails.py           # Email cleanup script (with Full Purge support)
 └── email_generator/
     ├── __init__.py
     ├── config.py               # Configuration loader
     ├── templates.py            # Template re-exports (backward compatibility)
-    ├── content_generator.py    # Dynamic content generation
+    ├── content_generator.py    # Dynamic content generation with CC/BCC
     ├── variations.py           # Content variation pools for realistic emails
     ├── attachments.py          # File attachment creation
     ├── threading.py            # Email thread management
-    ├── graph_client.py         # Microsoft Graph API client
+    ├── graph_client.py         # Microsoft Graph API client (MIME import, rate limiting)
+    ├── azure_ad_discovery.py   # Azure AD user/group discovery
+    ├── user_pool.py            # User pool for CC/BCC recipient selection
     ├── utils.py                # Utility functions
     └── templates/              # Email template modules
-        ├── __init__.py                    # Exports all templates
-        ├── newsletter_templates.py        # Company & industry newsletters
-        ├── sharepoint_templates.py        # Document sharing & site activity
-        ├── attachment_templates.py        # Reports & documents for review
-        ├── organisational_templates.py    # Announcements, HR, leadership
-        ├── interdepartmental_templates.py # Project updates, meetings, status
-        ├── security_templates.py          # Account blocked, password reset
-        └── spam_templates.py              # Promotional, phishing, scams
+        ├── __init__.py                       # Exports all templates
+        ├── newsletter_templates.py           # Company & industry newsletters
+        ├── sharepoint_templates.py           # Document sharing & site activity
+        ├── attachment_templates.py           # Reports & documents for review
+        ├── organisational_templates.py       # Announcements, HR, leadership
+        ├── interdepartmental_templates.py    # Project updates, meetings, status
+        ├── security_templates.py             # Account blocked, password reset
+        ├── spam_templates.py                 # Promotional, phishing, scams
+        └── external_business_templates.py    # External vendor/partner communications
 
 config/
 ├── mailboxes.yaml              # Mailbox configuration
@@ -560,6 +701,7 @@ Each department has tailored:
 | Organisational | `organisational_templates.py` | 3 | Announcements, HR policies, leadership |
 | Interdepartmental | `interdepartmental_templates.py` | 4 | Project updates, meetings, status reports |
 | Security | `security_templates.py` | 5 | Account blocked, password reset, suspicious activity |
+| External Business | `external_business_templates.py` | 12 | Vendor/partner communications, proposals, invoices |
 | Spam | `spam_templates.py` | 5 | Promotional, phishing, lottery scams |
 
 ## Security Considerations
