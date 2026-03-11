@@ -860,37 +860,9 @@ class GraphClient:
         # Add flag status - some emails should be flagged for follow-up
         message["flag"] = self._generate_flag_status(email_date, category)
         
-        # Add @mentions in body if applicable
-        if email.get("has_mention") and "@" in email.get("body", ""):
-            message["mentionsPreview"] = {"isMentioned": True}
-        
         # Add inference classification (focused vs other)
+        # Note: This helps Outlook sort emails into Focused/Other tabs
         message["inferenceClassification"] = self._get_inference_classification(sender, category)
-        
-        # Add internet message headers for external emails
-        sender_email = sender.get("email", "")
-        if sender_email and not sender_email.endswith(mailbox.split("@")[-1]):
-            message["internetMessageHeaders"] = [
-                {
-                    "name": "X-MS-Exchange-Organization-SCL",
-                    "value": str(random.choice([0, 0, 0, 1, 2]))  # Spam confidence level
-                },
-                {
-                    "name": "X-MS-Exchange-Organization-AuthSource",
-                    "value": "external.mail.protection.outlook.com"
-                }
-            ]
-        
-        # Add conversation ID for threading
-        if email.get("conversation_id"):
-            message["conversationId"] = email["conversation_id"]
-        
-        # Add reply/forward indicators
-        subject = email.get("subject", "")
-        if subject.startswith("RE:") or subject.startswith("Re:"):
-            message["isReply"] = True
-        elif subject.startswith("FW:") or subject.startswith("Fwd:"):
-            message["isForward"] = True
         
         return message
     
