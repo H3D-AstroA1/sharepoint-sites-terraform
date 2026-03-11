@@ -358,11 +358,37 @@ class EWSClient:
             
             # Build MIME message
             mime_msg = MIMEMultipart('alternative')
-            mime_msg['Subject'] = email.get("subject", "No Subject")
+            
+            # Get threading info
+            threading = email.get("threading", {})
+            is_reply = threading.get("is_reply", False)
+            is_forward = threading.get("is_forward", False)
+            is_reply_all = threading.get("is_reply_all", False)
+            
+            # Modify subject for replies/forwards
+            subject = email.get("subject", "No Subject")
+            if is_reply or is_reply_all:
+                if not subject.lower().startswith("re:"):
+                    subject = f"Re: {subject}"
+            elif is_forward:
+                if not subject.lower().startswith("fw:") and not subject.lower().startswith("fwd:"):
+                    subject = f"Fwd: {subject}"
+            
+            mime_msg['Subject'] = subject
             mime_msg['From'] = formataddr((from_name, from_email))
             mime_msg['To'] = formataddr((to_name, to_email))
             mime_msg['Date'] = formatdate(email_date.timestamp(), localtime=False)
             mime_msg['Message-ID'] = f"<{email_date.timestamp()}.{id(email)}@{from_email.split('@')[-1]}>"
+            
+            # Add threading headers for replies/forwards
+            if is_reply or is_reply_all or is_forward:
+                if threading.get("in_reply_to"):
+                    mime_msg['In-Reply-To'] = threading["in_reply_to"]
+                if threading.get("references"):
+                    mime_msg['References'] = " ".join(threading["references"])
+                if threading.get("thread_id"):
+                    mime_msg['Thread-Topic'] = subject.replace("Re: ", "").replace("Fwd: ", "")
+                    mime_msg['Thread-Index'] = threading["thread_id"]
             
             # Add CC recipients
             if email.get("cc_recipients"):
@@ -370,8 +396,32 @@ class EWSClient:
                           for cc in email["cc_recipients"]]
                 mime_msg['Cc'] = ", ".join(cc_list)
             
+            # Add X-Priority header for importance
+            importance = email.get("importance", "normal")
+            if importance == "high":
+                mime_msg['X-Priority'] = '1'
+                mime_msg['X-MSMail-Priority'] = 'High'
+                mime_msg['Importance'] = 'High'
+            elif importance == "low":
+                mime_msg['X-Priority'] = '5'
+                mime_msg['X-MSMail-Priority'] = 'Low'
+                mime_msg['Importance'] = 'Low'
+            
             # Add body - both plain text and HTML
             body_html = email.get("body", "")
+            
+            # For forwards, add original message info
+            if is_forward and threading.get("original_sender"):
+                orig_sender = threading["original_sender"]
+                forward_header = f"""
+<div style="border-left: 2px solid #ccc; padding-left: 10px; margin: 10px 0;">
+<p><strong>---------- Forwarded message ---------</strong></p>
+<p><strong>From:</strong> {orig_sender.get('name', '')} &lt;{orig_sender.get('email', '')}&gt;</p>
+<p><strong>Date:</strong> {email_date.strftime('%a, %b %d, %Y at %I:%M %p')}</p>
+<p><strong>Subject:</strong> {email.get('subject', '')}</p>
+</div>
+"""
+                body_html = forward_header + body_html
             # Create plain text version by stripping HTML tags
             body_text = re.sub(r'<[^>]+>', '', body_html)
             body_text = body_text.replace('&nbsp;', ' ').replace('&amp;', '&')
@@ -435,6 +485,40 @@ class EWSClient:
             # EWS expects: 2024-01-15T10:30:00Z
             ews_date = email_date.strftime('%Y-%m-%dT%H:%M:%SZ')
             
+            # Get importance level (High, Normal, Low)
+            importance = email.get("importance", "normal")
+            importance_map = {"high": "High", "normal": "Normal", "low": "Low"}
+            ews_importance = importance_map.get(importance.lower(), "Normal")
+            
+            # Get categories (color tags)
+            categories = email.get("categories", [])
+            categories_xml = ""
+            if categories:
+                cat_items = "".join(f"<t:String>{cat}</t:String>" for cat in categories)
+                categories_xml = f"<t:Categories>{cat_items}</t:Categories>"
+            
+            # Get flag status
+            flag_status = email.get("flag_status", {})
+            flag_xml = ""
+            if flag_status.get("flagged"):
+                flag_type = flag_status.get("flag_type", "followUp")
+                if flag_status.get("completed"):
+                    flag_xml = """<t:Flag>
+            <t:FlagStatus>Complete</t:FlagStatus>
+          </t:Flag>"""
+                else:
+                    due_date = flag_status.get("due_date")
+                    if due_date:
+                        due_str = due_date.strftime('%Y-%m-%dT%H:%M:%SZ')
+                        flag_xml = f"""<t:Flag>
+            <t:FlagStatus>Flagged</t:FlagStatus>
+            <t:DueDate>{due_str}</t:DueDate>
+          </t:Flag>"""
+                    else:
+                        flag_xml = """<t:Flag>
+            <t:FlagStatus>Flagged</t:FlagStatus>
+          </t:Flag>"""
+            
             # Build the CreateItem SOAP request with MIME content
             # Using MimeContent allows setting the Date header
             # Setting extended properties for timestamps:
@@ -461,6 +545,9 @@ class EWSClient:
       <m:Items>
         <t:Message>
           <t:MimeContent CharacterSet="UTF-8">{mime_b64}</t:MimeContent>
+          <t:Importance>{ews_importance}</t:Importance>
+          {categories_xml}
+          {flag_xml}
           <t:IsRead>{is_read_val}</t:IsRead>
           <t:ExtendedProperty>
             <t:ExtendedFieldURI PropertyTag="0x0E07" PropertyType="Integer"/>

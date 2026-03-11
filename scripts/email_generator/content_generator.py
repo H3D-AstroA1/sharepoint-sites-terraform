@@ -78,6 +78,18 @@ class EmailContentGenerator:
         # Select sensitivity label
         sensitivity = self._select_sensitivity(category, recipient)
         
+        # Generate importance level
+        importance = self._generate_importance(category, template)
+        
+        # Generate flag status (follow-up flags)
+        flag_status = self._generate_flag_status(email_date, category)
+        
+        # Generate categories (color tags)
+        categories = self._generate_categories(category, recipient)
+        
+        # Generate threading info (reply/forward)
+        threading_info = self._generate_threading_info(category, template, sender, recipient)
+        
         # Build email object
         email = {
             "category": category,
@@ -93,6 +105,11 @@ class EmailContentGenerator:
             "sensitivity_label": sensitivity,
             "has_attachment": template.get("has_attachment", False),
             "supports_threading": template.get("supports_threading", False),
+            # New realistic properties
+            "importance": importance,
+            "flag_status": flag_status,
+            "categories": categories,
+            "threading": threading_info,
         }
         
         # Add CC/BCC recipients if user_pool is available
@@ -849,6 +866,218 @@ class EmailContentGenerator:
         
         types = dept_attachments.get(department, ["docx", "xlsx", "pptx", "pdf"])
         return random.choice(types)
+    
+    def _generate_importance(self, category: str, template: Dict) -> str:
+        """
+        Generate email importance level based on category and template.
+        
+        Returns:
+            'high', 'normal', or 'low'
+        """
+        # Categories that tend to have high importance
+        high_importance_categories = ["security", "organisational"]
+        
+        # Check template for urgency indicators
+        subject_templates = template.get("subject_templates", [])
+        has_urgent = any(
+            "urgent" in s.lower() or "important" in s.lower() or "action required" in s.lower()
+            for s in subject_templates
+        )
+        
+        if has_urgent:
+            return random.choices(["high", "normal"], weights=[0.7, 0.3])[0]
+        
+        if category in high_importance_categories:
+            return random.choices(["high", "normal", "low"], weights=[0.3, 0.6, 0.1])[0]
+        
+        # Default distribution: mostly normal
+        return random.choices(["high", "normal", "low"], weights=[0.1, 0.8, 0.1])[0]
+    
+    def _generate_flag_status(self, email_date: datetime, category: str) -> Dict[str, Any]:
+        """
+        Generate follow-up flag status for the email.
+        
+        Returns:
+            Dictionary with flag information:
+            - flagged: bool - whether email is flagged
+            - flag_type: str - 'followUp', 'reply', 'review', etc.
+            - due_date: datetime or None - when follow-up is due
+            - completed: bool - whether flag is completed
+        """
+        # Only flag some emails (about 15%)
+        if random.random() > 0.15:
+            return {"flagged": False}
+        
+        # Categories more likely to be flagged
+        flag_weights = {
+            "interdepartmental": 0.25,
+            "organisational": 0.20,
+            "external_business": 0.20,
+            "security": 0.15,
+            "attachments": 0.15,
+            "links": 0.10,
+            "newsletters": 0.05,
+            "spam": 0.02,
+        }
+        
+        # Check if this category should be flagged
+        if random.random() > flag_weights.get(category, 0.10):
+            return {"flagged": False}
+        
+        # Flag types
+        flag_types = ["followUp", "reply", "review", "forYourInformation", "noResponseNecessary"]
+        flag_type = random.choices(
+            flag_types,
+            weights=[0.4, 0.25, 0.2, 0.1, 0.05]
+        )[0]
+        
+        # Due date (1-14 days from email date)
+        due_days = random.randint(1, 14)
+        due_date = email_date + timedelta(days=due_days)
+        
+        # Older emails might have completed flags
+        now = datetime.now()
+        if email_date.tzinfo:
+            now = now.replace(tzinfo=email_date.tzinfo)
+        
+        days_old = (now - email_date).days
+        completed = days_old > due_days and random.random() > 0.3
+        
+        return {
+            "flagged": True,
+            "flag_type": flag_type,
+            "due_date": due_date,
+            "completed": completed,
+        }
+    
+    def _generate_categories(self, category: str, recipient: Dict) -> List[str]:
+        """
+        Generate Outlook categories (color tags) for the email.
+        
+        Returns:
+            List of category names (Outlook color categories)
+        """
+        # Only categorize some emails (about 20%)
+        if random.random() > 0.20:
+            return []
+        
+        # Map email categories to Outlook color categories
+        category_mapping = {
+            "interdepartmental": ["Blue Category", "Green Category"],
+            "organisational": ["Purple Category", "Red Category"],
+            "security": ["Red Category", "Orange Category"],
+            "external_business": ["Yellow Category", "Green Category"],
+            "attachments": ["Blue Category", "Yellow Category"],
+            "links": ["Green Category"],
+            "newsletters": ["Purple Category"],
+            "spam": [],  # Don't categorize spam
+        }
+        
+        # Department-based categories
+        department = recipient.get("department", "")
+        dept_categories = {
+            "Finance Department": ["Yellow Category"],
+            "Human Resources": ["Purple Category"],
+            "IT Department": ["Blue Category"],
+            "Marketing Department": ["Orange Category"],
+            "Sales Department": ["Green Category"],
+            "Executive Leadership": ["Red Category"],
+            "Legal & Compliance": ["Red Category"],
+        }
+        
+        available = category_mapping.get(category, ["Blue Category"])
+        dept_cats = dept_categories.get(department, [])
+        
+        # Combine and pick 1-2 categories
+        all_cats = list(set(available + dept_cats))
+        if not all_cats:
+            return []
+        
+        num_cats = random.choices([1, 2], weights=[0.8, 0.2])[0]
+        return random.sample(all_cats, min(num_cats, len(all_cats)))
+    
+    def _generate_threading_info(
+        self,
+        category: str,
+        template: Dict,
+        sender: Dict,
+        recipient: Dict
+    ) -> Dict[str, Any]:
+        """
+        Generate email threading information (reply/forward chains).
+        
+        Returns:
+            Dictionary with threading info:
+            - is_reply: bool - whether this is a reply
+            - is_forward: bool - whether this is a forward
+            - is_reply_all: bool - whether this is a reply-all
+            - thread_id: str - conversation thread ID
+            - in_reply_to: str - message ID being replied to
+            - references: list - chain of message IDs
+            - original_sender: dict - original sender for forwards
+        """
+        # Check if template supports threading
+        if not template.get("supports_threading", False):
+            return {"is_reply": False, "is_forward": False, "is_reply_all": False}
+        
+        # Threading probability by category
+        thread_weights = {
+            "interdepartmental": 0.45,
+            "external_business": 0.35,
+            "organisational": 0.20,
+            "attachments": 0.25,
+            "links": 0.15,
+            "security": 0.10,
+            "newsletters": 0.05,
+            "spam": 0.0,
+        }
+        
+        if random.random() > thread_weights.get(category, 0.20):
+            return {"is_reply": False, "is_forward": False, "is_reply_all": False}
+        
+        # Determine thread type
+        thread_type = random.choices(
+            ["reply", "reply_all", "forward"],
+            weights=[0.5, 0.25, 0.25]
+        )[0]
+        
+        # Generate thread ID
+        import hashlib
+        thread_seed = f"{sender.get('email', '')}-{recipient.get('email', '')}-{random.randint(1000, 9999)}"
+        thread_id = hashlib.md5(thread_seed.encode()).hexdigest()[:16]
+        
+        # Generate message ID for in-reply-to
+        original_msg_id = f"<{thread_id}.{random.randint(1, 100)}@{sender.get('email', 'example.com').split('@')[-1]}>"
+        
+        # Build references chain (1-3 previous messages)
+        num_refs = random.randint(1, 3)
+        references = [
+            f"<{thread_id}.{i}@{sender.get('email', 'example.com').split('@')[-1]}>"
+            for i in range(num_refs)
+        ]
+        
+        result = {
+            "is_reply": thread_type == "reply",
+            "is_forward": thread_type == "forward",
+            "is_reply_all": thread_type == "reply_all",
+            "thread_id": thread_id,
+            "in_reply_to": original_msg_id,
+            "references": references,
+        }
+        
+        # For forwards, include original sender info
+        if thread_type == "forward":
+            # Generate a plausible original sender
+            original_senders = [
+                {"name": "John Smith", "email": "john.smith@external.com"},
+                {"name": "Sarah Johnson", "email": "sarah.j@partner.org"},
+                {"name": "Mike Wilson", "email": "m.wilson@vendor.net"},
+                {"name": "Emily Brown", "email": "emily.brown@client.com"},
+                {"name": "David Lee", "email": "d.lee@supplier.io"},
+            ]
+            result["original_sender"] = random.choice(original_senders)
+        
+        return result
     
     def _get_site_for_department(self, department: str) -> str:
         """Get SharePoint site name for a department."""
