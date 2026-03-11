@@ -136,15 +136,27 @@ class GraphClient:
             return True
             
         except urllib.error.HTTPError as e:
-            if e.code == 403:
-                print(f"  Permission denied for mailbox: {mailbox}")
+            # Read the error response body for detailed error message
+            error_body = ""
+            try:
+                error_body = e.read().decode('utf-8')
+            except Exception:
+                pass
+            
+            if e.code == 400:
+                # Bad request - likely invalid property or format
+                print(f"  ❌ Bad Request (400) for folder '{folder}': {error_body[:200]}")
+            elif e.code == 403:
+                print(f"  ❌ Permission denied (403) for mailbox: {mailbox}")
             elif e.code == 404:
-                print(f"  Mailbox not found: {mailbox}")
+                print(f"  ❌ Not found (404) - mailbox or folder: {mailbox}/{folder}")
             elif e.code == 429:
-                print(f"  Rate limited - will retry on next attempt")
+                print(f"  ⚠️ Rate limited (429) - will retry on next attempt")
+            else:
+                print(f"  ❌ HTTP Error {e.code} for {folder}: {error_body[:200]}")
             return False
         except Exception as e:
-            print(f"  Error creating email: {e}")
+            print(f"  ❌ Error creating email in {folder}: {type(e).__name__}: {e}")
             return False
     
     def create_email_batch(
@@ -730,22 +742,16 @@ class GraphClient:
         """
         Build the message payload for Graph API.
         
-        Uses singleValueExtendedProperties to set MAPI properties for backdated
-        timestamps since receivedDateTime and sentDateTime are read-only.
+        For sentitems and drafts folders, the From/To are swapped so the mailbox
+        owner appears as the sender and the original sender appears as the recipient.
         
-        For sentitems folder, the From/To are swapped so the mailbox owner appears
-        as the sender and the original sender appears as the recipient.
-        
-        MAPI Properties used:
-        - PR_MESSAGE_DELIVERY_TIME (0x0E06): When message was delivered
-        - PR_CLIENT_SUBMIT_TIME (0x0039): When message was submitted/sent
-        - PR_CREATION_TIME (0x3007): When message was created
-        - PR_MESSAGE_FLAGS (0x0E07): Message flags (0 = read, not draft)
+        Note: receivedDateTime and sentDateTime are read-only in Graph API, so
+        messages will have the current timestamp when created.
         
         Args:
             mailbox: Recipient mailbox (the user's email address).
             email: Email data dictionary.
-            folder: Target folder (inbox, sentitems, etc.). Default is inbox.
+            folder: Target folder (inbox, sentitems, drafts, etc.). Default is inbox.
             
         Returns:
             Message payload dictionary.
@@ -753,9 +759,6 @@ class GraphClient:
         sender = email.get("sender", {})
         recipient = email.get("recipient", {})
         email_date = email.get("date", datetime.now())
-        
-        # Format date for Graph API (ISO 8601 format with timezone)
-        date_str = email_date.strftime("%Y-%m-%dT%H:%M:%SZ")
         
         # For sent items and drafts, swap From and To:
         # - From should be the mailbox owner (they sent/are composing it)
@@ -803,32 +806,8 @@ class GraphClient:
             "from": from_address,
             "toRecipients": to_recipients,
             # Note: receivedDateTime and sentDateTime are read-only in Graph API
-            # We use singleValueExtendedProperties to set MAPI timestamps instead
+            # Messages will have current timestamp - this is a Graph API limitation
             "isRead": self._should_be_read(email_date),
-            # Use extended properties to set timestamps and message flags
-            "singleValueExtendedProperties": [
-                {
-                    # PR_MESSAGE_DELIVERY_TIME - When the message was delivered
-                    "id": "SystemTime 0x0E06",
-                    "value": date_str
-                },
-                {
-                    # PR_CLIENT_SUBMIT_TIME - When the message was sent
-                    "id": "SystemTime 0x0039",
-                    "value": date_str
-                },
-                {
-                    # PR_CREATION_TIME - When the message was created
-                    "id": "SystemTime 0x3007",
-                    "value": date_str
-                },
-                {
-                    # PR_MESSAGE_FLAGS - Set to MSGFLAG_READ (1) to mark as read, not draft
-                    # Bit 0 (MSGFLAG_READ) = 1, Bit 3 (MSGFLAG_UNSENT/draft) = 0
-                    "id": "Integer 0x0E07",
-                    "value": "1" if self._should_be_read(email_date) else "0"
-                }
-            ],
         }
         
         # Add CC recipients if present
