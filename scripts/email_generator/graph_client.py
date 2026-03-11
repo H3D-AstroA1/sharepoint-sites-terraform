@@ -757,10 +757,10 @@ class GraphClient:
         # Format date for Graph API (ISO 8601 format with timezone)
         date_str = email_date.strftime("%Y-%m-%dT%H:%M:%SZ")
         
-        # For sent items, swap From and To:
-        # - From should be the mailbox owner (they sent it)
-        # - To should be the original sender (they received it)
-        if folder == "sentitems":
+        # For sent items and drafts, swap From and To:
+        # - From should be the mailbox owner (they sent/are composing it)
+        # - To should be the original sender (they are/will be the recipient)
+        if folder in ("sentitems", "drafts"):
             # Mailbox owner is the sender
             from_address = {
                 "emailAddress": {
@@ -778,7 +778,7 @@ class GraphClient:
                 }
             ]
         else:
-            # Normal case: sender is From, mailbox owner is To
+            # Normal case (inbox, junkemail, deleteditems): sender is From, mailbox owner is To
             from_address = {
                 "emailAddress": {
                     "name": sender.get("name", "Sender"),

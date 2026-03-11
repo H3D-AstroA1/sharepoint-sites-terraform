@@ -269,15 +269,13 @@ class EmailPopulator:
         """
         import random
         
-        # SPAM emails: ONLY go to junkemail or inbox (if slipping through)
-        # They should NEVER go to sentitems, drafts, or deleteditems
+        # SPAM emails: ALWAYS go to junkemail folder
+        # They should NEVER go to inbox, sentitems, drafts, or deleteditems
         if category == "spam":
             if "junkemail" in folders:
-                # 85% of spam goes to junk, 15% slips through to inbox
-                if random.random() < 0.85:
-                    return "junkemail"
-            # Spam that slips through goes to inbox only
-            return "inbox" if "inbox" in folders else "junkemail"
+                return "junkemail"
+            # If junkemail not available, still try to use it
+            return "junkemail"
         
         # For legitimate emails, exclude junkemail from available folders
         # Legitimate emails should NEVER go to junk folder
