@@ -797,6 +797,9 @@ class GraphClient:
                 }
             ]
         
+        # Format date for extended properties (ISO 8601 format)
+        date_str = email_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+        
         message = {
             "subject": email.get("subject", "No Subject"),
             "body": {
@@ -805,9 +808,23 @@ class GraphClient:
             },
             "from": from_address,
             "toRecipients": to_recipients,
-            # Note: receivedDateTime and sentDateTime are read-only in Graph API
-            # Messages will have current timestamp - this is a Graph API limitation
             "isRead": self._should_be_read(email_date),
+            # Use singleValueExtendedProperties to set message timestamps
+            # Format: "SystemTime {property_tag}" where property_tag is hex with type suffix
+            # PR_MESSAGE_DELIVERY_TIME = 0x0E06 (type 0x0040 = SystemTime)
+            # PR_CLIENT_SUBMIT_TIME = 0x0039 (type 0x0040 = SystemTime)
+            "singleValueExtendedProperties": [
+                {
+                    # PR_MESSAGE_DELIVERY_TIME - sets receivedDateTime
+                    "id": "SystemTime 0x0E060040",
+                    "value": date_str
+                },
+                {
+                    # PR_CLIENT_SUBMIT_TIME - sets sentDateTime
+                    "id": "SystemTime 0x00390040",
+                    "value": date_str
+                }
+            ],
         }
         
         # Add CC recipients if present
