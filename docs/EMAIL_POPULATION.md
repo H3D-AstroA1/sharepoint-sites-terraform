@@ -21,7 +21,7 @@ This tool populates Microsoft 365 mailboxes with realistic organizational emails
 
 ## Prerequisites
 
-1. **Python 3.8+** with PyYAML installed:
+1. **Python 3.8+** with required packages:
    ```bash
    pip install -r requirements.txt
    ```
@@ -31,11 +31,38 @@ This tool populates Microsoft 365 mailboxes with realistic organizational emails
    az login
    ```
 
-3. **Microsoft Graph API Permissions**:
+3. **App Registration with Permissions**:
+   
+   Use the menu option `[A] Manage App Registration` to create an app with:
+   
+   **Microsoft Graph API Permissions**:
    - `Mail.ReadWrite` - To create emails in mailboxes
    - `Mail.Send` - To send emails (optional)
+   - `User.Read.All` - For Azure AD user discovery
    
-   Use the menu option `[A] Manage App Registration` to set up permissions.
+   **Exchange Online API Permissions** (for EWS):
+   - `full_access_as_app` - Full mailbox access via EWS
+   
+   The app registration also creates a **client secret** which is required for EWS authentication.
+
+4. **exchangelib** (Recommended):
+   ```bash
+   pip install exchangelib
+   ```
+   
+   The `exchangelib` package enables Exchange Web Services (EWS) support, which provides:
+   - **Proper email timestamps** - Emails show backdated dates instead of creation time
+   - **No "[Draft]" prefix** - Emails appear as received messages, not drafts
+   - **Full control over email properties** - Read status, importance, categories
+   
+   **EWS Authentication**: EWS uses OAuth2 client credentials flow with the app's client_id
+   and client_secret from `.app_config.json` (created by the app registration process).
+   
+   Without `exchangelib`, the tool falls back to Graph API which has limitations:
+   - Emails show current timestamp (not backdated)
+   - Emails may show "[Draft]" prefix
+   
+   Run menu option `[0] Check & Install Prerequisites` to automatically install.
 
 ## Configuration
 
@@ -408,11 +435,23 @@ rate_limiting:
 
 ### Automatic Retry
 
-When rate limited (HTTP 429), the tool automatically:
-1. Reads the `Retry-After` header
+When rate limited (HTTP 429) or experiencing timeouts, the tool automatically:
+1. Reads the `Retry-After` header (if present)
 2. Waits the specified time
-3. Retries the request
-4. Uses exponential backoff (1s, 2s, 4s, 8s, 16s)
+3. Retries the request with exponential backoff
+4. EWS: 3 retries with 2s, 4s, 8s delays
+5. Graph API: 5 retries with 1s, 2s, 4s, 8s, 16s delays
+
+### EWS Performance Optimizations
+
+The EWS client includes several performance optimizations:
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| Timeout | 90 seconds | Extended timeout for slow Exchange responses |
+| Max Retries | 3 | Retry attempts for failed requests |
+| Backoff | Exponential | 2s, 4s, 8s between retries |
+| Request Delay | 50ms | Faster than Graph API (100ms) |
 
 ### Recommendations
 
@@ -424,12 +463,20 @@ When rate limited (HTTP 429), the tool automatically:
 
 ## Date Distribution
 
-Emails are backdated over 6-12 months with:
+Emails are backdated with a weighted distribution to simulate realistic mailbox activity:
 
+| Time Period | Weight | Description |
+|-------------|--------|-------------|
+| Last 30 days | 40% | Recent emails |
+| 1-3 months ago | 30% | Moderately recent |
+| 3-6 months ago | 20% | Older emails |
+| 6-12 months ago | 10% | Historical emails |
+
+Additional features:
 - **Business Hours Bias**: 80% during 8 AM - 6 PM
 - **Weekday Bias**: 90% on weekdays
 - **Realistic Gaps**: Natural distribution, not uniform
-- **MIME Import**: Uses MIME message format for proper date handling
+- **MIME Import**: Uses MIME message format for proper date handling via EWS
 
 ## Attachments
 
@@ -475,6 +522,66 @@ pip install pyyaml
 # or
 pip install -r requirements.txt
 ```
+
+### Emails Show "[Draft]" Prefix or Current Timestamp
+
+This is a known limitation of the Microsoft Graph API. To fix this:
+
+1. **Install exchangelib**:
+   ```bash
+   pip install exchangelib
+   ```
+   Or run menu option `[0] Check & Install Prerequisites` to install automatically.
+
+2. **Set up App Registration with EWS permissions**:
+   - Run menu option `[A] Manage App Registration`
+   - This creates an app with both Graph API and EWS permissions
+   - The app includes `full_access_as_app` permission for Exchange Online
+   - A client secret is created and stored in `.app_config.json`
+
+3. **Grant Admin Consent**:
+   - Admin consent is required for the EWS `full_access_as_app` permission
+   - Use the admin consent option in the app registration menu
+
+With `exchangelib` installed and proper permissions, the tool uses Exchange Web Services (EWS) which provides full control over email timestamps and draft status.
+
+### EWS Authentication Failed
+
+If you see "EWS authentication failed, falling back to Graph API":
+
+1. **Check app registration**: Ensure you've created an app via `[A] Manage App Registration`
+
+2. **Verify client secret**: Check that `.app_config.json` exists and contains a valid `client_secret`
+
+3. **Grant admin consent**: EWS requires admin consent for `full_access_as_app` permission
+   - Run `[A] Manage App Registration` → `[3] Grant Admin Consent`
+
+4. **Check EWS permission**: Ensure the app has the Exchange Online `full_access_as_app` permission
+   - If missing, delete and recreate the app registration
+
+5. **Verify tenant ID**: The `.app_config.json` must have the correct `tenant_id`
+
+### exchangelib Installation Failed
+
+If `exchangelib` installation fails:
+
+1. **Try manual installation**:
+   ```bash
+   pip install exchangelib>=5.0
+   ```
+
+2. **Check Python version**: `exchangelib` requires Python 3.8+
+
+3. **Install dependencies**: On some systems, you may need to install additional packages:
+   ```bash
+   # Windows
+   pip install pywin32
+   
+   # Linux
+   sudo apt-get install libxml2-dev libxslt1-dev
+   ```
+
+4. **Use Graph API fallback**: If EWS doesn't work, the tool will automatically fall back to Graph API (with limitations)
 
 ## Email Cleanup
 
@@ -630,7 +737,8 @@ scripts/
     ├── variations.py           # Content variation pools for realistic emails
     ├── attachments.py          # File attachment creation
     ├── threading.py            # Email thread management
-    ├── graph_client.py         # Microsoft Graph API client (MIME import, rate limiting)
+    ├── graph_client.py         # Microsoft Graph API client (with EWS fallback)
+    ├── ews_client.py           # Exchange Web Services client (for proper timestamps)
     ├── azure_ad_discovery.py   # Azure AD user/group discovery
     ├── user_pool.py            # User pool for CC/BCC recipient selection
     ├── utils.py                # Utility functions
@@ -650,6 +758,34 @@ config/
 ├── environments.json           # Tenant configuration
 └── sites.json                  # SharePoint sites (for links)
 ```
+
+### Email Creation Methods
+
+The tool supports two methods for creating emails:
+
+#### 1. Exchange Web Services (EWS) - Recommended
+
+When `exchangelib` is installed, the tool uses EWS which provides:
+
+| Feature | EWS Support |
+|---------|-------------|
+| Backdated timestamps | ✅ Full control over `datetime_received` and `datetime_sent` |
+| No "[Draft]" prefix | ✅ Emails appear as received messages |
+| Read/unread status | ✅ Full control |
+| All folders | ✅ Inbox, Sent Items, Drafts, Deleted Items, Junk |
+
+#### 2. Microsoft Graph API - Fallback
+
+When `exchangelib` is not installed, the tool falls back to Graph API:
+
+| Feature | Graph API Support |
+|---------|-------------------|
+| Backdated timestamps | ❌ Shows current time (read-only property) |
+| No "[Draft]" prefix | ❌ May show as draft (read-only property) |
+| Read/unread status | ✅ Full control |
+| All folders | ✅ Inbox, Sent Items, Drafts, Deleted Items, Junk |
+
+**Note**: The Graph API limitations are due to `receivedDateTime`, `sentDateTime`, and `isDraft` being read-only properties in the Microsoft Graph API.
 
 ### Content Variation System
 

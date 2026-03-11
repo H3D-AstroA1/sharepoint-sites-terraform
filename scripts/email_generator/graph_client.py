@@ -2,7 +2,8 @@
 Microsoft Graph API client for email operations.
 
 Handles authentication and email creation in M365 mailboxes
-using the Microsoft Graph API.
+using the Microsoft Graph API. Can optionally use Exchange Web Services (EWS)
+for full control over message properties including timestamps and draft status.
 """
 
 import json
@@ -18,6 +19,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
+# Try to import EWS client for enhanced email creation
+try:
+    from .ews_client import EWSClient, EXCHANGELIB_AVAILABLE
+except ImportError:
+    EXCHANGELIB_AVAILABLE = False
+    EWSClient = None  # type: ignore
+
 
 # Default Azure CLI installation paths on Windows
 AZURE_CLI_PATHS = [
@@ -31,7 +39,13 @@ APP_CONFIG_FILE = SCRIPT_DIR.parent / ".app_config.json"
 
 
 class GraphClient:
-    """Client for Microsoft Graph API email operations."""
+    """
+    Client for Microsoft Graph API email operations.
+    
+    Can optionally use Exchange Web Services (EWS) for creating emails with
+    full control over timestamps and draft status. When EWS is not available
+    or disabled, falls back to Graph API (with known limitations).
+    """
     
     GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
     
@@ -40,7 +54,7 @@ class GraphClient:
     DEFAULT_BATCH_DELAY_MS = 500    # Delay between batches (ms)
     DEFAULT_MAX_RETRIES = 5         # Maximum retry attempts
     
-    def __init__(self, rate_limit_config: Optional[Dict[str, Any]] = None):
+    def __init__(self, rate_limit_config: Optional[Dict[str, Any]] = None, use_ews: bool = True):
         """
         Initialize the Graph client.
         
@@ -49,9 +63,22 @@ class GraphClient:
                 - request_delay_ms: Delay between requests in milliseconds
                 - batch_delay_ms: Delay between batches in milliseconds
                 - max_retries: Maximum retry attempts for failed requests
+            use_ews: Whether to use EWS for email creation (provides full control
+                over timestamps and draft status). Default True - EWS uses client
+                credentials from .app_config.json for OAuth2 authentication.
+                Falls back to Graph API if EWS is not available or authentication fails.
         """
         self.access_token: Optional[str] = None
         self._az_path: Optional[str] = None
+        self._tenant_id: Optional[str] = None
+        
+        # EWS client for enhanced email creation
+        # EWS uses client credentials flow with app_id and client_secret from .app_config.json
+        # This provides full control over email timestamps and draft status
+        self._use_ews = use_ews and EXCHANGELIB_AVAILABLE
+        self._ews_client: Optional[Any] = None
+        if self._use_ews and EWSClient:
+            self._ews_client = EWSClient(rate_limit_config)
         
         # Configure rate limiting
         config = rate_limit_config or {}
@@ -61,9 +88,10 @@ class GraphClient:
     
     def authenticate(self, app_config: Optional[Dict] = None) -> bool:
         """
-        Authenticate with Microsoft Graph API.
+        Authenticate with Microsoft Graph API (and optionally EWS).
         
         Tries app credentials first, then falls back to Azure CLI.
+        If EWS is enabled and available, also authenticates the EWS client.
         
         Args:
             app_config: Optional app configuration with client credentials.
@@ -74,27 +102,99 @@ class GraphClient:
         # Try app credentials first
         if app_config and app_config.get("client_secret"):
             self.access_token = self._get_token_client_credentials(app_config)
+            self._tenant_id = app_config.get("tenant_id")
             if self.access_token:
+                # Also authenticate EWS if available
+                self._authenticate_ews()
                 return True
         
         # Try loading app config from file
         file_config = self._load_app_config()
         if file_config and file_config.get("client_secret"):
             self.access_token = self._get_token_client_credentials(file_config)
+            self._tenant_id = file_config.get("tenant_id")
             if self.access_token:
+                # Also authenticate EWS if available
+                self._authenticate_ews()
                 return True
         
         # Fall back to Azure CLI
         self.access_token = self._get_token_azure_cli()
+        if self.access_token:
+            # Try to get tenant ID from Azure CLI
+            self._tenant_id = self._get_tenant_id_from_cli()
+            # Also authenticate EWS if available
+            self._authenticate_ews()
         return self.access_token is not None
+    
+    def _authenticate_ews(self) -> bool:
+        """
+        Authenticate the EWS client if available.
+        
+        EWS uses client credentials flow with the app registration's
+        client_id and client_secret from .app_config.json.
+        
+        Returns:
+            True if EWS authentication successful or EWS not enabled.
+        """
+        if not self._use_ews or not self._ews_client:
+            return True
+        
+        try:
+            # EWS client now uses client credentials flow
+            # It loads app config from .app_config.json automatically
+            if self._ews_client.authenticate():
+                return True
+            else:
+                # EWS auth failed, fall back to Graph API
+                print("  ⚠ EWS authentication failed, falling back to Graph API")
+                self._use_ews = False
+                return False
+        except Exception as e:
+            print(f"  ⚠ EWS authentication failed, using Graph API: {e}")
+            self._use_ews = False
+            return False
+    
+    def _get_tenant_id_from_cli(self) -> Optional[str]:
+        """
+        Get the tenant ID from Azure CLI.
+        
+        Returns:
+            Tenant ID string or None.
+        """
+        try:
+            az_path = self._find_azure_cli_path()
+            if not az_path:
+                return None
+            
+            result = subprocess.run(
+                [az_path, "account", "show", "--query", "tenantId", "-o", "tsv"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+            return None
+        except Exception:
+            return None
+    
+    def is_using_ews(self) -> bool:
+        """
+        Check if EWS is being used for email creation.
+        
+        Returns:
+            True if EWS is enabled and authenticated.
+        """
+        return self._use_ews and self._ews_client is not None
     
     def create_email(self, mailbox: str, email: Dict[str, Any], folder: str = "inbox") -> bool:
         """
         Create an email in a user's mailbox.
         
-        Creates emails using the Graph API messages endpoint. Note that Graph API
-        creates messages as drafts by default, but we set isDraft=False and configure
-        other properties to make them appear as received messages.
+        If EWS is available and enabled, uses EWS for full control over message
+        properties (timestamps, draft status). Otherwise falls back to Graph API.
         
         Args:
             mailbox: User's email address (UPN).
@@ -108,6 +208,37 @@ class GraphClient:
         
         if not self.access_token:
             return False
+        
+        # Try EWS first if available (provides full control over timestamps/draft status)
+        if self._use_ews and self._ews_client:
+            try:
+                result = self._ews_client.create_email(mailbox, email, folder)
+                if result:
+                    return True
+                # If EWS fails, fall back to Graph API
+                print(f"  ⚠ EWS failed, falling back to Graph API")
+            except Exception as e:
+                print(f"  ⚠ EWS error, falling back to Graph API: {e}")
+        
+        # Fall back to Graph API
+        return self._create_email_graph_api(mailbox, email, folder)
+    
+    def _create_email_graph_api(self, mailbox: str, email: Dict[str, Any], folder: str = "inbox") -> bool:
+        """
+        Create an email using the Graph API.
+        
+        Note: Graph API has limitations - receivedDateTime, sentDateTime, and isDraft
+        are read-only, so emails will show current timestamp and may appear as drafts.
+        
+        Args:
+            mailbox: User's email address (UPN).
+            email: Email data dictionary.
+            folder: Target folder (inbox, drafts, sentitems, junkemail). Default is inbox.
+            
+        Returns:
+            True if email created successfully, False otherwise.
+        """
+        import time
         
         # Apply rate limiting delay before request
         if self.request_delay_ms > 0:
@@ -800,6 +931,45 @@ class GraphClient:
         # Format date for extended properties (ISO 8601 format)
         date_str = email_date.strftime("%Y-%m-%dT%H:%M:%SZ")
         
+        # Build extended properties for timestamps and message flags
+        # Using MAPI property tags with proper format
+        extended_properties = [
+            {
+                # PR_MESSAGE_DELIVERY_TIME (0x0E06) - type 0x0040 (PT_SYSTIME)
+                # This sets when the message was delivered/received
+                "id": "SystemTime 0x0E060040",
+                "value": date_str
+            },
+            {
+                # PR_CLIENT_SUBMIT_TIME (0x0039) - type 0x0040 (PT_SYSTIME)
+                # This sets when the message was sent
+                "id": "SystemTime 0x00390040",
+                "value": date_str
+            },
+            {
+                # PR_CREATION_TIME (0x3007) - type 0x0040 (PT_SYSTIME)
+                # This sets the creation time of the message
+                "id": "SystemTime 0x30070040",
+                "value": date_str
+            },
+            {
+                # PR_LAST_MODIFICATION_TIME (0x3008) - type 0x0040 (PT_SYSTIME)
+                # This sets the last modification time
+                "id": "SystemTime 0x30080040",
+                "value": date_str
+            },
+            {
+                # PR_MESSAGE_FLAGS (0x0E07) - type 0x0003 (PT_LONG/Integer)
+                # MSGFLAG_READ (0x0001) + MSGFLAG_UNSENT removed = makes it appear as received
+                # Value 1 = MSGFLAG_READ (message has been read)
+                # Value 0 = No flags (not a draft, not unsent)
+                # For inbox: use MSGFLAG_READ (1) for read messages, 0 for unread
+                # The key is NOT setting MSGFLAG_UNSENT (0x0008) which marks as draft
+                "id": "Integer 0x0E070003",
+                "value": "1" if self._should_be_read(email_date) else "0"
+            }
+        ]
+        
         message = {
             "subject": email.get("subject", "No Subject"),
             "body": {
@@ -809,22 +979,7 @@ class GraphClient:
             "from": from_address,
             "toRecipients": to_recipients,
             "isRead": self._should_be_read(email_date),
-            # Use singleValueExtendedProperties to set message timestamps
-            # Format: "SystemTime {property_tag}" where property_tag is hex with type suffix
-            # PR_MESSAGE_DELIVERY_TIME = 0x0E06 (type 0x0040 = SystemTime)
-            # PR_CLIENT_SUBMIT_TIME = 0x0039 (type 0x0040 = SystemTime)
-            "singleValueExtendedProperties": [
-                {
-                    # PR_MESSAGE_DELIVERY_TIME - sets receivedDateTime
-                    "id": "SystemTime 0x0E060040",
-                    "value": date_str
-                },
-                {
-                    # PR_CLIENT_SUBMIT_TIME - sets sentDateTime
-                    "id": "SystemTime 0x00390040",
-                    "value": date_str
-                }
-            ],
+            "singleValueExtendedProperties": extended_properties,
         }
         
         # Add CC recipients if present

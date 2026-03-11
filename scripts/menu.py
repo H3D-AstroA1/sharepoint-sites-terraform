@@ -401,6 +401,9 @@ APP_CONFIG_FILE = SCRIPT_DIR / ".app_config.json"
 # Microsoft Graph API ID (constant across all tenants)
 MICROSOFT_GRAPH_API_ID = "00000003-0000-0000-c000-000000000000"
 
+# Office 365 Exchange Online API ID (for EWS permissions)
+EXCHANGE_ONLINE_API_ID = "00000002-0000-0ff1-ce00-000000000000"
+
 # Microsoft Graph API permission IDs (Application permissions)
 # These are the GUIDs for the specific permissions we need
 GRAPH_PERMISSION_IDS = {
@@ -413,6 +416,13 @@ GRAPH_PERMISSION_IDS = {
     # Mail permissions (for email population)
     "Mail.ReadWrite": "e2a3a72e-5f79-4c64-b1b1-878b674786c9",
     "User.Read.All": "df021288-bdef-4463-88db-98f22de89214"
+}
+
+# Exchange Online API permission IDs (for EWS access)
+# These permissions allow full mailbox access via EWS
+EWS_PERMISSION_IDS = {
+    # full_access_as_app - Full access to all mailboxes via EWS
+    "full_access_as_app": "dc890d15-9560-4a4c-9b7f-a736ec74ec40"
 }
 
 # Required permissions for SharePoint and Email operations
@@ -650,6 +660,24 @@ def create_custom_app() -> Optional[Dict[str, Any]]:
                 print(f"    {Colors.GREEN}✓{Colors.NC} Added: {perm_name}")
             else:
                 print(f"    {Colors.YELLOW}⚠{Colors.NC} {perm_name}: {add_perm_result.stderr.strip()[:50]}")
+        
+        # Add EWS permissions (Exchange Online API)
+        print(f"  {Colors.DIM}Adding EWS permissions for email operations...{Colors.NC}")
+        for perm_name, perm_id in EWS_PERMISSION_IDS.items():
+            add_perm_result = subprocess.run(
+                [az_path, "ad", "app", "permission", "add",
+                 "--id", app_id,
+                 "--api", EXCHANGE_ONLINE_API_ID,
+                 "--api-permissions", f"{perm_id}=Role"],  # Role = Application permission
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if add_perm_result.returncode == 0:
+                print(f"    {Colors.GREEN}✓{Colors.NC} Added: EWS.{perm_name}")
+            else:
+                print(f"    {Colors.YELLOW}⚠{Colors.NC} EWS.{perm_name}: {add_perm_result.stderr.strip()[:50]}")
         
         # Step 3: Create a service principal for the app
         print(f"  {Colors.DIM}Step 3/4: Creating service principal...{Colors.NC}")
@@ -915,7 +943,10 @@ def delete_custom_app() -> bool:
         return False
 
 def update_app_permissions() -> bool:
-    """Update permissions on an existing app registration."""
+    """Update all permissions on an existing app registration.
+    
+    This adds both Microsoft Graph API permissions and Exchange Online (EWS) permissions.
+    """
     az_path = find_azure_cli_path()
     if not az_path:
         print_error("Azure CLI not found")
@@ -944,10 +975,12 @@ def update_app_permissions() -> bool:
     print()
     print(f"  {Colors.WHITE}App ID:{Colors.NC} {app_id}")
     print()
-    print(f"  {Colors.WHITE}Adding permissions:{Colors.NC}")
     
     added_count = 0
     skipped_count = 0
+    
+    # Add Microsoft Graph API permissions
+    print(f"  {Colors.WHITE}Adding Microsoft Graph API permissions:{Colors.NC}")
     
     for perm_name, perm_id in GRAPH_PERMISSION_IDS.items():
         try:
@@ -973,6 +1006,35 @@ def update_app_permissions() -> bool:
                     print(f"    {Colors.YELLOW}⚠{Colors.NC} {perm_name}: {add_perm_result.stderr.strip()[:50]}")
         except Exception as e:
             print(f"    {Colors.RED}✗{Colors.NC} {perm_name}: {str(e)[:50]}")
+    
+    # Add Exchange Online (EWS) permissions
+    print()
+    print(f"  {Colors.WHITE}Adding Exchange Online (EWS) permissions:{Colors.NC}")
+    
+    for perm_name, perm_id in EWS_PERMISSION_IDS.items():
+        try:
+            add_perm_result = subprocess.run(
+                [az_path, "ad", "app", "permission", "add",
+                 "--id", app_id,
+                 "--api", EXCHANGE_ONLINE_API_ID,
+                 "--api-permissions", f"{perm_id}=Role"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if add_perm_result.returncode == 0:
+                print(f"    {Colors.GREEN}✓{Colors.NC} Added: EWS.{perm_name}")
+                added_count += 1
+            else:
+                # Check if permission already exists
+                if "already exists" in add_perm_result.stderr.lower() or "already been added" in add_perm_result.stderr.lower():
+                    print(f"    {Colors.DIM}○ Already exists: EWS.{perm_name}{Colors.NC}")
+                    skipped_count += 1
+                else:
+                    print(f"    {Colors.YELLOW}⚠{Colors.NC} EWS.{perm_name}: {add_perm_result.stderr.strip()[:50]}")
+        except Exception as e:
+            print(f"    {Colors.RED}✗{Colors.NC} EWS.{perm_name}: {str(e)[:50]}")
     
     print()
     print(f"  {Colors.WHITE}Summary:{Colors.NC}")
@@ -1178,6 +1240,40 @@ def install_pyyaml() -> bool:
         return False
 
 
+def check_exchangelib_installed() -> tuple:
+    """Check if exchangelib is installed and return (installed, version)."""
+    try:
+        import exchangelib
+        version = getattr(exchangelib, '__version__', 'unknown')
+        return True, version
+    except ImportError:
+        return False, None
+
+
+def install_exchangelib() -> bool:
+    """Install exchangelib using pip."""
+    try:
+        print(f"  {Colors.YELLOW}Installing exchangelib (for EWS support)...{Colors.NC}")
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "exchangelib>=5.0"],
+            capture_output=True,
+            text=True,
+            timeout=180  # May take a while due to dependencies
+        )
+        if result.returncode == 0:
+            print(f"  {Colors.GREEN}✓{Colors.NC} exchangelib installed successfully")
+            return True
+        else:
+            print(f"  {Colors.RED}✗{Colors.NC} Failed to install exchangelib: {result.stderr}")
+            return False
+    except subprocess.TimeoutExpired:
+        print(f"  {Colors.RED}✗{Colors.NC} Installation timed out. Try manually: pip install exchangelib")
+        return False
+    except Exception as e:
+        print(f"  {Colors.RED}✗{Colors.NC} Failed to install exchangelib: {e}")
+        return False
+
+
 def check_prerequisites(auto_install: bool = False) -> dict:
     """Check all prerequisites and optionally install missing ones."""
     results = {
@@ -1185,6 +1281,7 @@ def check_prerequisites(auto_install: bool = False) -> dict:
         "azure_cli": {"installed": False, "version": None},
         "terraform": {"installed": False, "version": None},
         "pyyaml": {"installed": False, "version": None},
+        "exchangelib": {"installed": False, "version": None},
         "azure_login": {"logged_in": False, "account_info": None},
         "graph_permissions": {"has_permissions": False, "error": None}
     }
@@ -1225,6 +1322,17 @@ def check_prerequisites(auto_install: bool = False) -> dict:
             results["pyyaml"]["installed"] = pyyaml_installed
             results["pyyaml"]["version"] = pyyaml_version
     
+    # Check exchangelib (optional - for EWS support with proper timestamps)
+    exchangelib_installed, exchangelib_version = check_exchangelib_installed()
+    if exchangelib_installed:
+        results["exchangelib"]["installed"] = True
+        results["exchangelib"]["version"] = exchangelib_version
+    elif auto_install:
+        if install_exchangelib():
+            exchangelib_installed, exchangelib_version = check_exchangelib_installed()
+            results["exchangelib"]["installed"] = exchangelib_installed
+            results["exchangelib"]["version"] = exchangelib_version
+    
     return results
 
 def display_prerequisites_status(results: dict) -> None:
@@ -1254,6 +1362,12 @@ def display_prerequisites_status(results: dict) -> None:
         print(f"  {Colors.GREEN}✓{Colors.NC} PyYAML: {results['pyyaml']['version']} (for email population)")
     else:
         print(f"  {Colors.YELLOW}⚠{Colors.NC} PyYAML: Not installed (required for email population)")
+    
+    # exchangelib (for EWS support - proper timestamps and no draft prefix)
+    if results.get("exchangelib", {}).get("installed"):
+        print(f"  {Colors.GREEN}✓{Colors.NC} exchangelib: {results['exchangelib']['version']} (for EWS email timestamps)")
+    else:
+        print(f"  {Colors.YELLOW}⚠{Colors.NC} exchangelib: Not installed (optional - enables proper email timestamps)")
     
     # Azure Login
     if results["azure_cli"]["installed"]:
@@ -1399,6 +1513,34 @@ def run_prerequisites_check_menu() -> None:
                 results["pyyaml"] = {"installed": True, "version": "installed"}
             else:
                 print_error("Failed to install PyYAML. Try manually: pip install pyyaml")
+    
+    # Check exchangelib and offer to install if missing (optional but recommended)
+    exchangelib_status = results.get("exchangelib", {})
+    if not exchangelib_status.get("installed", False):
+        print()
+        print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
+        print(f"  {Colors.WHITE}{Colors.BOLD}exchangelib Installation (Recommended){Colors.NC}")
+        print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
+        print()
+        print(f"  {Colors.YELLOW}⚠{Colors.NC} exchangelib enables proper email timestamps and removes '[Draft]' prefix.")
+        print(f"  {Colors.DIM}  Without it, emails will show current time and may appear as drafts.{Colors.NC}")
+        print()
+        print(f"  {Colors.WHITE}Would you like to install exchangelib now?{Colors.NC}")
+        print()
+        print(f"    {Colors.GREEN}[Y]{Colors.NC} Yes, install exchangelib (recommended)")
+        print(f"    {Colors.RED}[N]{Colors.NC} No, use Graph API fallback (limited features)")
+        print()
+        
+        choice = input(f"  {Colors.YELLOW}Choice:{Colors.NC} ").strip().lower()
+        
+        if choice == 'y':
+            print()
+            if install_exchangelib():
+                print_success("exchangelib installed successfully!")
+                results["exchangelib"] = {"installed": True, "version": "installed"}
+            else:
+                print_error("Failed to install exchangelib. Try manually: pip install exchangelib")
+                print_info("The tool will use Graph API fallback (with limitations).")
     
     # Check Graph API permissions and automatically grant consent if needed
     if results["azure_login"]["logged_in"]:
@@ -1646,7 +1788,7 @@ def manage_app_registration_menu() -> None:
         print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Remove the custom app from Azure AD{Colors.NC}                   {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.BLUE}[4]{Colors.NC} {Colors.WHITE}🔄 Update Permissions{Colors.NC}                                  {Colors.CYAN}│{Colors.NC}")
-        print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Add Mail permissions to existing app{Colors.NC}                  {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Add all required permissions (Graph + EWS){Colors.NC}            {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}├──────────────────────────────────────────────────────────────┤{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
@@ -1770,8 +1912,17 @@ def manage_app_registration_menu() -> None:
             print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
             print()
             print(f"  {Colors.WHITE}This will add the following permissions:{Colors.NC}")
+            print()
+            print(f"  {Colors.CYAN}Microsoft Graph API:{Colors.NC}")
             print(f"    • {Colors.GREEN}Mail.ReadWrite{Colors.NC} - Read and write mail in all mailboxes")
             print(f"    • {Colors.GREEN}User.Read.All{Colors.NC} - Read all users' profiles")
+            print(f"    • {Colors.GREEN}Sites.ReadWrite.All{Colors.NC} - Read and write SharePoint sites")
+            print(f"    • {Colors.GREEN}Files.ReadWrite.All{Colors.NC} - Read and write files")
+            print(f"    • {Colors.GREEN}Group.ReadWrite.All{Colors.NC} - Read and write groups")
+            print()
+            print(f"  {Colors.CYAN}Exchange Online (EWS):{Colors.NC}")
+            print(f"    • {Colors.GREEN}full_access_as_app{Colors.NC} - Full mailbox access via EWS")
+            print(f"      {Colors.DIM}(Required for backdated timestamps and no [Draft] prefix){Colors.NC}")
             print()
             print(f"  {Colors.DIM}These permissions are required for email population features.{Colors.NC}")
             print()

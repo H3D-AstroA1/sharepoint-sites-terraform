@@ -376,23 +376,39 @@ class EmailContentGenerator:
         }
     
     def _generate_date(self) -> datetime:
-        """Generate a realistic backdated timestamp."""
+        """Generate a realistic backdated timestamp with good distribution.
+        
+        Distribution aims for realistic mailbox activity:
+        - ~40% of emails from the last 30 days (recent activity)
+        - ~30% of emails from 1-3 months ago
+        - ~20% of emails from 3-6 months ago
+        - ~10% of emails from 6-12 months ago
+        """
         date_settings = self.settings.get("date_settings", {})
         months_back = self.settings.get("date_range_months", 12)
         
         # Calculate date range
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=months_back * 30)
-        days_range = (end_date - start_date).days
         
-        # Apply recent bias if configured
-        if date_settings.get("recent_bias", True):
-            # Use exponential distribution for recent bias
-            random_days = int(days_range * (1 - random.random() ** 2))
+        # Use weighted distribution for more realistic email age spread
+        # This ensures we have both recent and older emails
+        distribution_choice = random.random()
+        
+        if distribution_choice < 0.40:
+            # 40% - Last 30 days (recent emails)
+            days_back = random.randint(0, 30)
+        elif distribution_choice < 0.70:
+            # 30% - 1-3 months ago
+            days_back = random.randint(31, 90)
+        elif distribution_choice < 0.90:
+            # 20% - 3-6 months ago
+            days_back = random.randint(91, 180)
         else:
-            random_days = random.randint(0, days_range)
+            # 10% - 6-12 months ago (or configured max)
+            max_days = months_back * 30
+            days_back = random.randint(181, max(181, max_days))
         
-        date = end_date - timedelta(days=random_days)
+        date = end_date - timedelta(days=days_back)
         
         # Apply weekday bias
         weekday_pct = date_settings.get("weekday_percentage", 90) / 100
