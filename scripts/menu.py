@@ -410,6 +410,7 @@ GRAPH_PERMISSION_IDS = {
     # SharePoint permissions
     "Sites.Read.All": "332a536c-c7ef-4017-ab91-336970924f0d",
     "Sites.ReadWrite.All": "9492366f-7969-46a4-8d15-ed1a20078fff",
+    "Sites.FullControl.All": "a82116e5-55eb-4c41-a434-62fe8a61c773",  # Full control for site deletion
     "Files.ReadWrite.All": "75359482-378d-4052-8f01-80520e7db3cd",
     "Group.Read.All": "5b567255-7703-4780-807c-7be8301ae99b",
     "Group.ReadWrite.All": "62a82d76-70ea-41e2-9197-370581804d09",
@@ -429,6 +430,7 @@ EWS_PERMISSION_IDS = {
 REQUIRED_GRAPH_PERMISSIONS = [
     "Sites.Read.All",
     "Sites.ReadWrite.All",
+    "Sites.FullControl.All",  # Required for deleting SharePoint sites
     "Files.ReadWrite.All",
     "Group.Read.All",
     "Group.ReadWrite.All",

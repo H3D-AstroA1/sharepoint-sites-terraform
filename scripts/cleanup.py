@@ -1724,8 +1724,11 @@ def delete_selected_files_mode(sites: List[Dict[str, Any]], access_token: str) -
 def delete_sites_mode(sites: List[Dict[str, Any]], access_token: str, tenant: Optional[str] = None) -> None:
     """Delete selected SharePoint sites.
     
+    For group-connected sites (created via Terraform/M365 Groups), this deletes the M365 Group
+    which automatically deletes the associated SharePoint site.
+    
     Args:
-        sites: List of SharePoint sites to delete
+        sites: List of SharePoint sites to delete (may include group info)
         access_token: Microsoft Graph access token
         tenant: SharePoint tenant name for SPO recycle bin purge (e.g., 'contoso')
     """
@@ -1734,11 +1737,33 @@ def delete_sites_mode(sites: List[Dict[str, Any]], access_token: str, tenant: Op
     print()
     print_danger("This will permanently delete the following sites:")
     print()
+    
+    # Categorize sites by deletion method
+    group_sites = []  # Sites with M365 Group (delete via group)
+    standalone_sites = []  # Sites without group (delete directly)
+    
     for site in sites:
         site_name = site.get("displayName", site.get("name", "Unknown"))
-        web_url = site.get("webUrl", "")
-        print(f"    - {site_name}")
+        web_url = site.get("webUrl", site.get("siteUrl", ""))
+        
+        # Check if this is a group-connected site
+        # Sites from get_m365_groups have 'id' as group ID and 'siteId' as SharePoint site ID
+        # Sites from get_sharepoint_sites have 'id' as SharePoint site ID
+        has_group = "siteId" in site  # If siteId exists, 'id' is the group ID
+        
+        if has_group:
+            group_sites.append(site)
+            print(f"    - {site_name} {Colors.CYAN}(M365 Group){Colors.NC}")
+        else:
+            standalone_sites.append(site)
+            print(f"    - {site_name} {Colors.DIM}(Standalone){Colors.NC}")
         print(f"      {web_url}")
+    print()
+    
+    if group_sites:
+        print_info(f"{len(group_sites)} site(s) will be deleted via M365 Group deletion")
+    if standalone_sites:
+        print_info(f"{len(standalone_sites)} site(s) will be deleted directly (requires Sites.FullControl.All)")
     print()
     
     # Double confirmation for site deletion
@@ -1756,16 +1781,35 @@ def delete_sites_mode(sites: List[Dict[str, Any]], access_token: str, tenant: Op
     success_count = 0
     fail_count = 0
     
-    for i, site in enumerate(sites):
-        site_name = site.get("displayName", site.get("name", "Unknown"))
-        site_id = site.get("id", "")
-        
-        print_progress(i + 1, len(sites), f"Deleting: {site_name[:30]}...")
-        
-        if delete_site(site_id, access_token):
-            success_count += 1
-        else:
-            fail_count += 1
+    # Delete group-connected sites via M365 Group deletion
+    if group_sites:
+        print_info("Deleting group-connected sites via M365 Groups...")
+        for i, site in enumerate(group_sites):
+            site_name = site.get("displayName", site.get("name", "Unknown"))
+            group_id = site.get("id", "")  # For group sites, 'id' is the group ID
+            
+            print_progress(i + 1, len(group_sites), f"Deleting group: {site_name[:30]}...")
+            
+            if delete_m365_group(group_id, access_token):
+                success_count += 1
+            else:
+                fail_count += 1
+        print()
+    
+    # Delete standalone sites directly
+    if standalone_sites:
+        print_info("Deleting standalone sites directly...")
+        for i, site in enumerate(standalone_sites):
+            site_name = site.get("displayName", site.get("name", "Unknown"))
+            site_id = site.get("id", "")
+            
+            print_progress(i + 1, len(standalone_sites), f"Deleting site: {site_name[:30]}...")
+            
+            if delete_site(site_id, access_token):
+                success_count += 1
+            else:
+                fail_count += 1
+        print()
     
     print()
     print()
