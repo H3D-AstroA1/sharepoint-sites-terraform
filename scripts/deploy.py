@@ -118,6 +118,86 @@ DEPARTMENT_SITES = [
 ]
 
 # ============================================================================
+# AD-HOC / USER-CREATED SITES
+# ============================================================================
+# These sites simulate organic, user-created sites that employees might create
+# for projects, teams, events, working groups, and regional offices.
+# They represent the "messy" reality of SharePoint usage in organizations.
+# ============================================================================
+
+ADHOC_SITES = [
+    # Project Sites (Private - project teams)
+    {"name": "q4-product-launch-2024", "display_name": "Q4 Product Launch 2024", "description": "Planning and coordination for Q4 2024 product launch", "visibility": "Private", "template": "STS#3"},
+    {"name": "website-redesign-project", "display_name": "Website Redesign Project", "description": "Corporate website redesign initiative", "visibility": "Private", "template": "STS#3"},
+    {"name": "crm-migration-team", "display_name": "CRM Migration Team", "description": "Salesforce to Dynamics 365 migration project", "visibility": "Private", "template": "STS#3"},
+    {"name": "office-relocation-planning", "display_name": "Office Relocation Planning", "description": "HQ office move coordination and planning", "visibility": "Private", "template": "STS#3"},
+    {"name": "erp-implementation", "display_name": "ERP Implementation", "description": "SAP implementation project team", "visibility": "Private", "template": "STS#3"},
+    {"name": "mobile-app-development", "display_name": "Mobile App Development", "description": "Customer mobile app development project", "visibility": "Private", "template": "STS#3"},
+    {"name": "data-warehouse-project", "display_name": "Data Warehouse Project", "description": "Enterprise data warehouse modernization", "visibility": "Private", "template": "STS#3"},
+    {"name": "cloud-migration-2024", "display_name": "Cloud Migration 2024", "description": "Azure cloud migration initiative", "visibility": "Private", "template": "STS#3"},
+    {"name": "process-automation-team", "display_name": "Process Automation Team", "description": "RPA and workflow automation project", "visibility": "Private", "template": "STS#3"},
+    {"name": "customer-portal-redesign", "display_name": "Customer Portal Redesign", "description": "Customer self-service portal project", "visibility": "Private", "template": "STS#3"},
+    
+    # Working Groups & Committees (Mixed visibility)
+    {"name": "innovation-lab", "display_name": "Innovation Lab", "description": "Cross-functional innovation and ideation team", "visibility": "Private", "template": "STS#3"},
+    {"name": "sustainability-committee", "display_name": "Sustainability Committee", "description": "Environmental sustainability initiatives", "visibility": "Public", "template": "STS#3"},
+    {"name": "digital-transformation", "display_name": "Digital Transformation", "description": "Company-wide digital transformation working group", "visibility": "Private", "template": "STS#3"},
+    {"name": "employee-engagement-team", "display_name": "Employee Engagement Team", "description": "Employee satisfaction and engagement initiatives", "visibility": "Private", "template": "STS#3"},
+    {"name": "cost-reduction-taskforce", "display_name": "Cost Reduction Taskforce", "description": "Operational efficiency and cost optimization", "visibility": "Private", "template": "STS#3"},
+    {"name": "merger-integration-team", "display_name": "Merger Integration Team", "description": "Post-merger integration planning", "visibility": "Private", "template": "STS#3"},
+    {"name": "compliance-working-group", "display_name": "Compliance Working Group", "description": "Cross-departmental compliance coordination", "visibility": "Private", "template": "STS#3"},
+    {"name": "vendor-management-team", "display_name": "Vendor Management Team", "description": "Strategic vendor relationships and contracts", "visibility": "Private", "template": "STS#3"},
+    
+    # Social & Interest Groups (Public - employee communities)
+    {"name": "coffee-club", "display_name": "Coffee Club", "description": "Coffee enthusiasts and office coffee machine updates", "visibility": "Public", "template": "STS#3"},
+    {"name": "book-club", "display_name": "Book Club", "description": "Monthly book discussions and recommendations", "visibility": "Public", "template": "STS#3"},
+    {"name": "running-club", "display_name": "Running Club", "description": "Lunchtime running group and race events", "visibility": "Public", "template": "STS#3"},
+    {"name": "photography-club", "display_name": "Photography Club", "description": "Photography enthusiasts and photo sharing", "visibility": "Public", "template": "STS#3"},
+    {"name": "gaming-community", "display_name": "Gaming Community", "description": "Video game enthusiasts and gaming events", "visibility": "Public", "template": "STS#3"},
+    {"name": "parents-network", "display_name": "Parents Network", "description": "Working parents support and resources", "visibility": "Public", "template": "STS#3"},
+    {"name": "pet-lovers", "display_name": "Pet Lovers", "description": "Pet photos and pet-friendly workplace initiatives", "visibility": "Public", "template": "STS#3"},
+    {"name": "volunteer-corps", "display_name": "Volunteer Corps", "description": "Community volunteering and charity events", "visibility": "Public", "template": "STS#3"},
+    
+    # Employee Resource Groups (Public - D&I)
+    {"name": "women-in-tech", "display_name": "Women in Tech", "description": "Women in technology employee resource group", "visibility": "Public", "template": "STS#3"},
+    {"name": "pride-network", "display_name": "Pride Network", "description": "LGBTQ+ employee resource group", "visibility": "Public", "template": "STS#3"},
+    {"name": "veterans-network", "display_name": "Veterans Network", "description": "Military veterans employee resource group", "visibility": "Public", "template": "STS#3"},
+    {"name": "young-professionals", "display_name": "Young Professionals", "description": "Early career professionals network", "visibility": "Public", "template": "STS#3"},
+    {"name": "accessibility-advocates", "display_name": "Accessibility Advocates", "description": "Disability inclusion and accessibility", "visibility": "Public", "template": "STS#3"},
+    {"name": "multicultural-network", "display_name": "Multicultural Network", "description": "Cultural diversity and inclusion", "visibility": "Public", "template": "STS#3"},
+    
+    # Event Sites (Public - company events)
+    {"name": "annual-company-retreat-2024", "display_name": "Annual Company Retreat 2024", "description": "Planning for the 2024 company retreat", "visibility": "Public", "template": "STS#3"},
+    {"name": "hackathon-2024", "display_name": "Hackathon 2024", "description": "Annual innovation hackathon event", "visibility": "Public", "template": "STS#3"},
+    {"name": "customer-summit-planning", "display_name": "Customer Summit Planning", "description": "Annual customer conference planning", "visibility": "Private", "template": "STS#3"},
+    {"name": "holiday-party-2024", "display_name": "Holiday Party 2024", "description": "End of year celebration planning", "visibility": "Public", "template": "STS#3"},
+    {"name": "sales-kickoff-2025", "display_name": "Sales Kickoff 2025", "description": "Annual sales kickoff event planning", "visibility": "Private", "template": "STS#3"},
+    {"name": "town-hall-archives", "display_name": "Town Hall Archives", "description": "Recordings and materials from company town halls", "visibility": "Public", "template": "STS#3"},
+    {"name": "charity-fundraiser", "display_name": "Charity Fundraiser", "description": "Annual charity fundraising campaign", "visibility": "Public", "template": "STS#3"},
+    {"name": "wellness-week-2024", "display_name": "Wellness Week 2024", "description": "Employee wellness week activities", "visibility": "Public", "template": "STS#3"},
+    
+    # Regional & Office Sites (Mixed visibility)
+    {"name": "london-office", "display_name": "London Office", "description": "London office team and local announcements", "visibility": "Public", "template": "STS#3"},
+    {"name": "new-york-team", "display_name": "New York Team", "description": "New York office collaboration space", "visibility": "Public", "template": "STS#3"},
+    {"name": "apac-region", "display_name": "APAC Region", "description": "Asia-Pacific regional team", "visibility": "Private", "template": "STS#3"},
+    {"name": "emea-operations", "display_name": "EMEA Operations", "description": "Europe, Middle East & Africa operations", "visibility": "Private", "template": "STS#3"},
+    {"name": "remote-workers-hub", "display_name": "Remote Workers Hub", "description": "Resources and community for remote employees", "visibility": "Public", "template": "STS#3"},
+    {"name": "singapore-office", "display_name": "Singapore Office", "description": "Singapore office team collaboration", "visibility": "Public", "template": "STS#3"},
+    {"name": "sydney-team", "display_name": "Sydney Team", "description": "Sydney office local team site", "visibility": "Public", "template": "STS#3"},
+    {"name": "berlin-hub", "display_name": "Berlin Hub", "description": "Berlin office and DACH region", "visibility": "Public", "template": "STS#3"},
+    
+    # Miscellaneous User-Created Sites
+    {"name": "lunch-orders", "display_name": "Lunch Orders", "description": "Weekly lunch order coordination", "visibility": "Public", "template": "STS#3"},
+    {"name": "parking-coordination", "display_name": "Parking Coordination", "description": "Office parking space management", "visibility": "Public", "template": "STS#3"},
+    {"name": "office-plants", "display_name": "Office Plants", "description": "Office plant care and watering schedule", "visibility": "Public", "template": "STS#3"},
+    {"name": "lost-and-found", "display_name": "Lost and Found", "description": "Office lost and found items", "visibility": "Public", "template": "STS#3"},
+    {"name": "carpool-network", "display_name": "Carpool Network", "description": "Employee carpooling coordination", "visibility": "Public", "template": "STS#3"},
+    {"name": "office-supplies-requests", "display_name": "Office Supplies Requests", "description": "Office supply requests and inventory", "visibility": "Public", "template": "STS#3"},
+    {"name": "meeting-room-tips", "display_name": "Meeting Room Tips", "description": "Meeting room booking tips and AV guides", "visibility": "Public", "template": "STS#3"},
+    {"name": "new-hire-buddies", "display_name": "New Hire Buddies", "description": "Buddy program for new employees", "visibility": "Public", "template": "STS#3"},
+]
+
+# ============================================================================
 # CONSOLE OUTPUT HELPERS
 # ============================================================================
 
@@ -649,6 +729,71 @@ def generate_random_sites(count: int) -> List[Dict]:
     return sites
 
 
+def generate_adhoc_sites(count: int) -> List[Dict]:
+    """Generate a list of realistic ad-hoc/user-created sites.
+    
+    These sites simulate organic, user-created sites that employees might create
+    for projects, teams, events, working groups, and regional offices.
+    
+    The maximum number of unique sites is limited to the number of templates
+    in ADHOC_SITES (currently 60+). Each site includes realistic visibility
+    settings (Private or Public) and appropriate templates.
+    """
+    max_sites = len(ADHOC_SITES)
+    
+    if count > max_sites:
+        print_warning(f"Requested {count} sites, but only {max_sites} unique ad-hoc templates available.")
+        print_info(f"Generating {max_sites} sites instead.")
+        count = max_sites
+    
+    # Shuffle the ad-hoc sites to get random selection
+    available_sites = ADHOC_SITES.copy()
+    random.shuffle(available_sites)
+    
+    # Generate sites from the shuffled list
+    sites = []
+    for i in range(count):
+        site_template = available_sites[i]
+        
+        # Create a copy with all required fields, preserving visibility and template
+        site = {
+            'name': site_template['name'],
+            'display_name': site_template['display_name'],
+            'description': site_template['description'],
+            'template': site_template.get('template', 'STS#3'),
+            'visibility': site_template.get('visibility', 'Private'),
+            'owners': [],
+            'members': []
+        }
+        
+        sites.append(site)
+    
+    return sites
+
+
+def generate_mixed_sites(dept_count: int, adhoc_count: int) -> List[Dict]:
+    """Generate a mix of department sites and ad-hoc sites.
+    
+    This creates a more realistic environment with both official department
+    sites and organic user-created sites.
+    
+    Args:
+        dept_count: Number of department sites to generate
+        adhoc_count: Number of ad-hoc sites to generate
+    
+    Returns:
+        Combined list of sites
+    """
+    dept_sites = generate_random_sites(dept_count)
+    adhoc_sites = generate_adhoc_sites(adhoc_count)
+    
+    # Combine and shuffle for a more natural mix
+    all_sites = dept_sites + adhoc_sites
+    random.shuffle(all_sites)
+    
+    return all_sites
+
+
 def format_terraform_sites_block(sites: List[Dict]) -> str:
     """Format sites as a Terraform HCL block."""
     lines = ["sharepoint_sites = {"]
@@ -954,30 +1099,55 @@ def select_site_mode(args, step_num: int = 1) -> Tuple[str, List[Dict]]:
         print()
         print(f"  {Colors.WHITE}How would you like to define your SharePoint sites?{Colors.NC}")
         print()
+        print(f"  {Colors.CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{Colors.NC}")
+        print()
         print("    [1] Use Configuration File (config/sites.json)")
         print("        - Edit the JSON file to add your custom site names")
         print("        - Full control over site names, descriptions, and settings")
         print()
-        print("    [2] Generate Random Sites")
-        print(f"        - Specify how many sites to create (1-{len(DEPARTMENT_SITES)})")
-        print("        - Sites will have realistic department names with mixed visibility")
+        print(f"  {Colors.CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{Colors.NC}")
+        print(f"  {Colors.WHITE}RANDOM GENERATION OPTIONS:{Colors.NC}")
+        print()
+        print(f"    [2] Generate Department Sites ({len(DEPARTMENT_SITES)} templates)")
+        print("        - Official department sites (HR, Finance, IT, Legal, etc.)")
+        print("        - Realistic organizational structure")
+        print("        - Mix of Private and Public visibility")
+        print()
+        print(f"    [3] Generate Ad-hoc Sites ({len(ADHOC_SITES)} templates)")
+        print("        - User-created sites (projects, teams, events, clubs)")
+        print("        - Simulates organic SharePoint usage by employees")
+        print("        - Includes working groups, social clubs, regional offices")
+        print()
+        print(f"    [4] Generate Mixed Sites (Department + Ad-hoc)")
+        print("        - Combines both types for maximum realism")
+        print("        - Specify count for each type separately")
+        print()
+        print(f"  {Colors.CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{Colors.NC}")
         print()
         print(f"    {Colors.RED}[Q] Quit{Colors.NC}")
         print()
         
         while True:
-            choice_input = input(f"  Enter your choice (1-2, Q to quit): ").strip().lower()
+            choice_input = input(f"  Enter your choice (1-4, Q to quit): ").strip().lower()
             if choice_input == 'q':
                 print_warning("Deployment cancelled.")
                 sys.exit(0)
             try:
                 choice = int(choice_input)
-                if 1 <= choice <= 2:
+                if 1 <= choice <= 4:
                     break
-                print_warning("Please enter 1, 2, or Q to quit.")
+                print_warning("Please enter 1, 2, 3, 4, or Q to quit.")
             except ValueError:
-                print_warning("Please enter 1, 2, or Q to quit.")
-        mode = "config" if choice == 1 else "random"
+                print_warning("Please enter 1, 2, 3, 4, or Q to quit.")
+        
+        if choice == 1:
+            mode = "config"
+        elif choice == 2:
+            mode = "random"
+        elif choice == 3:
+            mode = "adhoc"
+        else:
+            mode = "mixed"
     
     # Process based on mode
     if mode == "config":
@@ -998,25 +1168,87 @@ def select_site_mode(args, step_num: int = 1) -> Tuple[str, List[Dict]]:
         except Exception as e:
             print_error(f"Failed to read configuration file: {e}")
             sys.exit(1)
-    else:
+    
+    elif mode == "random":
         print()
-        print_info("Random Generation Mode selected")
+        print_info("Department Sites Mode selected")
+        print(f"  {Colors.CYAN}ℹ{Colors.NC} These are official department sites (HR, Finance, IT, etc.)")
+        print()
         
         max_sites = len(DEPARTMENT_SITES)
         count = args.random if args.random and args.random > 0 else 0
         if count == 0:
             while True:
                 try:
-                    count = int(prompt_input(f"How many sites would you like to create? (1-{max_sites})", required=True))
+                    count = int(prompt_input(f"How many department sites would you like to create? (1-{max_sites})", required=True))
                     if 1 <= count <= max_sites:
                         break
                     print_warning(f"Please enter a number between 1 and {max_sites}")
                 except ValueError:
                     print_warning("Please enter a valid number")
         
-        print_info(f"Generating {count} random sites...")
+        print_info(f"Generating {count} department sites...")
         sites = generate_random_sites(count)
-        print_success(f"Generated {len(sites)} random sites")
+        print_success(f"Generated {len(sites)} department sites")
+    
+    elif mode == "adhoc":
+        print()
+        print_info("Ad-hoc Sites Mode selected")
+        print(f"  {Colors.CYAN}ℹ{Colors.NC} These are user-created sites (projects, teams, events, clubs)")
+        print()
+        
+        max_sites = len(ADHOC_SITES)
+        while True:
+            try:
+                count = int(prompt_input(f"How many ad-hoc sites would you like to create? (1-{max_sites})", required=True))
+                if 1 <= count <= max_sites:
+                    break
+                print_warning(f"Please enter a number between 1 and {max_sites}")
+            except ValueError:
+                print_warning("Please enter a valid number")
+        
+        print_info(f"Generating {count} ad-hoc sites...")
+        sites = generate_adhoc_sites(count)
+        print_success(f"Generated {len(sites)} ad-hoc sites")
+    
+    else:  # mixed mode
+        print()
+        print_info("Mixed Sites Mode selected")
+        print(f"  {Colors.CYAN}ℹ{Colors.NC} This creates a realistic mix of department and ad-hoc sites")
+        print()
+        
+        max_dept = len(DEPARTMENT_SITES)
+        max_adhoc = len(ADHOC_SITES)
+        
+        print(f"  {Colors.WHITE}Step 1: Department Sites{Colors.NC}")
+        while True:
+            try:
+                dept_count = int(prompt_input(f"How many department sites? (0-{max_dept})", required=True))
+                if 0 <= dept_count <= max_dept:
+                    break
+                print_warning(f"Please enter a number between 0 and {max_dept}")
+            except ValueError:
+                print_warning("Please enter a valid number")
+        
+        print()
+        print(f"  {Colors.WHITE}Step 2: Ad-hoc Sites{Colors.NC}")
+        while True:
+            try:
+                adhoc_count = int(prompt_input(f"How many ad-hoc sites? (0-{max_adhoc})", required=True))
+                if 0 <= adhoc_count <= max_adhoc:
+                    break
+                print_warning(f"Please enter a number between 0 and {max_adhoc}")
+            except ValueError:
+                print_warning("Please enter a valid number")
+        
+        if dept_count == 0 and adhoc_count == 0:
+            print_error("You must create at least one site")
+            sys.exit(1)
+        
+        print()
+        print_info(f"Generating {dept_count} department sites + {adhoc_count} ad-hoc sites...")
+        sites = generate_mixed_sites(dept_count, adhoc_count)
+        print_success(f"Generated {len(sites)} total sites ({dept_count} department + {adhoc_count} ad-hoc)")
     
     # Display sites
     print()
