@@ -1267,22 +1267,37 @@ def run_graph_permissions_check() -> None:
         if perm_info["error"]:
             print(f"    {Colors.YELLOW}⚠{Colors.NC} Could not retrieve permissions: {perm_info['error']}")
         elif perm_info["configured_permissions"]:
-            # Group by API
+            # Group by API and deduplicate by permission name
             graph_perms = [p for p in perm_info["configured_permissions"] if p["api"] == "Microsoft Graph"]
             ews_perms = [p for p in perm_info["configured_permissions"] if p["api"] == "Exchange Online"]
             
-            if graph_perms:
+            # Deduplicate permissions by name (keep unique names only)
+            seen_graph = set()
+            unique_graph_perms = []
+            for p in graph_perms:
+                if p["name"] not in seen_graph:
+                    seen_graph.add(p["name"])
+                    unique_graph_perms.append(p)
+            
+            seen_ews = set()
+            unique_ews_perms = []
+            for p in ews_perms:
+                if p["name"] not in seen_ews:
+                    seen_ews.add(p["name"])
+                    unique_ews_perms.append(p)
+            
+            if unique_graph_perms:
                 print(f"    {Colors.CYAN}Microsoft Graph API:{Colors.NC}")
-                for perm in graph_perms:
+                for perm in unique_graph_perms:
                     # Check if this permission is in our required list
                     is_required = perm["name"] in REQUIRED_GRAPH_PERMISSIONS
                     status_icon = Colors.GREEN + "✓" + Colors.NC if is_required else Colors.DIM + "○" + Colors.NC
                     print(f"      {status_icon} {perm['name']}")
                 print()
             
-            if ews_perms:
+            if unique_ews_perms:
                 print(f"    {Colors.CYAN}Exchange Online (EWS):{Colors.NC}")
-                for perm in ews_perms:
+                for perm in unique_ews_perms:
                     print(f"      {Colors.GREEN}✓{Colors.NC} {perm['name']}")
                 print()
             
