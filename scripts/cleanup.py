@@ -2177,7 +2177,7 @@ Selection Syntax (for --select-sites and --select-files):
     delete_sites = args.delete_sites or args.delete_all
     
     # Interactive mode if no flags specified
-    if not delete_files and not delete_sites:
+    while not delete_files and not delete_sites:
         print()
         print(f"  {Colors.WHITE}What would you like to do?{Colors.NC}")
         print()
@@ -2190,7 +2190,7 @@ Selection Syntax (for --select-sites and --select-files):
         print(f"    {Colors.RED}[5]{Colors.NC} 🎯 Select specific SITES to delete")
         print(f"    {Colors.YELLOW}[6]{Colors.NC} 🎯 Select specific FILES to delete")
         print()
-        print(f"    {Colors.DIM}[7] Cancel{Colors.NC}")
+        print(f"    {Colors.DIM}[7] Cancel / Exit{Colors.NC}")
         print()
         
         choice = input("  Enter your choice (1-7): ").strip()
@@ -2209,27 +2209,39 @@ Selection Syntax (for --select-sites and --select-files):
                 if url:
                     print(f"         {Colors.DIM}{url}{Colors.NC}")
             print()
-            input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
-            sys.exit(0)
+            input(f"  {Colors.YELLOW}Press Enter to return to menu...{Colors.NC}")
+            # Loop continues - shows menu again
         elif choice == "2":
             list_files_mode(sites, access_token)
-            sys.exit(0)
+            input(f"\n  {Colors.YELLOW}Press Enter to return to menu...{Colors.NC}")
+            # Loop continues - shows menu again
         elif choice == "3":
             delete_sites = True
+            # Exit loop to proceed with deletion
         elif choice == "4":
             delete_files = True
+            # Exit loop to proceed with deletion
         elif choice == "5":
-            sites = interactive_select_sites(sites)
-            if not sites:
+            selected_sites = interactive_select_sites(sites)
+            if not selected_sites:
                 print_warning("No sites selected")
-                sys.exit(0)
+                input(f"\n  {Colors.YELLOW}Press Enter to return to menu...{Colors.NC}")
+                continue
+            sites = selected_sites
             delete_sites = True
+            # Exit loop to proceed with deletion
         elif choice == "6":
             delete_selected_files_mode(sites, access_token)
+            input(f"\n  {Colors.YELLOW}Press Enter to return to menu...{Colors.NC}")
+            # Loop continues - shows menu again
+        elif choice == "7" or choice.lower() == "q":
+            print()
+            print(f"  {Colors.GREEN}✓{Colors.NC} Exiting cleanup. No changes made.")
             sys.exit(0)
         else:
-            print_warning("Operation cancelled")
-            sys.exit(0)
+            print_warning("Invalid choice. Please enter 1-7.")
+            input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            # Loop continues - shows menu again
     
     # Show what will be affected
     print()
