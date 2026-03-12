@@ -2171,6 +2171,7 @@ def list_sharepoint_sites_menu() -> None:
     """List SharePoint sites with a clean, friendly interface."""
     import urllib.request
     import urllib.error
+    import urllib.parse
     
     clear_screen()
     print()
@@ -2220,7 +2221,9 @@ def list_sharepoint_sites_menu() -> None:
     # These are the sites users typically want to manage
     print(f"  {Colors.YELLOW}ℹ{Colors.NC} Checking Microsoft 365 Groups for additional sites...")
     try:
-        url = "https://graph.microsoft.com/v1.0/groups?$filter=groupTypes/any(c:c eq 'Unified')&$select=id,displayName,createdDateTime,visibility&$top=100"
+        # URL-encode the filter parameter to handle special characters
+        filter_param = urllib.parse.quote("groupTypes/any(c:c eq 'Unified')")
+        url = f"https://graph.microsoft.com/v1.0/groups?$filter={filter_param}&$select=id,displayName,createdDateTime,visibility&$top=100"
         req = urllib.request.Request(url)
         req.add_header("Authorization", f"Bearer {token}")
         req.add_header("Content-Type", "application/json")
@@ -2374,6 +2377,7 @@ def list_files_in_sites_menu() -> None:
     """List files in SharePoint sites with a clean, friendly interface."""
     import urllib.request
     import urllib.error
+    import urllib.parse
     
     # Get access token once at the start
     clear_screen()
@@ -2418,7 +2422,8 @@ def list_files_in_sites_menu() -> None:
     # ALWAYS try M365 Groups API to get group-connected sites
     print(f"  {Colors.YELLOW}ℹ{Colors.NC} Checking Microsoft 365 Groups...")
     try:
-        url = "https://graph.microsoft.com/v1.0/groups?$filter=groupTypes/any(c:c eq 'Unified')&$select=id,displayName&$top=100"
+        filter_param = urllib.parse.quote("groupTypes/any(c:c eq 'Unified')")
+        url = f"https://graph.microsoft.com/v1.0/groups?$filter={filter_param}&$select=id,displayName&$top=100"
         req = urllib.request.Request(url)
         req.add_header("Authorization", f"Bearer {token}")
         req.add_header("Content-Type", "application/json")
