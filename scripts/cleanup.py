@@ -55,7 +55,8 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_DIR = SCRIPT_DIR.parent
 CONFIG_DIR = PROJECT_DIR / "config"
 ENVIRONMENTS_FILE = CONFIG_DIR / "environments.json"
-APP_CONFIG_FILE = CONFIG_DIR / "app_config.json"
+# App config file path (same as menu.py - in scripts folder as hidden file)
+APP_CONFIG_FILE = SCRIPT_DIR / ".app_config.json"
 
 # Default Azure CLI installation paths on Windows
 AZURE_CLI_PATHS = [
