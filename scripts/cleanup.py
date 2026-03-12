@@ -2181,54 +2181,51 @@ Selection Syntax (for --select-sites and --select-files):
         print()
         print(f"  {Colors.WHITE}What would you like to do?{Colors.NC}")
         print()
-        print("    [1] Delete all FILES from sites (keeps sites)")
-        print("    [2] Delete SITES (and all their content)")
-        print("    [3] Delete BOTH files and sites")
-        print("    [4] Select SPECIFIC sites to work with")
-        print("    [5] Select SPECIFIC files to delete")
-        print("    [6] List files in sites")
-        print("    [7] Cancel")
+        print(f"    {Colors.CYAN}[1]{Colors.NC} 📋 List all sites")
+        print(f"    {Colors.CYAN}[2]{Colors.NC} 📁 List files in sites")
+        print()
+        print(f"    {Colors.RED}[3]{Colors.NC} 🗑️  Delete all SITES (and all their content)")
+        print(f"    {Colors.YELLOW}[4]{Colors.NC} 🗑️  Delete all FILES from sites (keeps sites)")
+        print()
+        print(f"    {Colors.RED}[5]{Colors.NC} 🎯 Select specific SITES to delete")
+        print(f"    {Colors.YELLOW}[6]{Colors.NC} 🎯 Select specific FILES to delete")
+        print()
+        print(f"    {Colors.DIM}[7] Cancel{Colors.NC}")
         print()
         
         choice = input("  Enter your choice (1-7): ").strip()
         
         if choice == "1":
-            delete_files = True
+            # List all sites
+            print()
+            print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+            print(f"  {Colors.WHITE}{Colors.BOLD}SharePoint Sites ({len(sites)} found){Colors.NC}")
+            print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+            print()
+            for i, site in enumerate(sites, 1):
+                name = site.get("displayName", site.get("name", "Unknown"))
+                url = site.get("webUrl", "")
+                print(f"    [{i:2}] {name}")
+                if url:
+                    print(f"         {Colors.DIM}{url}{Colors.NC}")
+            print()
+            input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            sys.exit(0)
         elif choice == "2":
-            delete_sites = True
+            list_files_mode(sites, access_token)
+            sys.exit(0)
         elif choice == "3":
-            delete_files = True
             delete_sites = True
         elif choice == "4":
+            delete_files = True
+        elif choice == "5":
             sites = interactive_select_sites(sites)
             if not sites:
                 print_warning("No sites selected")
                 sys.exit(0)
-            # Ask what to do with selected sites
-            print()
-            print(f"  {Colors.WHITE}What would you like to do with selected sites?{Colors.NC}")
-            print()
-            print("    [1] Delete all FILES from these sites")
-            print("    [2] Delete these SITES")
-            print("    [3] Select specific FILES to delete")
-            print("    [4] Cancel")
-            print()
-            sub_choice = input("  Enter your choice (1-4): ").strip()
-            if sub_choice == "1":
-                delete_files = True
-            elif sub_choice == "2":
-                delete_sites = True
-            elif sub_choice == "3":
-                delete_selected_files_mode(sites, access_token)
-                sys.exit(0)
-            else:
-                print_warning("Operation cancelled")
-                sys.exit(0)
-        elif choice == "5":
-            delete_selected_files_mode(sites, access_token)
-            sys.exit(0)
+            delete_sites = True
         elif choice == "6":
-            list_files_mode(sites, access_token)
+            delete_selected_files_mode(sites, access_token)
             sys.exit(0)
         else:
             print_warning("Operation cancelled")
