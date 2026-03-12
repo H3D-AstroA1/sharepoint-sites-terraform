@@ -1100,25 +1100,31 @@ def select_site_mode(args, step_num: int = 1) -> Tuple[str, List[Dict]]:
         print(f"  {Colors.WHITE}How would you like to define your SharePoint sites?{Colors.NC}")
         print()
         print(f"  {Colors.CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{Colors.NC}")
+        print(f"  {Colors.WHITE}CONFIGURATION FILE OPTIONS:{Colors.NC}")
         print()
-        print("    [1] Use Configuration File (config/sites.json)")
+        print("    [1] Use Configuration File Only (config/sites.json)")
         print("        - Edit the JSON file to add your custom site names")
         print("        - Full control over site names, descriptions, and settings")
+        print()
+        print(f"    [2] Configuration File + Ad-hoc Sites")
+        print("        - Uses your custom sites from config/sites.json")
+        print("        - PLUS random ad-hoc sites (projects, teams, events)")
+        print("        - Best for realistic environments with your specific sites")
         print()
         print(f"  {Colors.CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{Colors.NC}")
         print(f"  {Colors.WHITE}RANDOM GENERATION OPTIONS:{Colors.NC}")
         print()
-        print(f"    [2] Generate Department Sites ({len(DEPARTMENT_SITES)} templates)")
+        print(f"    [3] Generate Department Sites ({len(DEPARTMENT_SITES)} templates)")
         print("        - Official department sites (HR, Finance, IT, Legal, etc.)")
         print("        - Realistic organizational structure")
         print("        - Mix of Private and Public visibility")
         print()
-        print(f"    [3] Generate Ad-hoc Sites ({len(ADHOC_SITES)} templates)")
+        print(f"    [4] Generate Ad-hoc Sites ({len(ADHOC_SITES)} templates)")
         print("        - User-created sites (projects, teams, events, clubs)")
         print("        - Simulates organic SharePoint usage by employees")
         print("        - Includes working groups, social clubs, regional offices")
         print()
-        print(f"    [4] Generate Mixed Sites (Department + Ad-hoc)")
+        print(f"    [5] Generate Mixed Sites (Department + Ad-hoc)")
         print("        - Combines both types for maximum realism")
         print("        - Specify count for each type separately")
         print()
@@ -1128,23 +1134,25 @@ def select_site_mode(args, step_num: int = 1) -> Tuple[str, List[Dict]]:
         print()
         
         while True:
-            choice_input = input(f"  Enter your choice (1-4, Q to quit): ").strip().lower()
+            choice_input = input(f"  Enter your choice (1-5, Q to quit): ").strip().lower()
             if choice_input == 'q':
                 print_warning("Deployment cancelled.")
                 sys.exit(0)
             try:
                 choice = int(choice_input)
-                if 1 <= choice <= 4:
+                if 1 <= choice <= 5:
                     break
-                print_warning("Please enter 1, 2, 3, 4, or Q to quit.")
+                print_warning("Please enter 1, 2, 3, 4, 5, or Q to quit.")
             except ValueError:
-                print_warning("Please enter 1, 2, 3, 4, or Q to quit.")
+                print_warning("Please enter 1, 2, 3, 4, 5, or Q to quit.")
         
         if choice == 1:
             mode = "config"
         elif choice == 2:
-            mode = "random"
+            mode = "config_adhoc"
         elif choice == 3:
+            mode = "random"
+        elif choice == 4:
             mode = "adhoc"
         else:
             mode = "mixed"
@@ -1168,6 +1176,49 @@ def select_site_mode(args, step_num: int = 1) -> Tuple[str, List[Dict]]:
         except Exception as e:
             print_error(f"Failed to read configuration file: {e}")
             sys.exit(1)
+    
+    elif mode == "config_adhoc":
+        print()
+        print_info("Configuration File + Ad-hoc Sites Mode selected")
+        print(f"  {Colors.CYAN}ℹ{Colors.NC} Your custom sites + random ad-hoc sites")
+        print()
+        
+        # Load config file sites
+        config_path = Path(args.config) if args.config else DEFAULT_CONFIG_FILE
+        
+        if not config_path.exists():
+            print_warning(f"Config file not found at: {config_path}")
+            config_path = Path(prompt_input("Enter path to configuration file", required=True))
+        
+        print_info(f"Reading sites from: {config_path}")
+        
+        try:
+            config_sites = read_sites_from_config(config_path)
+            print_success(f"Loaded {len(config_sites)} sites from configuration file")
+        except Exception as e:
+            print_error(f"Failed to read configuration file: {e}")
+            sys.exit(1)
+        
+        # Ask for ad-hoc sites count
+        print()
+        max_adhoc = len(ADHOC_SITES)
+        while True:
+            try:
+                adhoc_count = int(prompt_input(f"How many ad-hoc sites to add? (0-{max_adhoc})", required=True))
+                if 0 <= adhoc_count <= max_adhoc:
+                    break
+                print_warning(f"Please enter a number between 0 and {max_adhoc}")
+            except ValueError:
+                print_warning("Please enter a valid number")
+        
+        if adhoc_count > 0:
+            adhoc_sites = generate_adhoc_sites(adhoc_count)
+            sites = config_sites + adhoc_sites
+            random.shuffle(sites)  # Mix them up for realism
+            print_success(f"Combined {len(config_sites)} config sites + {adhoc_count} ad-hoc sites = {len(sites)} total")
+        else:
+            sites = config_sites
+            print_info("No ad-hoc sites added, using config file only")
     
     elif mode == "random":
         print()
