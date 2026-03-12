@@ -2421,12 +2421,22 @@ def list_files_in_sites_menu() -> None:
         except Exception as e:
             print(f"  {Colors.RED}✗{Colors.NC} Error: {str(e)}")
     
-    # Filter out system/personal sites
-    sites = filter_writable_sites(sites)
+    # Categorize sites into deletable and system sites
+    deletable_sites, system_sites = categorize_sites(sites)
+    
+    # For file listing, we use deletable sites (user-created sites)
+    sites = deletable_sites
+    
+    if not sites and not system_sites:
+        print()
+        print(f"  {Colors.YELLOW}No SharePoint sites found.{Colors.NC}")
+        input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        return
     
     if not sites:
         print()
-        print(f"  {Colors.YELLOW}No SharePoint sites found.{Colors.NC}")
+        print(f"  {Colors.YELLOW}No user-created sites found.{Colors.NC}")
+        print(f"  {Colors.DIM}  Only system sites exist (which typically don't have user files){Colors.NC}")
         input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
         return
     
