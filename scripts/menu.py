@@ -1149,6 +1149,96 @@ def auto_grant_admin_consent() -> bool:
     # Use the custom app registration flow - this is the most reliable method
     return setup_custom_app_with_consent()
 
+def get_app_permissions(app_id: str) -> Dict[str, Any]:
+    """Get the current permissions assigned to an app registration.
+    
+    Returns a dict with:
+    - configured_permissions: list of permissions configured on the app
+    - consented_permissions: list of permissions that have admin consent
+    - error: any error message
+    """
+    az_path = find_azure_cli_path()
+    if not az_path:
+        return {"configured_permissions": [], "consented_permissions": [], "error": "Azure CLI not found"}
+    
+    result = {
+        "configured_permissions": [],
+        "consented_permissions": [],
+        "error": None
+    }
+    
+    # Reverse lookup for permission IDs to names
+    permission_id_to_name = {v: k for k, v in GRAPH_PERMISSION_IDS.items()}
+    ews_permission_id_to_name = {v: k for k, v in EWS_PERMISSION_IDS.items()}
+    
+    try:
+        # Get app registration details including required resource access
+        app_result = subprocess.run(
+            [az_path, "ad", "app", "show", "--id", app_id, "--query", "requiredResourceAccess", "-o", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if app_result.returncode == 0 and app_result.stdout.strip():
+            resource_access = json.loads(app_result.stdout)
+            
+            for resource in resource_access:
+                resource_app_id = resource.get("resourceAppId", "")
+                
+                for access in resource.get("resourceAccess", []):
+                    perm_id = access.get("id", "")
+                    perm_type = access.get("type", "")  # "Role" for application permissions
+                    
+                    # Check if it's a Graph permission
+                    if resource_app_id == MICROSOFT_GRAPH_API_ID:
+                        perm_name = permission_id_to_name.get(perm_id, f"Unknown ({perm_id[:8]}...)")
+                        result["configured_permissions"].append({
+                            "name": perm_name,
+                            "id": perm_id,
+                            "type": perm_type,
+                            "api": "Microsoft Graph"
+                        })
+                    # Check if it's an Exchange Online permission
+                    elif resource_app_id == EXCHANGE_ONLINE_API_ID:
+                        perm_name = ews_permission_id_to_name.get(perm_id, f"Unknown ({perm_id[:8]}...)")
+                        result["configured_permissions"].append({
+                            "name": perm_name,
+                            "id": perm_id,
+                            "type": perm_type,
+                            "api": "Exchange Online"
+                        })
+        
+        # Get service principal to check consented permissions
+        sp_result = subprocess.run(
+            [az_path, "ad", "sp", "list", "--filter", f"appId eq '{app_id}'", "--query", "[0].appRoleAssignments", "-o", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if sp_result.returncode == 0 and sp_result.stdout.strip() and sp_result.stdout.strip() != "null":
+            try:
+                role_assignments = json.loads(sp_result.stdout)
+                if role_assignments:
+                    for assignment in role_assignments:
+                        perm_id = assignment.get("appRoleId", "")
+                        perm_name = permission_id_to_name.get(perm_id, ews_permission_id_to_name.get(perm_id, f"Unknown ({perm_id[:8]}...)"))
+                        result["consented_permissions"].append({
+                            "name": perm_name,
+                            "id": perm_id
+                        })
+            except json.JSONDecodeError:
+                pass
+                
+    except subprocess.TimeoutExpired:
+        result["error"] = "Timeout getting app permissions"
+    except Exception as e:
+        result["error"] = str(e)
+    
+    return result
+
+
 def run_graph_permissions_check() -> None:
     """Run the Graph API permissions check and offer to grant consent."""
     print()
@@ -1163,17 +1253,72 @@ def run_graph_permissions_check() -> None:
     # Check if we have a custom app configured
     app_config = load_app_config()
     if app_config:
-        print(f"  {Colors.GREEN}✓{Colors.NC} Custom app registered: {app_config.get('app_id', 'Unknown')}")
+        app_id = app_config.get('app_id', 'Unknown')
+        print(f"  {Colors.GREEN}✓{Colors.NC} Custom app registered: {app_id}")
+        print(f"    {Colors.DIM}Name: {app_config.get('display_name', 'Unknown')}{Colors.NC}")
+        print()
+        
+        # Get and display current permissions
+        print(f"  {Colors.WHITE}{Colors.BOLD}Configured Permissions:{Colors.NC}")
+        print()
+        
+        perm_info = get_app_permissions(app_id)
+        
+        if perm_info["error"]:
+            print(f"    {Colors.YELLOW}⚠{Colors.NC} Could not retrieve permissions: {perm_info['error']}")
+        elif perm_info["configured_permissions"]:
+            # Group by API
+            graph_perms = [p for p in perm_info["configured_permissions"] if p["api"] == "Microsoft Graph"]
+            ews_perms = [p for p in perm_info["configured_permissions"] if p["api"] == "Exchange Online"]
+            
+            if graph_perms:
+                print(f"    {Colors.CYAN}Microsoft Graph API:{Colors.NC}")
+                for perm in graph_perms:
+                    # Check if this permission is in our required list
+                    is_required = perm["name"] in REQUIRED_GRAPH_PERMISSIONS
+                    status_icon = Colors.GREEN + "✓" + Colors.NC if is_required else Colors.DIM + "○" + Colors.NC
+                    print(f"      {status_icon} {perm['name']}")
+                print()
+            
+            if ews_perms:
+                print(f"    {Colors.CYAN}Exchange Online (EWS):{Colors.NC}")
+                for perm in ews_perms:
+                    print(f"      {Colors.GREEN}✓{Colors.NC} {perm['name']}")
+                print()
+            
+            # Check for missing required permissions
+            configured_names = {p["name"] for p in perm_info["configured_permissions"]}
+            missing_perms = [p for p in REQUIRED_GRAPH_PERMISSIONS if p not in configured_names]
+            
+            if missing_perms:
+                print(f"    {Colors.YELLOW}Missing Required Permissions:{Colors.NC}")
+                for perm in missing_perms:
+                    print(f"      {Colors.RED}✗{Colors.NC} {perm}")
+                print()
+                print(f"    {Colors.DIM}Use option [4] 'Update Permissions' to add missing permissions{Colors.NC}")
+        else:
+            print(f"    {Colors.YELLOW}⚠{Colors.NC} No permissions configured on this app")
+            print(f"    {Colors.DIM}Use option [4] 'Update Permissions' to add required permissions{Colors.NC}")
+        
+        print()
+    else:
+        print(f"  {Colors.YELLOW}⚠{Colors.NC} No custom app configured")
+        print(f"    {Colors.DIM}Use option [1] 'Setup App Registration' to create one{Colors.NC}")
+        print()
+    
+    # Test actual API access
+    print(f"  {Colors.WHITE}{Colors.BOLD}Testing API Access:{Colors.NC}")
+    print()
     
     result = check_graph_permissions()
     
     if result["has_permissions"]:
-        print(f"  {Colors.GREEN}✓{Colors.NC} Graph API permissions: OK")
-        print(f"  {Colors.GREEN}✓{Colors.NC} Can access SharePoint sites: Yes")
+        print(f"    {Colors.GREEN}✓{Colors.NC} Graph API access: Working")
+        print(f"    {Colors.GREEN}✓{Colors.NC} Can list SharePoint sites: Yes")
     else:
-        print(f"  {Colors.RED}✗{Colors.NC} Graph API permissions: Missing")
+        print(f"    {Colors.RED}✗{Colors.NC} Graph API access: Not working")
         if result["error"]:
-            print(f"    {Colors.DIM}Error: {result['error']}{Colors.NC}")
+            print(f"      {Colors.DIM}Error: {result['error']}{Colors.NC}")
         print()
         print(f"  {Colors.WHITE}Options to fix this:{Colors.NC}")
         print()
