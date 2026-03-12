@@ -2232,8 +2232,12 @@ def list_sharepoint_sites_menu() -> None:
             data = json.loads(response.read().decode())
             groups = data.get("value", [])
             
+            print(f"  {Colors.CYAN}ℹ{Colors.NC} Groups API returned {len(groups)} groups")
+            
             if groups:
                 print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(groups)} M365 Groups")
+                for g in groups[:5]:  # Show first 5 for debug
+                    print(f"      - {g.get('displayName', 'Unknown')}")
             
             # Convert groups to sites format
             for group in groups:
