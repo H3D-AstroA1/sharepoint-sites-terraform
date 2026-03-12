@@ -1096,17 +1096,30 @@ def select_site_mode(args, step_num: int = 1) -> Tuple[str, List[Dict]]:
         print_info("Using configuration file mode (from command line)")
     else:
         # Interactive selection
+        # Try to get config file site count for display
+        config_site_count = 0
+        config_path = Path(args.config) if args.config else DEFAULT_CONFIG_FILE
+        if config_path.exists():
+            try:
+                with open(config_path, 'r') as f:
+                    config_data = json.load(f)
+                    config_site_count = len(config_data.get('sites', []))
+            except Exception:
+                pass
+        
+        config_count_str = f" ({config_site_count} sites)" if config_site_count > 0 else " (edit to add sites)"
+        
         print()
         print(f"  {Colors.WHITE}How would you like to define your SharePoint sites?{Colors.NC}")
         print()
         print(f"  {Colors.CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{Colors.NC}")
         print(f"  {Colors.WHITE}CONFIGURATION FILE OPTIONS:{Colors.NC}")
         print()
-        print("    [1] Use Configuration File Only (config/sites.json)")
-        print("        - Edit the JSON file to add your custom site names")
+        print(f"    [1] Use Configuration File Only{config_count_str}")
+        print("        - Uses config/sites.json for your custom site names")
         print("        - Full control over site names, descriptions, and settings")
         print()
-        print(f"    [2] Configuration File + Ad-hoc Sites")
+        print(f"    [2] Configuration File + Ad-hoc Sites{config_count_str}")
         print("        - Uses your custom sites from config/sites.json")
         print("        - PLUS random ad-hoc sites (projects, teams, events)")
         print("        - Best for realistic environments with your specific sites")
