@@ -2189,8 +2189,14 @@ def list_sharepoint_sites_menu() -> None:
         input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
         return
     
-    # Try SharePoint Sites API first
+    # Get sites from both APIs to ensure we capture all sites
+    # 1. SharePoint Sites API - returns system sites and some user sites
+    # 2. M365 Groups API - returns group-connected sites (created via Terraform)
+    
     sites = []
+    site_urls_seen = set()  # Track URLs to avoid duplicates
+    
+    # Try SharePoint Sites API first (for system sites)
     try:
         url = "https://graph.microsoft.com/v1.0/sites?search=*&$top=100"
         req = urllib.request.Request(url)
@@ -2199,50 +2205,63 @@ def list_sharepoint_sites_menu() -> None:
         
         with urllib.request.urlopen(req, timeout=30) as response:
             data = json.loads(response.read().decode())
-            sites = data.get("value", [])
+            for site in data.get("value", []):
+                web_url = site.get("webUrl", "")
+                if web_url and web_url not in site_urls_seen:
+                    site_urls_seen.add(web_url)
+                    sites.append(site)
     except urllib.error.HTTPError as e:
-        if e.code == 403:
-            # Fall back to M365 Groups API
-            pass
-        else:
-            print(f"  {Colors.RED}✗{Colors.NC} Error: {e.code} - {e.reason}")
+        if e.code != 403:
+            print(f"  {Colors.RED}✗{Colors.NC} Sites API Error: {e.code} - {e.reason}")
     except Exception as e:
-        print(f"  {Colors.RED}✗{Colors.NC} Error: {str(e)}")
+        print(f"  {Colors.RED}✗{Colors.NC} Sites API Error: {str(e)}")
     
-    # If no sites from Sites API, try M365 Groups
-    if not sites:
-        print(f"  {Colors.YELLOW}ℹ{Colors.NC} Using Microsoft 365 Groups API...")
-        try:
-            url = "https://graph.microsoft.com/v1.0/groups?$filter=groupTypes/any(c:c eq 'Unified')&$select=id,displayName,createdDateTime,visibility&$top=100"
-            req = urllib.request.Request(url)
-            req.add_header("Authorization", f"Bearer {token}")
-            req.add_header("Content-Type", "application/json")
+    # ALWAYS try M365 Groups API to get group-connected sites (created via Terraform)
+    # These are the sites users typically want to manage
+    print(f"  {Colors.YELLOW}ℹ{Colors.NC} Checking Microsoft 365 Groups for additional sites...")
+    try:
+        url = "https://graph.microsoft.com/v1.0/groups?$filter=groupTypes/any(c:c eq 'Unified')&$select=id,displayName,createdDateTime,visibility&$top=100"
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Content-Type", "application/json")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode())
+            groups = data.get("value", [])
             
-            with urllib.request.urlopen(req, timeout=30) as response:
-                data = json.loads(response.read().decode())
-                groups = data.get("value", [])
-                
-                # Convert groups to sites format
-                for group in groups:
-                    try:
-                        site_url = f"https://graph.microsoft.com/v1.0/groups/{group['id']}/sites/root"
-                        site_req = urllib.request.Request(site_url)
-                        site_req.add_header("Authorization", f"Bearer {token}")
+            # Convert groups to sites format
+            for group in groups:
+                try:
+                    site_url = f"https://graph.microsoft.com/v1.0/groups/{group['id']}/sites/root"
+                    site_req = urllib.request.Request(site_url)
+                    site_req.add_header("Authorization", f"Bearer {token}")
+                    
+                    with urllib.request.urlopen(site_req, timeout=10) as site_response:
+                        site_data = json.loads(site_response.read().decode())
+                        web_url = site_data.get("webUrl", "")
                         
-                        with urllib.request.urlopen(site_req, timeout=10) as site_response:
-                            site_data = json.loads(site_response.read().decode())
+                        # Only add if not already seen
+                        if web_url and web_url not in site_urls_seen:
+                            site_urls_seen.add(web_url)
                             sites.append({
+                                "id": site_data.get("id", ""),
                                 "displayName": group.get("displayName", "Unknown"),
-                                "webUrl": site_data.get("webUrl", ""),
+                                "webUrl": web_url,
                                 "createdDateTime": group.get("createdDateTime", ""),
                                 "visibility": group.get("visibility", ""),
-                                "isGroup": True
+                                "isGroup": True,
+                                "groupId": group.get("id", "")  # Store group ID for deletion
                             })
-                    except Exception:
-                        # Group might not have a SharePoint site
-                        pass
-        except Exception as e:
-            print(f"  {Colors.RED}✗{Colors.NC} Error: {str(e)}")
+                except Exception:
+                    # Group might not have a SharePoint site
+                    pass
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            print(f"  {Colors.YELLOW}ℹ{Colors.NC} No access to Groups API (need Group.Read.All)")
+        else:
+            print(f"  {Colors.RED}✗{Colors.NC} Groups API Error: {e.code} - {e.reason}")
+    except Exception as e:
+        print(f"  {Colors.RED}✗{Colors.NC} Groups API Error: {str(e)}")
     
     # Categorize sites into deletable and system sites
     deletable_sites, system_sites = categorize_sites(sites)
@@ -2373,8 +2392,11 @@ def list_files_in_sites_menu() -> None:
         input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
         return
     
-    # Get sites once at the start
+    # Get sites from both APIs to ensure we capture all sites
     sites = []
+    site_urls_seen = set()
+    
+    # Try SharePoint Sites API first
     try:
         url = "https://graph.microsoft.com/v1.0/sites?search=*&$top=100"
         req = urllib.request.Request(url)
@@ -2383,43 +2405,50 @@ def list_files_in_sites_menu() -> None:
         
         with urllib.request.urlopen(req, timeout=30) as response:
             data = json.loads(response.read().decode())
-            sites = data.get("value", [])
-    except urllib.error.HTTPError as e:
-        if e.code == 403:
-            pass  # Fall back to M365 Groups
+            for site in data.get("value", []):
+                web_url = site.get("webUrl", "")
+                if web_url and web_url not in site_urls_seen:
+                    site_urls_seen.add(web_url)
+                    sites.append(site)
+    except urllib.error.HTTPError:
+        pass
     except Exception:
         pass
     
-    # If no sites from Sites API, try M365 Groups
-    if not sites:
-        print(f"  {Colors.YELLOW}ℹ{Colors.NC} Using Microsoft 365 Groups API...")
-        try:
-            url = "https://graph.microsoft.com/v1.0/groups?$filter=groupTypes/any(c:c eq 'Unified')&$select=id,displayName&$top=100"
-            req = urllib.request.Request(url)
-            req.add_header("Authorization", f"Bearer {token}")
-            req.add_header("Content-Type", "application/json")
+    # ALWAYS try M365 Groups API to get group-connected sites
+    print(f"  {Colors.YELLOW}ℹ{Colors.NC} Checking Microsoft 365 Groups...")
+    try:
+        url = "https://graph.microsoft.com/v1.0/groups?$filter=groupTypes/any(c:c eq 'Unified')&$select=id,displayName&$top=100"
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Content-Type", "application/json")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode())
+            groups = data.get("value", [])
             
-            with urllib.request.urlopen(req, timeout=30) as response:
-                data = json.loads(response.read().decode())
-                groups = data.get("value", [])
-                
-                for group in groups:
-                    try:
-                        site_url = f"https://graph.microsoft.com/v1.0/groups/{group['id']}/sites/root"
-                        site_req = urllib.request.Request(site_url)
-                        site_req.add_header("Authorization", f"Bearer {token}")
+            for group in groups:
+                try:
+                    site_url = f"https://graph.microsoft.com/v1.0/groups/{group['id']}/sites/root"
+                    site_req = urllib.request.Request(site_url)
+                    site_req.add_header("Authorization", f"Bearer {token}")
+                    
+                    with urllib.request.urlopen(site_req, timeout=10) as site_response:
+                        site_data = json.loads(site_response.read().decode())
+                        web_url = site_data.get("webUrl", "")
                         
-                        with urllib.request.urlopen(site_req, timeout=10) as site_response:
-                            site_data = json.loads(site_response.read().decode())
+                        if web_url and web_url not in site_urls_seen:
+                            site_urls_seen.add(web_url)
                             sites.append({
                                 "id": site_data.get("id", ""),
                                 "displayName": group.get("displayName", "Unknown"),
-                                "webUrl": site_data.get("webUrl", "")
+                                "webUrl": web_url,
+                                "isGroup": True
                             })
-                    except Exception:
-                        pass
-        except Exception as e:
-            print(f"  {Colors.RED}✗{Colors.NC} Error: {str(e)}")
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"  {Colors.RED}✗{Colors.NC} Error: {str(e)}")
     
     # Categorize sites into deletable and system sites
     deletable_sites, system_sites = categorize_sites(sites)
