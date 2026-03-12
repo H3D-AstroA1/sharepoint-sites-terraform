@@ -55,6 +55,7 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_DIR = SCRIPT_DIR.parent
 CONFIG_DIR = PROJECT_DIR / "config"
 ENVIRONMENTS_FILE = CONFIG_DIR / "environments.json"
+APP_CONFIG_FILE = CONFIG_DIR / "app_config.json"
 
 # Default Azure CLI installation paths on Windows
 AZURE_CLI_PATHS = [
@@ -279,8 +280,65 @@ def azure_login() -> bool:
     except subprocess.CalledProcessError:
         return False
 
+def load_app_config() -> Optional[Dict[str, Any]]:
+    """Load the custom app configuration from file."""
+    if APP_CONFIG_FILE.exists():
+        try:
+            with open(APP_CONFIG_FILE, 'r') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return None
+
+
+def get_graph_access_token_via_client_credentials(app_config: Dict[str, Any]) -> Optional[str]:
+    """Get Microsoft Graph access token using client credentials flow."""
+    tenant_id = app_config.get("tenant_id")
+    client_id = app_config.get("app_id")
+    client_secret = app_config.get("client_secret")
+    
+    if not all([tenant_id, client_id, client_secret]):
+        return None
+    
+    token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    
+    data = urllib.parse.urlencode({
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "scope": "https://graph.microsoft.com/.default",
+        "grant_type": "client_credentials"
+    }).encode()
+    
+    try:
+        req = urllib.request.Request(token_url, data=data)
+        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode())
+            return result.get("access_token")
+    except Exception as e:
+        print_error(f"Failed to get token via client credentials: {e}")
+    return None
+
+
 def get_access_token() -> Optional[str]:
-    """Get Microsoft Graph access token using Azure CLI."""
+    """Get Microsoft Graph access token.
+    
+    First tries to use custom app credentials if available,
+    then falls back to Azure CLI.
+    """
+    # Try custom app credentials first
+    app_config = load_app_config()
+    if app_config and app_config.get("client_secret"):
+        print_info("Using custom app credentials for authentication...")
+        token = get_graph_access_token_via_client_credentials(app_config)
+        if token:
+            print_success("Authenticated via custom app")
+            return token
+        else:
+            print_warning("Custom app authentication failed, falling back to Azure CLI...")
+    
+    # Fall back to Azure CLI
     try:
         result = run_command([
             "az", "account", "get-access-token",
