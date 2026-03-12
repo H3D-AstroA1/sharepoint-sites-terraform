@@ -342,16 +342,31 @@ Folder Distribution:
 
 ## Email Threading
 
-40% of emails are part of threads:
+Emails are threaded with category-specific probabilities to simulate realistic conversation patterns:
 
-- **Reply Chains**: 2-5 messages in a conversation
-- **Forward Chains**: Forwarded emails with context
-- **Reply-All**: Group conversations
+| Category | Threading % | Description |
+|----------|-------------|-------------|
+| Inter-departmental | 55% | Lots of internal back-and-forth |
+| External Business | 50% | Client/vendor conversations |
+| Attachments | 40% | Document review discussions |
+| Organisational | 35% | HR/policy discussions |
+| Links | 25% | Shared link discussions |
+| Security | 20% | Security follow-ups |
+| Newsletters | 0% | Never threaded |
+| Spam | 0% | Never threaded |
 
-Threads maintain:
-- Consistent subject lines (with Re:/Fwd: prefixes)
-- Quoted content from previous messages
-- Realistic time gaps between messages
+### Thread Types
+
+- **Reply (50%)**: Standard reply to a message
+- **Reply-All (25%)**: Group conversations with multiple recipients
+- **Forward (25%)**: Forwarded emails with context
+
+### Thread Features
+
+- **Subject Prefixes**: Automatic `Re:` for replies and `Fwd:` for forwards
+- **Thread Headers**: In-Reply-To, References, Thread-Topic, Thread-Index
+- **Quoted Content**: Original message quoted in replies
+- **Forward Headers**: Original sender info in forwarded messages
 
 ## Sensitivity Labels
 
@@ -363,6 +378,58 @@ Emails are assigned Microsoft 365 sensitivity labels:
 | Internal | 35% | Internal use only |
 | Confidential | 20% | Sensitive business data |
 | Highly Confidential | 5% | Restricted access |
+
+## Email Properties
+
+Emails include realistic properties to simulate a real mailbox:
+
+### Importance Levels
+
+| Level | Distribution | Description |
+|-------|--------------|-------------|
+| Normal | 75% | Standard priority |
+| High | 15% | Urgent/important emails |
+| Low | 10% | Low priority/FYI emails |
+
+Importance is influenced by:
+- **Category**: Security alerts more likely to be high importance
+- **Template**: Urgent templates get higher importance
+- **Random variation**: Natural distribution
+
+### Outlook Color Categories
+
+About 20% of emails are tagged with Outlook color categories:
+
+| Category | Email Types |
+|----------|-------------|
+| 🔵 Blue Category | IT, Attachments |
+| 🟢 Green Category | Sales, Links |
+| 🟡 Yellow Category | Finance, External Business |
+| 🟠 Orange Category | Marketing, Security |
+| 🟣 Purple Category | HR, Newsletters |
+| 🔴 Red Category | Executive, Legal, Security |
+
+### Read/Unread Patterns
+
+Emails are marked as read or unread based on realistic patterns:
+
+| Factor | Effect |
+|--------|--------|
+| Email Age | Older emails more likely read |
+| Importance | High importance more likely read |
+| Category | Spam often left unread |
+| Recency | Emails < 3 days have higher unread rate |
+
+### External Links
+
+External business emails and newsletters include realistic clickable links:
+
+- **Newsletter Articles**: Links to HBR, Forbes, McKinsey, Gartner, TechCrunch, etc.
+- **Unsubscribe Links**: Realistic unsubscribe URLs with unique tokens
+- **Calendar Links**: Calendly booking links
+- **Meeting Links**: Zoom and Teams meeting URLs
+- **Company Websites**: Links to sender's company website
+- **Portal Links**: Client portal and invoice links
 
 ## Azure AD Auto-Discovery
 

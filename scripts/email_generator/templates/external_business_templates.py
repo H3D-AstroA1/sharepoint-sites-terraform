@@ -155,14 +155,14 @@ EXTERNAL_BUSINESS_TEMPLATES: List[Dict[str, Any]] = [
 
 <p>{followup_action}</p>
 
-<p>Please let me know if you have any questions or if there's anything else I can help with.</p>
+<p>Please let me know if you have any questions or if there's anything else I can help with. You can also <a href="{calendar_link}">schedule a call directly on my calendar</a>.</p>
 
 <p>Best regards,</p>
 <p><strong>{sender_name}</strong><br>
 {sender_title}<br>
-{sender_company}<br>
+{sender_company} | <a href="{company_website}">Website</a><br>
 {sender_phone}<br>
-{sender_email}</p>
+<a href="mailto:{sender_email}">{sender_email}</a></p>
 </body>
 </html>""",
         "has_attachment": False,
@@ -247,6 +247,8 @@ EXTERNAL_BUSINESS_TEMPLATES: List[Dict[str, Any]] = [
 {meeting_times}
 </ul>
 
+<p>Alternatively, you can <a href="{calendar_link}">book a time directly on my calendar</a> or join via <a href="{zoom_link}">Zoom</a>.</p>
+
 <p>Please let me know what works best for your schedule, or feel free to suggest alternative times.</p>
 
 <p>Looking forward to connecting.</p>
@@ -254,9 +256,9 @@ EXTERNAL_BUSINESS_TEMPLATES: List[Dict[str, Any]] = [
 <p>Best regards,</p>
 <p><strong>{sender_name}</strong><br>
 {sender_title}<br>
-{sender_company}<br>
+{sender_company} | <a href="{company_website}">Website</a><br>
 {sender_phone}<br>
-{sender_email}</p>
+<a href="mailto:{sender_email}">{sender_email}</a></p>
 </body>
 </html>""",
         "has_attachment": False,

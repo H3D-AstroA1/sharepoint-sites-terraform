@@ -478,17 +478,20 @@ class EWSClient:
             # Get the folder ID - need to map to EWS distinguished folder names
             folder_id = self._get_folder_id(folder)
             
-            # Determine if message should be read
-            is_read_val = "true" if self._should_be_read(email_date) else "false"
-            
-            # Format the date for EWS (ISO 8601 format)
-            # EWS expects: 2024-01-15T10:30:00Z
-            ews_date = email_date.strftime('%Y-%m-%dT%H:%M:%SZ')
-            
             # Get importance level (High, Normal, Low)
             importance = email.get("importance", "normal")
             importance_map = {"high": "High", "normal": "Normal", "low": "Low"}
             ews_importance = importance_map.get(importance.lower(), "Normal")
+            
+            # Get category for read/unread determination
+            category = email.get("category", "")
+            
+            # Determine if message should be read (using realistic patterns)
+            is_read_val = "true" if self._should_be_read(email_date, category, importance) else "false"
+            
+            # Format the date for EWS (ISO 8601 format)
+            # EWS expects: 2024-01-15T10:30:00Z
+            ews_date = email_date.strftime('%Y-%m-%dT%H:%M:%SZ')
             
             # Get categories (color tags)
             categories = email.get("categories", [])
@@ -497,27 +500,10 @@ class EWSClient:
                 cat_items = "".join(f"<t:String>{cat}</t:String>" for cat in categories)
                 categories_xml = f"<t:Categories>{cat_items}</t:Categories>"
             
-            # Get flag status
-            flag_status = email.get("flag_status", {})
-            flag_xml = ""
-            if flag_status.get("flagged"):
-                flag_type = flag_status.get("flag_type", "followUp")
-                if flag_status.get("completed"):
-                    flag_xml = """<t:Flag>
-            <t:FlagStatus>Complete</t:FlagStatus>
-          </t:Flag>"""
-                else:
-                    due_date = flag_status.get("due_date")
-                    if due_date:
-                        due_str = due_date.strftime('%Y-%m-%dT%H:%M:%SZ')
-                        flag_xml = f"""<t:Flag>
-            <t:FlagStatus>Flagged</t:FlagStatus>
-            <t:DueDate>{due_str}</t:DueDate>
-          </t:Flag>"""
-                    else:
-                        flag_xml = """<t:Flag>
-            <t:FlagStatus>Flagged</t:FlagStatus>
-          </t:Flag>"""
+            # Note: Flag status is not set via EWS CreateItem with MimeContent
+            # as it can cause "The request is invalid" errors.
+            # Flags would need to be set via UpdateItem after creation.
+            # For now, we skip flag setting to ensure reliable email creation.
             
             # Build the CreateItem SOAP request with MIME content
             # Using MimeContent allows setting the Date header
@@ -547,7 +533,6 @@ class EWSClient:
           <t:MimeContent CharacterSet="UTF-8">{mime_b64}</t:MimeContent>
           <t:Importance>{ews_importance}</t:Importance>
           {categories_xml}
-          {flag_xml}
           <t:IsRead>{is_read_val}</t:IsRead>
           <t:ExtendedProperty>
             <t:ExtendedFieldURI PropertyTag="0x0E07" PropertyType="Integer"/>
@@ -623,28 +608,44 @@ class EWSClient:
             print(f"  ✗ EWS create_email failed: {e}")
             return False
     
-    def _should_be_read(self, email_date: datetime) -> bool:
+    def _should_be_read(
+        self,
+        email_date: datetime,
+        category: str = "",
+        importance: str = "normal"
+    ) -> bool:
         """
-        Determine if an email should be marked as read based on its age.
+        Determine if an email should be marked as read based on realistic patterns.
         
-        Emails older than 7 days are marked as read.
+        Uses the ReadUnreadPatterns class for more realistic behavior:
+        - Recent emails (< 3 days) have higher unread probability
+        - Spam emails are often left unread
+        - Important emails are more likely to be read
+        - Older emails are mostly read
         
         Args:
             email_date: The date of the email.
+            category: Email category (spam, security, etc.)
+            importance: Email importance (high, normal, low)
             
         Returns:
             True if the email should be marked as read.
         """
-        # Use timezone-aware datetime for comparison with EWS dates
-        from exchangelib import UTC
-        now = datetime.now(UTC)
-        
-        # Ensure email_date is also timezone-aware
-        if email_date.tzinfo is None:
-            email_date = email_date.replace(tzinfo=UTC)
-        
-        age_days = (now - email_date).days
-        return age_days > 7
+        try:
+            from .realism import ReadUnreadPatterns
+            patterns = ReadUnreadPatterns()
+            is_spam = category.lower() == "spam" if category else False
+            return patterns.should_be_read(email_date, category or "", importance, is_spam)
+        except ImportError:
+            # Fallback to simple age-based logic
+            from exchangelib import UTC
+            now = datetime.now(UTC)
+            
+            if email_date.tzinfo is None:
+                email_date = email_date.replace(tzinfo=UTC)
+            
+            age_days = (now - email_date).days
+            return age_days > 7
     
     def verify_connection(self, mailbox: str) -> bool:
         """

@@ -132,7 +132,7 @@ INDUSTRY_NEWSLETTER: Dict[str, Any] = {
         
         <div class="footer">
             <p>You're receiving this because you subscribed to {newsletter_name}.</p>
-            <p><a href="#">Unsubscribe</a> | <a href="#">Manage Preferences</a> | <a href="#">View Online</a></p>
+            <p><a href="https://newsletters.{sender_domain}/unsubscribe?id={unsubscribe_id}">Unsubscribe</a> | <a href="https://newsletters.{sender_domain}/preferences?id={unsubscribe_id}">Manage Preferences</a> | <a href="https://newsletters.{sender_domain}/view/{newsletter_id}">View Online</a></p>
         </div>
     </div>
 </body>

@@ -90,6 +90,14 @@ class EmailContentGenerator:
         # Generate threading info (reply/forward)
         threading_info = self._generate_threading_info(category, template, sender, recipient)
         
+        # Apply Re:/Fwd: prefix to subject based on threading info
+        if threading_info.get("is_reply") or threading_info.get("is_reply_all"):
+            if not subject.lower().startswith("re:"):
+                subject = f"Re: {subject}"
+        elif threading_info.get("is_forward"):
+            if not subject.lower().startswith("fwd:") and not subject.lower().startswith("fw:"):
+                subject = f"Fwd: {subject}"
+        
         # Build email object
         email = {
             "category": category,
@@ -495,6 +503,16 @@ class EmailContentGenerator:
             "{sender_department}": sender.get("department", ""),
             "{sender_role}": sender.get("title", ""),
             "{sender_phone}": self._generate_phone(),
+            "{sender_company}": sender.get("company", "External Company"),
+            
+            # External business link placeholders
+            "{company_website}": f"https://www.{sender.get('email', 'company.com').split('@')[-1] if '@' in sender.get('email', '') else 'company.com'}",
+            "{calendar_link}": f"https://calendly.com/{sender.get('first_name', 'contact').lower()}-{secrets.token_hex(4)}",
+            "{portal_link}": f"https://portal.{sender.get('email', 'company.com').split('@')[-1] if '@' in sender.get('email', '') else 'company.com'}/client/{secrets.token_urlsafe(8)}",
+            "{invoice_link}": f"https://billing.{sender.get('email', 'company.com').split('@')[-1] if '@' in sender.get('email', '') else 'company.com'}/invoice/{secrets.token_hex(8).upper()}",
+            "{contract_link}": f"https://docs.{sender.get('email', 'company.com').split('@')[-1] if '@' in sender.get('email', '') else 'company.com'}/contract/{secrets.token_hex(8)}",
+            "{meeting_link}": f"https://teams.microsoft.com/l/meetup-join/{secrets.token_urlsafe(32)}",
+            "{zoom_link}": f"https://zoom.us/j/{random.randint(10000000000, 99999999999)}?pwd={secrets.token_urlsafe(16)}",
             
             # Company/Domain placeholders
             "{company_name}": company_name,
@@ -515,8 +533,13 @@ class EmailContentGenerator:
             # Dynamic content placeholders
             "{department}": department,
             "{industry}": random.choice(["Technology", "Business", "Finance", "Healthcare"]),
-            "{newsletter_name}": random.choice(["Industry Insights", "Weekly Digest", "News Roundup"]),
+            "{newsletter_name}": random.choice(["Industry Insights", "Weekly Digest", "News Roundup", "Harvard Business Review", "Forbes Daily", "TechCrunch Weekly"]),
             "{tagline}": "Your weekly source for industry news and insights",
+            
+            # Newsletter link placeholders
+            "{sender_domain}": sender.get("email", "newsletter.com").split("@")[-1] if "@" in sender.get("email", "") else "newsletter.com",
+            "{unsubscribe_id}": secrets.token_urlsafe(16),
+            "{newsletter_id}": f"nl-{now.strftime('%Y%m%d')}-{secrets.token_hex(4)}",
             
             # Document placeholders
             "{document_name}": self._generate_document_name(department),
@@ -1016,23 +1039,32 @@ class EmailContentGenerator:
             - references: list - chain of message IDs
             - original_sender: dict - original sender for forwards
         """
-        # Check if template supports threading
-        if not template.get("supports_threading", False):
+        # Check if template supports threading - default to True for most categories
+        # to ensure we get a good mix of threaded emails
+        supports_threading = template.get("supports_threading", True)
+        
+        # Categories that should never have threading
+        no_threading_categories = ["spam", "newsletters"]
+        if category in no_threading_categories:
+            supports_threading = False
+        
+        if not supports_threading:
             return {"is_reply": False, "is_forward": False, "is_reply_all": False}
         
-        # Threading probability by category
+        # Threading probability by category - increased for more realistic mailbox
+        # Real mailboxes have many reply chains and forwards
         thread_weights = {
-            "interdepartmental": 0.45,
-            "external_business": 0.35,
-            "organisational": 0.20,
-            "attachments": 0.25,
-            "links": 0.15,
-            "security": 0.10,
-            "newsletters": 0.05,
-            "spam": 0.0,
+            "interdepartmental": 0.55,  # Increased from 0.45 - lots of internal back-and-forth
+            "external_business": 0.50,  # Increased from 0.35 - client conversations
+            "organisational": 0.35,     # Increased from 0.20 - HR/policy discussions
+            "attachments": 0.40,        # Increased from 0.25 - document reviews
+            "links": 0.25,              # Increased from 0.15 - shared link discussions
+            "security": 0.20,           # Increased from 0.10 - security follow-ups
+            "newsletters": 0.0,         # Keep at 0 - newsletters aren't replied to
+            "spam": 0.0,                # Keep at 0 - spam isn't replied to
         }
         
-        if random.random() > thread_weights.get(category, 0.20):
+        if random.random() > thread_weights.get(category, 0.30):
             return {"is_reply": False, "is_forward": False, "is_reply_all": False}
         
         # Determine thread type
@@ -1492,84 +1524,122 @@ class EmailContentGenerator:
         return "".join(updates_html)
     
     def _generate_articles(self) -> str:
-        """Generate newsletter articles with extensive variations."""
+        """Generate newsletter articles with extensive variations and realistic links."""
         year = variations.get_current_fiscal_year()
+        
+        # Realistic external article URLs from reputable business/tech sources
+        article_urls = [
+            "https://hbr.org/article/",
+            "https://www.forbes.com/sites/",
+            "https://www.mckinsey.com/insights/",
+            "https://www.gartner.com/en/articles/",
+            "https://www.forrester.com/report/",
+            "https://www.techcrunch.com/",
+            "https://www.wired.com/story/",
+            "https://www.fastcompany.com/",
+            "https://www.inc.com/",
+            "https://www.entrepreneur.com/article/",
+            "https://www.businessinsider.com/",
+            "https://www.cnbc.com/",
+            "https://www.reuters.com/business/",
+            "https://www.bloomberg.com/news/",
+            "https://www.wsj.com/articles/",
+            "https://www.ft.com/content/",
+            "https://www.economist.com/",
+            "https://sloanreview.mit.edu/article/",
+            "https://www.strategy-business.com/article/",
+            "https://www.bain.com/insights/",
+        ]
         
         article_pool = [
             # Industry trends
             {
                 "title": f"Industry Trends: What to Watch in {year}",
                 "time": f"{random.randint(4, 8)} min read",
-                "summary": "The latest developments shaping our industry and what they mean for businesses like ours."
+                "summary": "The latest developments shaping our industry and what they mean for businesses like ours.",
+                "url": f"{random.choice(article_urls)}industry-trends-{year}-{random.randint(1000, 9999)}"
             },
             {
                 "title": "Market Analysis: Emerging Opportunities",
                 "time": f"{random.randint(5, 10)} min read",
-                "summary": "A deep dive into new market segments and growth potential for the coming year."
+                "summary": "A deep dive into new market segments and growth potential for the coming year.",
+                "url": f"{random.choice(article_urls)}market-analysis-opportunities-{random.randint(1000, 9999)}"
             },
             {
                 "title": f"Economic Outlook for {year}",
                 "time": f"{random.randint(6, 12)} min read",
-                "summary": "Expert predictions and analysis of economic factors affecting our business."
+                "summary": "Expert predictions and analysis of economic factors affecting our business.",
+                "url": f"{random.choice(article_urls)}economic-outlook-{year}-{random.randint(1000, 9999)}"
             },
             # Technology
             {
                 "title": "Technology Spotlight: AI in the Workplace",
                 "time": f"{random.randint(3, 6)} min read",
-                "summary": "How artificial intelligence is transforming how we work."
+                "summary": "How artificial intelligence is transforming how we work.",
+                "url": f"{random.choice(article_urls)}ai-workplace-transformation-{random.randint(1000, 9999)}"
             },
             {
                 "title": "Digital Transformation: Success Stories",
                 "time": f"{random.randint(4, 7)} min read",
-                "summary": "Real-world examples of companies thriving through digital innovation."
+                "summary": "Real-world examples of companies thriving through digital innovation.",
+                "url": f"{random.choice(article_urls)}digital-transformation-success-{random.randint(1000, 9999)}"
             },
             {
                 "title": "Cybersecurity Best Practices for Teams",
                 "time": f"{random.randint(3, 5)} min read",
-                "summary": "Essential security tips every employee should know."
+                "summary": "Essential security tips every employee should know.",
+                "url": f"{random.choice(article_urls)}cybersecurity-best-practices-{random.randint(1000, 9999)}"
             },
             {
                 "title": "The Future of Cloud Computing",
                 "time": f"{random.randint(5, 8)} min read",
-                "summary": "Exploring the next generation of cloud technologies and their business impact."
+                "summary": "Exploring the next generation of cloud technologies and their business impact.",
+                "url": f"{random.choice(article_urls)}future-cloud-computing-{random.randint(1000, 9999)}"
             },
             # Workplace
             {
                 "title": "Best Practices for Remote Collaboration",
                 "time": f"{random.randint(3, 5)} min read",
-                "summary": "Tips and tools for effective teamwork in a distributed environment."
+                "summary": "Tips and tools for effective teamwork in a distributed environment.",
+                "url": f"{random.choice(article_urls)}remote-collaboration-tips-{random.randint(1000, 9999)}"
             },
             {
                 "title": "Building a Culture of Innovation",
                 "time": f"{random.randint(4, 6)} min read",
-                "summary": "How leading companies foster creativity and continuous improvement."
+                "summary": "How leading companies foster creativity and continuous improvement.",
+                "url": f"{random.choice(article_urls)}innovation-culture-building-{random.randint(1000, 9999)}"
             },
             {
                 "title": "Work-Life Balance in the Modern Era",
                 "time": f"{random.randint(3, 5)} min read",
-                "summary": "Strategies for maintaining wellbeing while staying productive."
+                "summary": "Strategies for maintaining wellbeing while staying productive.",
+                "url": f"{random.choice(article_urls)}work-life-balance-strategies-{random.randint(1000, 9999)}"
             },
             # Leadership
             {
                 "title": "Leadership Lessons from Top CEOs",
                 "time": f"{random.randint(5, 8)} min read",
-                "summary": "Insights and advice from industry leaders on effective management."
+                "summary": "Insights and advice from industry leaders on effective management.",
+                "url": f"{random.choice(article_urls)}ceo-leadership-lessons-{random.randint(1000, 9999)}"
             },
             {
                 "title": "Developing Your Leadership Style",
                 "time": f"{random.randint(4, 7)} min read",
-                "summary": "A guide to understanding and improving your leadership approach."
+                "summary": "A guide to understanding and improving your leadership approach.",
+                "url": f"{random.choice(article_urls)}leadership-style-development-{random.randint(1000, 9999)}"
             },
             # Professional development
             {
                 "title": f"Skills That Will Matter in {year}",
                 "time": f"{random.randint(4, 6)} min read",
-                "summary": "The competencies employers are looking for in the evolving job market."
+                "summary": "The competencies employers are looking for in the evolving job market.",
+                "url": f"{random.choice(article_urls)}skills-matter-{year}-{random.randint(1000, 9999)}"
             },
             {
                 "title": "Continuous Learning: A Career Imperative",
                 "time": f"{random.randint(3, 5)} min read",
-                "summary": "Why lifelong learning is essential for professional growth."
+                "summary": "Why lifelong learning is essential for professional growth.",
+                "url": f"{random.choice(article_urls)}continuous-learning-career-{random.randint(1000, 9999)}"
             },
         ]
         
@@ -1583,7 +1653,7 @@ class EmailContentGenerator:
             <div class="article-title">{article['title']}</div>
             <div class="article-meta">{article['time']}</div>
             <p class="article-summary">{article['summary']}</p>
-            <a href="#" class="read-more">Read More →</a>
+            <a href="{article['url']}" class="read-more">Read More →</a>
         </div>""")
         
         return "".join(articles_html)

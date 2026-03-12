@@ -14,6 +14,7 @@ Modules:
     - ews_client: Exchange Web Services client for full property control
     - azure_ad_discovery: Azure AD user/group discovery
     - user_pool: User and group pool management
+    - realism: Realistic email patterns (read/unread, threads, OOO)
     - utils: Utility functions
 """
 
@@ -66,7 +67,16 @@ from .user_pool import (
     UserSource,
 )
 
-__version__ = "1.2.0"
+# Realism enhancements
+from .realism import (
+    ReadUnreadPatterns,
+    ConversationThreadGenerator,
+    TimeBasedPatterns,
+    OutOfOfficeGenerator,
+    RealisticAttachmentGenerator,
+)
+
+__version__ = "1.4.0"
 __all__ = [
     # Config
     "load_mailbox_config",
@@ -100,4 +110,10 @@ __all__ = [
     "EmailRecipient",
     "RecipientSelection",
     "UserSource",
+    # Realism enhancements
+    "ReadUnreadPatterns",
+    "ConversationThreadGenerator",
+    "TimeBasedPatterns",
+    "OutOfOfficeGenerator",
+    "RealisticAttachmentGenerator",
 ]
