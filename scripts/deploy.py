@@ -63,6 +63,9 @@ DEPARTMENT_SITES = [
     {"name": "finance-accounts-payable", "display_name": "Finance Accounts Payable", "description": "Vendor payments, invoice processing, and AP documentation", "visibility": "Private", "template": "STS#3"},
     {"name": "finance-treasury", "display_name": "Finance Treasury", "description": "Cash management, banking relationships, and treasury operations", "visibility": "Private", "template": "STS#3"},
     
+    # Claims (Private - sensitive claim data)
+    {"name": "claims-department", "display_name": "Claims Department", "description": "Claims processing, case management, and claims documentation", "visibility": "Private", "template": "STS#3"},
+    
     # Information Technology (Mixed)
     {"name": "it-department", "display_name": "IT Department", "description": "IT policies, system documentation, and technology resources", "visibility": "Private", "template": "STS#3"},
     {"name": "it-helpdesk", "display_name": "IT Helpdesk", "description": "IT support documentation, troubleshooting guides, and user assistance", "visibility": "Public", "template": "STS#3"},

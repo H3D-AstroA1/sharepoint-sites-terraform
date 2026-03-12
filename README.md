@@ -268,6 +268,7 @@ The script creates realistic files based on each site's department type:
 | **Executive** | Board Meeting Agenda, Strategic Plan, CEO Town Hall Presentation |
 | **HR** | Employee Handbook, Job Descriptions, Onboarding Checklist, Benefits Summary |
 | **Finance** | Monthly Financial Report, Annual Budget, Cash Flow Statement, Expense Reports |
+| **Claims** | Claim Form Template, Claims Processing Guide, Claim Status Tracker, Settlement Authorization |
 | **IT** | System Architecture Diagram, Security Policy, Disaster Recovery Plan |
 | **Marketing** | Marketing Plan, Brand Guidelines, Campaign Performance, Social Media Calendar |
 | **Sales** | Sales Proposals, Contracts, Pipeline Analysis, Territory Maps |

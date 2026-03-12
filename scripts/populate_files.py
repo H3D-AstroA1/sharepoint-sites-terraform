@@ -121,6 +121,21 @@ FILE_TEMPLATES = {
             {"name": "Cost_Center_Report_{month}_{year}.xlsx", "type": "excel"},
         ]
     },
+    "claims-department": {
+        "folders": ["Active Claims", "Closed Claims", "Templates", "Reports", "Policies"],
+        "files": [
+            {"name": "Claim_Form_Template_v{version}.docx", "type": "word"},
+            {"name": "Claims_Processing_Guide.pdf", "type": "pdf"},
+            {"name": "Monthly_Claims_Report_{month}_{year}.xlsx", "type": "excel"},
+            {"name": "Claim_Status_Tracker_{year}.xlsx", "type": "excel"},
+            {"name": "Claims_Policy_v{version}.pdf", "type": "pdf"},
+            {"name": "Investigation_Checklist.docx", "type": "word"},
+            {"name": "Settlement_Authorization_Template.docx", "type": "word"},
+            {"name": "Claims_Metrics_Dashboard_Q{quarter}_{year}.xlsx", "type": "excel"},
+            {"name": "Fraud_Detection_Guidelines.pdf", "type": "pdf"},
+            {"name": "Appeals_Process_Documentation.docx", "type": "word"},
+        ]
+    },
     "it-department": {
         "folders": ["Documentation", "Procedures", "Architecture", "Security", "Projects"],
         "files": [
@@ -477,6 +492,7 @@ def get_site_type(site_name: str) -> str:
         "finance": "finance-department",
         "accounting": "finance-department",
         "treasury": "finance-department",
+        "claims": "claims-department",
         "it": "it-department",
         "technology": "it-department",
         "security": "it-department",

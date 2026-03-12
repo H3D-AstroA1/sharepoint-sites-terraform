@@ -36,6 +36,15 @@
       "members": []
     },
     {
+      "name": "claims-department",
+      "display_name": "Claims Department",
+      "description": "Claims processing, case management, and claims documentation",
+      "template": "STS#3",
+      "visibility": "Private",
+      "owners": [],
+      "members": []
+    },
+    {
       "name": "it-department",
       "display_name": "IT Department",
       "description": "IT policies, system documentation, and technology resources",
