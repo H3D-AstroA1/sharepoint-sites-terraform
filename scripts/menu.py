@@ -946,6 +946,7 @@ def update_app_permissions() -> bool:
     """Update all permissions on an existing app registration.
     
     This adds both Microsoft Graph API permissions and Exchange Online (EWS) permissions.
+    First checks which permissions already exist to avoid duplicates.
     """
     az_path = find_azure_cli_path()
     if not az_path:
@@ -976,13 +977,41 @@ def update_app_permissions() -> bool:
     print(f"  {Colors.WHITE}App ID:{Colors.NC} {app_id}")
     print()
     
+    # First, get existing permissions to avoid duplicates
+    print(f"  {Colors.DIM}Checking existing permissions...{Colors.NC}")
+    existing_perm_ids = set()
+    
+    try:
+        app_result = subprocess.run(
+            [az_path, "ad", "app", "show", "--id", app_id, "--query", "requiredResourceAccess", "-o", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if app_result.returncode == 0 and app_result.stdout.strip():
+            resource_access = json.loads(app_result.stdout)
+            for resource in resource_access:
+                for access in resource.get("resourceAccess", []):
+                    existing_perm_ids.add(access.get("id", ""))
+    except Exception:
+        pass  # If we can't get existing permissions, we'll try to add all
+    
+    print()
+    
     added_count = 0
     skipped_count = 0
     
     # Add Microsoft Graph API permissions
-    print(f"  {Colors.WHITE}Adding Microsoft Graph API permissions:{Colors.NC}")
+    print(f"  {Colors.WHITE}Microsoft Graph API permissions:{Colors.NC}")
     
     for perm_name, perm_id in GRAPH_PERMISSION_IDS.items():
+        # Check if permission already exists
+        if perm_id in existing_perm_ids:
+            print(f"    {Colors.DIM}○ Already exists: {perm_name}{Colors.NC}")
+            skipped_count += 1
+            continue
+        
         try:
             add_perm_result = subprocess.run(
                 [az_path, "ad", "app", "permission", "add",
@@ -998,7 +1027,7 @@ def update_app_permissions() -> bool:
                 print(f"    {Colors.GREEN}✓{Colors.NC} Added: {perm_name}")
                 added_count += 1
             else:
-                # Check if permission already exists
+                # Check if permission already exists (fallback check)
                 if "already exists" in add_perm_result.stderr.lower() or "already been added" in add_perm_result.stderr.lower():
                     print(f"    {Colors.DIM}○ Already exists: {perm_name}{Colors.NC}")
                     skipped_count += 1
@@ -1009,9 +1038,15 @@ def update_app_permissions() -> bool:
     
     # Add Exchange Online (EWS) permissions
     print()
-    print(f"  {Colors.WHITE}Adding Exchange Online (EWS) permissions:{Colors.NC}")
+    print(f"  {Colors.WHITE}Exchange Online (EWS) permissions:{Colors.NC}")
     
     for perm_name, perm_id in EWS_PERMISSION_IDS.items():
+        # Check if permission already exists
+        if perm_id in existing_perm_ids:
+            print(f"    {Colors.DIM}○ Already exists: EWS.{perm_name}{Colors.NC}")
+            skipped_count += 1
+            continue
+        
         try:
             add_perm_result = subprocess.run(
                 [az_path, "ad", "app", "permission", "add",
@@ -1027,7 +1062,7 @@ def update_app_permissions() -> bool:
                 print(f"    {Colors.GREEN}✓{Colors.NC} Added: EWS.{perm_name}")
                 added_count += 1
             else:
-                # Check if permission already exists
+                # Check if permission already exists (fallback check)
                 if "already exists" in add_perm_result.stderr.lower() or "already been added" in add_perm_result.stderr.lower():
                     print(f"    {Colors.DIM}○ Already exists: EWS.{perm_name}{Colors.NC}")
                     skipped_count += 1
