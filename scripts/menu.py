@@ -66,38 +66,63 @@ EXCLUDED_SITE_PATTERNS = [
     "designer",          # Microsoft Designer integration site
     "contenttypehub",    # SharePoint content type hub
     "appcatalog",        # SharePoint app catalog
+    "team site",         # Default team site
+    "communication site", # Root communication site
 ]
 
 
-def filter_writable_sites(sites: list) -> list:
-    """Filter out system/personal sites that typically cause 403 errors."""
-    filtered = []
-    excluded_count = 0
+def is_system_site(site: dict) -> bool:
+    """Check if a site is a protected system site that cannot be deleted."""
+    site_name = site.get("displayName", site.get("name", "")).lower()
+    web_url = site.get("webUrl", "").lower()
+    
+    # Check name patterns
+    for pattern in EXCLUDED_SITE_PATTERNS:
+        if pattern in site_name:
+            return True
+    
+    # Check URL patterns
+    if "/contentstorage/" in web_url:
+        return True
+    if web_url.endswith(".sharepoint.com") or web_url.endswith(".sharepoint.com/"):
+        # Root site collection
+        return True
+    if "/sites/contenttypehub" in web_url:
+        return True
+    if "/sites/appcatalog" in web_url:
+        return True
+    if "/personal/" in web_url:
+        return True
+    
+    return False
+
+
+def categorize_sites(sites: list) -> tuple:
+    """Categorize sites into deletable and system (protected) sites.
+    
+    Returns:
+        Tuple of (deletable_sites, system_sites)
+    """
+    deletable = []
+    system = []
     
     for site in sites:
-        site_name = site.get("displayName", site.get("name", "")).lower()
-        web_url = site.get("webUrl", "").lower()
-        
-        # Check if site matches any excluded pattern
-        is_excluded = False
-        for pattern in EXCLUDED_SITE_PATTERNS:
-            if pattern in site_name or pattern in web_url:
-                is_excluded = True
-                excluded_count += 1
-                break
-        
-        # Also exclude sites that are clearly personal OneDrive sites
-        if "/personal/" in web_url:
-            is_excluded = True
-            excluded_count += 1
-        
-        if not is_excluded:
-            filtered.append(site)
+        if is_system_site(site):
+            system.append(site)
+        else:
+            deletable.append(site)
     
-    if excluded_count > 0:
-        print(f"  {Colors.YELLOW}ℹ{Colors.NC} Filtered out {excluded_count} system/personal sites")
+    return deletable, system
+
+
+def filter_writable_sites(sites: list) -> list:
+    """Filter out system/personal sites that typically cause 403 errors.
     
-    return filtered
+    Note: This function is kept for backward compatibility.
+    Use categorize_sites() for more detailed categorization.
+    """
+    deletable, _ = categorize_sites(sites)
+    return deletable
 
 
 def clear_screen() -> None:
@@ -2219,10 +2244,10 @@ def list_sharepoint_sites_menu() -> None:
         except Exception as e:
             print(f"  {Colors.RED}✗{Colors.NC} Error: {str(e)}")
     
-    # Filter out system/personal sites
-    sites = filter_writable_sites(sites)
+    # Categorize sites into deletable and system sites
+    deletable_sites, system_sites = categorize_sites(sites)
     
-    if not sites:
+    if not deletable_sites and not system_sites:
         print()
         print(f"  {Colors.YELLOW}No SharePoint sites found.{Colors.NC}")
         print()
@@ -2233,28 +2258,57 @@ def list_sharepoint_sites_menu() -> None:
         input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
         return
     
-    # Display sites
+    # Display summary
     print()
-    print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(sites)} SharePoint sites")
-    print()
-    print(f"  {Colors.WHITE}{'─' * 70}{Colors.NC}")
+    total_sites = len(deletable_sites) + len(system_sites)
+    print(f"  {Colors.GREEN}✓{Colors.NC} Found {total_sites} SharePoint sites")
     print()
     
-    for i, site in enumerate(sites, 1):
-        name = site.get("displayName", site.get("name", "Unknown"))
-        web_url = site.get("webUrl", "")
-        visibility = site.get("visibility", "")
-        is_group = site.get("isGroup", False)
-        
-        # Icon based on visibility
-        if visibility == "Private":
-            icon = "🔒"
-        else:
-            icon = "🌐"
-        
-        print(f"  [{i:2}] {icon} {name}")
-        print(f"       {Colors.DIM}{web_url}{Colors.NC}")
+    # Display deletable sites first
+    if deletable_sites:
+        print(f"  {Colors.CYAN}{'─' * 70}{Colors.NC}")
+        print(f"  {Colors.GREEN}✓ Deletable Sites ({len(deletable_sites)}):{Colors.NC}")
+        print(f"  {Colors.DIM}  These sites can be deleted via cleanup{Colors.NC}")
+        print(f"  {Colors.CYAN}{'─' * 70}{Colors.NC}")
         print()
+        
+        for i, site in enumerate(deletable_sites, 1):
+            name = site.get("displayName", site.get("name", "Unknown"))
+            web_url = site.get("webUrl", "")
+            visibility = site.get("visibility", "")
+            is_group = site.get("isGroup", False)
+            
+            # Icon based on visibility
+            if visibility == "Private":
+                icon = "🔒"
+            else:
+                icon = "🌐"
+            
+            # Show if it's a group-connected site
+            group_tag = f" {Colors.CYAN}(M365 Group){Colors.NC}" if is_group else ""
+            
+            print(f"  [{i:2}] {icon} {name}{group_tag}")
+            print(f"       {Colors.DIM}{web_url}{Colors.NC}")
+            print()
+    else:
+        print()
+        print(f"  {Colors.YELLOW}No deletable sites found.{Colors.NC}")
+        print()
+    
+    # Display system sites separately
+    if system_sites:
+        print(f"  {Colors.YELLOW}{'─' * 70}{Colors.NC}")
+        print(f"  {Colors.RED}🔒 Protected System Sites ({len(system_sites)}):{Colors.NC}")
+        print(f"  {Colors.DIM}  These are built-in SharePoint sites that cannot be deleted{Colors.NC}")
+        print(f"  {Colors.YELLOW}{'─' * 70}{Colors.NC}")
+        print()
+        
+        for site in system_sites:
+            name = site.get("displayName", site.get("name", "Unknown"))
+            web_url = site.get("webUrl", "")
+            print(f"      {Colors.DIM}• {name}{Colors.NC}")
+            print(f"        {Colors.DIM}{web_url}{Colors.NC}")
+            print()
     
     print(f"  {Colors.WHITE}{'─' * 70}{Colors.NC}")
     print()

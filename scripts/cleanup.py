@@ -85,6 +85,72 @@ def find_azure_cli_path() -> str:
     return "az"  # Return 'az' as fallback
 
 # ============================================================================
+# SYSTEM SITES DETECTION
+# ============================================================================
+
+# System sites that cannot be deleted (protected by SharePoint)
+SYSTEM_SITE_PATTERNS = [
+    "my workspace",
+    "designer",
+    "team site",
+    "communication site",
+    "contentstorage",  # Content storage sites (My workspace, Designer, etc.)
+    "contenttypehub",  # Content Type Hub
+    "appcatalog",      # App Catalog
+    "search",          # Search Center
+]
+
+def is_system_site(site: Dict[str, Any]) -> bool:
+    """Check if a site is a protected system site that cannot be deleted.
+    
+    System sites include:
+    - My workspace (personal content storage)
+    - Designer (design content storage)
+    - Team Site (default team site)
+    - Communication site (root site)
+    - Content Type Hub
+    - App Catalog
+    - Search Center
+    """
+    name = site.get("displayName", site.get("name", "")).lower()
+    web_url = site.get("webUrl", "").lower()
+    
+    # Check name patterns
+    for pattern in SYSTEM_SITE_PATTERNS:
+        if pattern in name:
+            return True
+    
+    # Check URL patterns
+    if "/contentstorage/" in web_url:
+        return True
+    if web_url.endswith(".sharepoint.com") or web_url.endswith(".sharepoint.com/"):
+        # Root site collection
+        return True
+    if "/sites/contenttypehub" in web_url:
+        return True
+    if "/sites/appcatalog" in web_url:
+        return True
+    
+    return False
+
+def categorize_sites(sites: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Categorize sites into deletable and system (protected) sites.
+    
+    Returns:
+        Tuple of (deletable_sites, system_sites)
+    """
+    deletable = []
+    system = []
+    
+    for site in sites:
+        if is_system_site(site):
+            system.append(site)
+        else:
+            deletable.append(site)
+    
+    return deletable, system
+
+# ============================================================================
 # CONSOLE OUTPUT HELPERS
 # ============================================================================
 
@@ -1727,6 +1793,9 @@ def delete_sites_mode(sites: List[Dict[str, Any]], access_token: str, tenant: Op
     For group-connected sites (created via Terraform/M365 Groups), this deletes the M365 Group
     which automatically deletes the associated SharePoint site.
     
+    System sites (My workspace, Designer, Team Site, Communication site) are automatically
+    filtered out as they cannot be deleted.
+    
     Args:
         sites: List of SharePoint sites to delete (may include group info)
         access_token: Microsoft Graph access token
@@ -1734,15 +1803,36 @@ def delete_sites_mode(sites: List[Dict[str, Any]], access_token: str, tenant: Op
     """
     print_step(5, "Delete SharePoint Sites")
     
+    # First, filter out system sites
+    deletable_sites, system_sites = categorize_sites(sites)
+    
+    # Warn about system sites that will be skipped
+    if system_sites:
+        print()
+        print(f"  {Colors.YELLOW}{'─' * 60}{Colors.NC}")
+        print(f"  {Colors.YELLOW}⚠ The following system sites will be SKIPPED:{Colors.NC}")
+        print(f"  {Colors.DIM}  (These are protected SharePoint system sites){Colors.NC}")
+        print()
+        for site in system_sites:
+            site_name = site.get("displayName", site.get("name", "Unknown"))
+            print(f"    {Colors.DIM}🔒 {site_name}{Colors.NC}")
+        print()
+        print(f"  {Colors.YELLOW}{'─' * 60}{Colors.NC}")
+    
+    if not deletable_sites:
+        print()
+        print_warning("No deletable sites found. All selected sites are protected system sites.")
+        return
+    
     print()
-    print_danger("This will permanently delete the following sites:")
+    print_danger(f"This will permanently delete the following {len(deletable_sites)} site(s):")
     print()
     
-    # Categorize sites by deletion method
+    # Categorize deletable sites by deletion method
     group_sites = []  # Sites with M365 Group (delete via group)
     standalone_sites = []  # Sites without group (delete directly)
     
-    for site in sites:
+    for site in deletable_sites:
         site_name = site.get("displayName", site.get("name", "Unknown"))
         web_url = site.get("webUrl", site.get("siteUrl", ""))
         
@@ -2240,18 +2330,48 @@ Selection Syntax (for --select-sites and --select-files):
         choice = input("  Enter your choice (1-7): ").strip()
         
         if choice == "1":
-            # List all sites
+            # List all sites - categorize into deletable and system sites
+            deletable_sites, system_sites = categorize_sites(sites)
+            
             print()
             print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
-            print(f"  {Colors.WHITE}{Colors.BOLD}SharePoint Sites ({len(sites)} found){Colors.NC}")
+            print(f"  {Colors.WHITE}{Colors.BOLD}SharePoint Sites ({len(sites)} total){Colors.NC}")
             print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+            
+            # Show deletable sites first
+            if deletable_sites:
+                print()
+                print(f"  {Colors.GREEN}✓ Deletable Sites ({len(deletable_sites)}):{Colors.NC}")
+                print(f"  {Colors.DIM}  These sites can be deleted via M365 Groups or Sites API{Colors.NC}")
+                print()
+                for i, site in enumerate(deletable_sites, 1):
+                    name = site.get("displayName", site.get("name", "Unknown"))
+                    url = site.get("webUrl", "")
+                    # Check if it's a group-connected site
+                    is_group = "siteId" in site
+                    group_tag = f" {Colors.CYAN}(M365 Group){Colors.NC}" if is_group else ""
+                    print(f"    [{i:2}] {name}{group_tag}")
+                    if url:
+                        print(f"         {Colors.DIM}{url}{Colors.NC}")
+            else:
+                print()
+                print(f"  {Colors.YELLOW}No deletable sites found.{Colors.NC}")
+            
+            # Show system sites separately
+            if system_sites:
+                print()
+                print(f"  {Colors.RED}🔒 Protected System Sites ({len(system_sites)}):{Colors.NC}")
+                print(f"  {Colors.DIM}  These are built-in SharePoint sites that cannot be deleted{Colors.NC}")
+                print()
+                for site in system_sites:
+                    name = site.get("displayName", site.get("name", "Unknown"))
+                    url = site.get("webUrl", "")
+                    print(f"    {Colors.DIM}•{Colors.NC} {Colors.DIM}{name}{Colors.NC}")
+                    if url:
+                        print(f"      {Colors.DIM}{url}{Colors.NC}")
+            
             print()
-            for i, site in enumerate(sites, 1):
-                name = site.get("displayName", site.get("name", "Unknown"))
-                url = site.get("webUrl", "")
-                print(f"    [{i:2}] {name}")
-                if url:
-                    print(f"         {Colors.DIM}{url}{Colors.NC}")
+            print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
             print()
             input(f"  {Colors.YELLOW}Press Enter to return to menu...{Colors.NC}")
             # Loop continues - shows menu again
