@@ -2232,6 +2232,9 @@ def list_sharepoint_sites_menu() -> None:
             data = json.loads(response.read().decode())
             groups = data.get("value", [])
             
+            if groups:
+                print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(groups)} M365 Groups")
+            
             # Convert groups to sites format
             for group in groups:
                 try:
