@@ -1956,21 +1956,8 @@ def manage_app_registration_menu() -> None:
             input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
             
         elif choice == '2':
-            # Check permissions
-            print()
-            if not check_azure_login():
-                print_error("Please log into Azure first")
-            else:
-                result = check_graph_permissions()
-                if result.get("has_permissions"):
-                    print(f"  {Colors.GREEN}✓{Colors.NC} Permissions are working correctly!")
-                    print(f"  {Colors.GREEN}✓{Colors.NC} You can access SharePoint sites.")
-                else:
-                    print(f"  {Colors.RED}✗{Colors.NC} Permissions are not working.")
-                    if result.get("error"):
-                        print(f"    {Colors.DIM}Error: {result['error']}{Colors.NC}")
-                    print()
-                    print(f"  {Colors.WHITE}Use option [1] to set up app registration.{Colors.NC}")
+            # Check permissions - use the enhanced function that shows all permissions
+            run_graph_permissions_check()
             input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
             
         elif choice == '3':
