@@ -1284,6 +1284,19 @@ def delete_groups_mode(groups: List[Dict[str, Any]], access_token: str, auto_con
         print(f"    {Colors.CYAN}2.{Colors.NC} SharePoint site recycle bin (SharePoint Admin Center)")
         print()
         
+        # Try to auto-detect tenant name from site URLs if not provided
+        if not tenant:
+            for group in groups:
+                site_url = group.get("siteUrl", "")
+                if site_url and ".sharepoint.com" in site_url:
+                    # Extract tenant from URL like https://contoso.sharepoint.com/sites/...
+                    import re
+                    match = re.search(r'https://([^.]+)\.sharepoint\.com', site_url)
+                    if match:
+                        tenant = match.group(1)
+                        print_info(f"Auto-detected tenant name: {tenant}")
+                        break
+        
         # Ask if user wants to skip recycle bin purge
         if not auto_confirm:
             skip_choice = input(f"  {Colors.YELLOW}Purge recycle bins now? (Y/n): {Colors.NC}").strip().lower()
@@ -1917,6 +1930,19 @@ def delete_sites_mode(sites: List[Dict[str, Any]], access_token: str, tenant: Op
         print(f"    {Colors.CYAN}2.{Colors.NC} SharePoint site recycle bin (SharePoint Admin Center)")
         print()
         
+        # Try to auto-detect tenant name from site URLs if not provided
+        if not tenant:
+            for site in sites:
+                site_url = site.get("webUrl", site.get("siteUrl", ""))
+                if site_url and ".sharepoint.com" in site_url:
+                    # Extract tenant from URL like https://contoso.sharepoint.com/sites/...
+                    import re
+                    match = re.search(r'https://([^.]+)\.sharepoint\.com', site_url)
+                    if match:
+                        tenant = match.group(1)
+                        print_info(f"Auto-detected tenant name: {tenant}")
+                        break
+        
         # Ask if user wants to skip recycle bin purge
         skip_choice = input(f"  {Colors.YELLOW}Purge recycle bins now? (Y/n): {Colors.NC}").strip().lower()
         if skip_choice == 'n':
@@ -1943,7 +1969,7 @@ def delete_sites_mode(sites: List[Dict[str, Any]], access_token: str, tenant: Op
             print()
             print_step(2, "Purging SharePoint site recycle bin")
             
-            # Get tenant name if not provided
+            # Get tenant name if not provided (and not auto-detected above)
             if not tenant:
                 print()
                 print(f"  {Colors.WHITE}Enter your SharePoint tenant name{Colors.NC}")

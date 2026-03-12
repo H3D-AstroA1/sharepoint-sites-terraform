@@ -983,6 +983,96 @@ Once the custom app is configured with admin consent, the scripts will use the S
 
 ---
 
+### Issue 25: Deleted Sites Reappear in SharePoint Admin Center
+
+**Symptom:**
+After deleting SharePoint sites via the cleanup script, the sites still appear in the SharePoint Admin Center's "Active sites" list, or they reappear after being manually deleted.
+
+**Cause:**
+Microsoft 365 uses a **two-stage deletion process** for SharePoint sites:
+
+1. **Stage 1 (Soft Delete)**: When you delete an M365 Group, the group goes to the "Deleted Groups" recycle bin AND the SharePoint site goes to the "Deleted Sites" recycle bin
+2. **Stage 2 (Hard Delete)**: Sites must be purged from the SharePoint recycle bin to be permanently deleted
+
+If only Stage 1 is completed, the sites remain in the recycle bin and may still appear in the Admin Center.
+
+**Solution:**
+
+The cleanup script now automatically handles both stages:
+
+1. **Auto-detects tenant name** from site URLs (e.g., `contoso` from `https://contoso.sharepoint.com/sites/...`)
+2. **Prompts to purge recycle bins** after deletion
+3. **Purges both** the M365 Groups recycle bin AND the SharePoint site recycle bin
+
+**Manual Purge:**
+
+If sites are stuck in the recycle bin, use menu option `[7] Purge SharePoint site recycle bin`:
+
+```bash
+python menu.py
+# Select [3] Delete Files or Sites
+# Select [7] Purge SharePoint site recycle bin
+# Select sites to permanently delete
+# Type 'PURGE' to confirm
+```
+
+**PowerShell Alternative:**
+
+```powershell
+# Connect to SharePoint Online
+Connect-SPOService -Url https://contoso-admin.sharepoint.com
+
+# List deleted sites
+Get-SPODeletedSite
+
+# Permanently delete a specific site
+Remove-SPODeletedSite -Identity https://contoso.sharepoint.com/sites/sitename
+
+# Permanently delete all deleted sites
+Get-SPODeletedSite | Remove-SPODeletedSite
+```
+
+---
+
+### Issue 26: System Sites Protected from File Population
+
+**Symptom:**
+When running "Populate Sites with Files", some sites are skipped with a message like:
+```
+⚠ PROTECTED SYSTEM SITES (excluded from file population):
+  These sites are protected and will not have files uploaded:
+    • My workspace
+    • Designer
+    • Team Site
+    • Communication site
+```
+
+**Cause:**
+This is **expected behavior**. The following sites are protected system sites that should not have files uploaded:
+
+| Site Type | Description |
+|-----------|-------------|
+| My workspace | Personal OneDrive-like workspace |
+| Designer | Microsoft Designer integration site |
+| Team Site | Default team site template |
+| Communication Site | Default communication site template |
+| Content Type Hub | SharePoint content type hub |
+| App Catalog | SharePoint app catalog |
+| Personal sites | URLs containing `/personal/` |
+| Root site | The tenant root (e.g., `contoso.sharepoint.com`) |
+
+**This is not an error** - the script is protecting these system sites from accidental modification.
+
+**Solution:**
+
+Only user-created sites (typically created via Terraform or M365 Groups) will have files uploaded. If you need to populate a specific site that's being filtered, you can:
+
+1. Create a new site via the deployment script
+2. Use the Microsoft Graph API directly
+3. Upload files manually via the SharePoint web interface
+
+---
+
 ## ✅ Prevention Tips
 
 1. **Always run `terraform plan` before `terraform apply`**
@@ -993,3 +1083,5 @@ Once the custom app is configured with admin consent, the scripts will use the S
 6. **Document any manual changes made outside Terraform**
 7. **Purge recycle bins after deleting sites** to fully remove them
 8. **Grant Azure CLI admin consent** before using populate_files.py or cleanup.py
+9. **Use the App Registration feature** for proper Microsoft Graph permissions
+10. **System sites are protected** - only user-created sites can be modified

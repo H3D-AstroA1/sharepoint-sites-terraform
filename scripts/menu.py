@@ -2221,9 +2221,9 @@ def list_sharepoint_sites_menu() -> None:
     # These are the sites users typically want to manage
     print(f"  {Colors.YELLOW}ℹ{Colors.NC} Checking Microsoft 365 Groups for additional sites...")
     try:
-        # URL-encode the filter parameter to handle special characters
-        filter_param = urllib.parse.quote("groupTypes/any(c:c eq 'Unified')")
-        url = f"https://graph.microsoft.com/v1.0/groups?$filter={filter_param}&$select=id,displayName,createdDateTime,visibility&$top=100"
+        # Try without filter first to see all groups, then filter client-side
+        # The $filter with groupTypes can be problematic with some permissions
+        url = "https://graph.microsoft.com/v1.0/groups?$select=id,displayName,groupTypes,createdDateTime,visibility&$top=100"
         req = urllib.request.Request(url)
         req.add_header("Authorization", f"Bearer {token}")
         req.add_header("Content-Type", "application/json")
@@ -2232,15 +2232,24 @@ def list_sharepoint_sites_menu() -> None:
             data = json.loads(response.read().decode())
             groups = data.get("value", [])
             
-            print(f"  {Colors.CYAN}ℹ{Colors.NC} Groups API returned {len(groups)} groups")
+            print(f"  {Colors.CYAN}ℹ{Colors.NC} Groups API returned {len(groups)} total groups")
             
-            if groups:
-                print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(groups)} M365 Groups")
-                for g in groups[:5]:  # Show first 5 for debug
+            # Filter to only M365 Groups (Unified) - these have SharePoint sites
+            unified_groups = [g for g in groups if 'Unified' in g.get('groupTypes', [])]
+            print(f"  {Colors.CYAN}ℹ{Colors.NC} Of those, {len(unified_groups)} are M365 Groups (Unified)")
+            
+            if unified_groups:
+                print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(unified_groups)} M365 Groups with SharePoint sites")
+                for g in unified_groups[:5]:  # Show first 5 for debug
                     print(f"      - {g.get('displayName', 'Unknown')}")
+            elif groups:
+                # Show what types of groups we found
+                print(f"  {Colors.YELLOW}ℹ{Colors.NC} Groups found are not M365 Groups (no SharePoint sites):")
+                for g in groups[:3]:
+                    print(f"      - {g.get('displayName', 'Unknown')} (types: {g.get('groupTypes', [])})")
             
-            # Convert groups to sites format
-            for group in groups:
+            # Convert unified groups to sites format
+            for group in unified_groups:
                 try:
                     site_url = f"https://graph.microsoft.com/v1.0/groups/{group['id']}/sites/root"
                     site_req = urllib.request.Request(site_url)
@@ -2272,6 +2281,41 @@ def list_sharepoint_sites_menu() -> None:
             print(f"  {Colors.RED}✗{Colors.NC} Groups API Error: {e.code} - {e.reason}")
     except Exception as e:
         print(f"  {Colors.RED}✗{Colors.NC} Groups API Error: {str(e)}")
+    
+    # Also check for DELETED M365 Groups - these may still have SharePoint sites visible
+    # This explains why sites "reappear" after deletion - the groups are soft-deleted
+    print(f"  {Colors.YELLOW}ℹ{Colors.NC} Checking for deleted M365 Groups (recycle bin)...")
+    deleted_groups_count = 0
+    try:
+        deleted_url = "https://graph.microsoft.com/v1.0/directory/deletedItems/microsoft.graph.group?$select=id,displayName,groupTypes,deletedDateTime&$top=100"
+        del_req = urllib.request.Request(deleted_url)
+        del_req.add_header("Authorization", f"Bearer {token}")
+        del_req.add_header("Content-Type", "application/json")
+        
+        with urllib.request.urlopen(del_req, timeout=30) as del_response:
+            del_data = json.loads(del_response.read().decode())
+            deleted_groups = del_data.get("value", [])
+            
+            # Filter to M365 Groups only
+            deleted_unified = [g for g in deleted_groups if 'Unified' in g.get('groupTypes', [])]
+            deleted_groups_count = len(deleted_unified)
+            
+            if deleted_unified:
+                print(f"  {Colors.YELLOW}⚠{Colors.NC} Found {len(deleted_unified)} DELETED M365 Groups in recycle bin!")
+                print(f"  {Colors.DIM}  These groups' SharePoint sites may still appear in Admin Center{Colors.NC}")
+                for g in deleted_unified[:5]:
+                    deleted_date = g.get('deletedDateTime', 'Unknown')[:10] if g.get('deletedDateTime') else 'Unknown'
+                    print(f"      - {g.get('displayName', 'Unknown')} (deleted: {deleted_date})")
+                print(f"  {Colors.YELLOW}ℹ{Colors.NC} Use cleanup menu option [7] to permanently purge deleted groups")
+            else:
+                print(f"  {Colors.GREEN}✓{Colors.NC} No deleted M365 Groups found in recycle bin")
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            print(f"  {Colors.YELLOW}ℹ{Colors.NC} No access to deleted items (need Directory.Read.All)")
+        else:
+            print(f"  {Colors.DIM}  Could not check deleted groups: {e.code}{Colors.NC}")
+    except Exception as e:
+        print(f"  {Colors.DIM}  Could not check deleted groups: {str(e)}{Colors.NC}")
     
     # Categorize sites into deletable and system sites
     deletable_sites, system_sites = categorize_sites(sites)

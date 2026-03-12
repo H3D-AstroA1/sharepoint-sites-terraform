@@ -737,44 +737,82 @@ def get_m365_groups_with_sites(access_token: str) -> List[Dict[str, Any]]:
 
 
 # Sites to exclude (system sites, personal sites, etc. that typically cause 403 errors)
+# These are protected system sites that should NOT have files uploaded to them
 # Note: We only exclude exact system site names, not patterns that might match user-created sites
 EXCLUDED_SITE_PATTERNS = [
-    "my workspace",      # Personal OneDrive-like workspace
-    "designer",          # Microsoft Designer integration site
-    "contenttypehub",    # SharePoint content type hub
-    "appcatalog",        # SharePoint app catalog
+    "my workspace",       # Personal OneDrive-like workspace
+    "designer",           # Microsoft Designer integration site
+    "contenttypehub",     # SharePoint content type hub
+    "appcatalog",         # SharePoint app catalog
+    "team site",          # Default team site template
+    "communication site", # Root communication site template
 ]
 
 
+def is_system_site(site: Dict[str, Any]) -> bool:
+    """Check if a site is a protected system site that should not be modified.
+    
+    System sites include:
+    - Personal OneDrive sites (/personal/)
+    - Content storage sites (/contentstorage/)
+    - Root site collections (tenant.sharepoint.com)
+    - Default template sites (Team Site, Communication Site)
+    - System sites (Designer, My Workspace, Content Type Hub, App Catalog)
+    
+    Returns:
+        True if the site is a system site that should be protected
+    """
+    site_name = site.get("displayName", site.get("name", "")).lower()
+    web_url = site.get("webUrl", "").lower()
+    
+    # Check name patterns
+    for pattern in EXCLUDED_SITE_PATTERNS:
+        if pattern in site_name:
+            return True
+    
+    # Check URL patterns
+    if "/contentstorage/" in web_url:
+        return True
+    if web_url.endswith(".sharepoint.com") or web_url.endswith(".sharepoint.com/"):
+        # Root site collection
+        return True
+    if "/sites/contenttypehub" in web_url:
+        return True
+    if "/sites/appcatalog" in web_url:
+        return True
+    if "/personal/" in web_url:
+        return True
+    
+    return False
+
+
 def filter_writable_sites(sites: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Filter out system/personal sites that typically cause 403 errors."""
+    """Filter out system/personal sites that should not have files uploaded.
+    
+    IMPORTANT: This function protects system sites from accidental modification.
+    System sites include default templates, personal sites, and SharePoint system sites.
+    Only user-created sites (typically via Terraform/M365 Groups) will be returned.
+    """
     filtered = []
-    excluded_count = 0
+    excluded_sites = []
     
     for site in sites:
-        site_name = site.get("displayName", site.get("name", "")).lower()
-        web_url = site.get("webUrl", "").lower()
-        
-        # Check if site matches any excluded pattern
-        is_excluded = False
-        for pattern in EXCLUDED_SITE_PATTERNS:
-            if pattern in site_name or pattern in web_url:
-                is_excluded = True
-                excluded_count += 1
-                break
-        
-        # Also exclude sites that are clearly personal OneDrive sites
-        if "/personal/" in web_url:
-            is_excluded = True
-            excluded_count += 1
-        
-        # Only include group-connected sites (these are the ones we created)
-        # or sites that don't match excluded patterns
-        if not is_excluded:
+        if is_system_site(site):
+            excluded_sites.append(site)
+        else:
             filtered.append(site)
     
-    if excluded_count > 0:
-        print_info(f"Filtered out {excluded_count} system/personal sites (not writable)")
+    if excluded_sites:
+        print()
+        print(f"  {Colors.YELLOW}⚠ PROTECTED SYSTEM SITES (excluded from file population):{Colors.NC}")
+        print(f"  {Colors.CYAN}  These sites are protected and will not have files uploaded:{Colors.NC}")
+        for site in excluded_sites[:5]:  # Show first 5
+            name = site.get("displayName", site.get("name", "Unknown"))
+            print(f"      {Colors.CYAN}• {name}{Colors.NC}")
+        if len(excluded_sites) > 5:
+            print(f"      {Colors.CYAN}... and {len(excluded_sites) - 5} more{Colors.NC}")
+        print()
+        print_info(f"Filtered out {len(excluded_sites)} system/protected sites")
     
     return filtered
 
