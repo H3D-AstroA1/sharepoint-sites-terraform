@@ -3452,7 +3452,7 @@ def delete_files_mode(sites: List[Dict[str, Any]], access_token: str, purge_recy
         
         if purge_recycle_bin:
             print()
-            print_step(6, "Purging Site Recycle Bins (using PnP PowerShell)")
+            print_step(6, "Purging Site Recycle Bins (using PnP PowerShell batch)")
             
             # Check if PnP module is installed
             if not check_pnp_module_installed():
@@ -3466,9 +3466,14 @@ def delete_files_mode(sites: List[Dict[str, Any]], access_token: str, purge_recy
                     print_info("Skipping recycle bin purge")
                     return
             
-            total_purged = 0
-            total_purge_fail = 0
+            # Load app configuration for non-interactive auth
+            app_config = load_app_config() or {}
+            has_secret_mode = bool(app_config.get("client_secret"))
+            has_cert_mode = bool(app_config.get("certificate_path") or app_config.get("certificate_thumbprint"))
+            non_interactive = has_secret_mode or has_cert_mode
             
+            # Build site entries for batch processing
+            site_entries: List[Dict[str, str]] = []
             for site in sites:
                 site_id = site.get("id", "")
                 site_name = site.get("displayName", site.get("name", "Unknown"))
@@ -3478,32 +3483,64 @@ def delete_files_mode(sites: List[Dict[str, Any]], access_token: str, purge_recy
                 
                 if not site_url:
                     print_warning(f"  Could not get URL for site: {site_name}")
-                    total_purge_fail += 1
                     continue
                 
-                print()
-                print_info(f"Purging recycle bin: {site_name}")
-                print_info(f"  Site URL: {site_url}")
+                site_entries.append({"name": site_name, "url": site_url})
+            
+            if not site_entries:
+                print_warning("No valid site URLs found for recycle bin purge")
+                return
+            
+            print_info(f"Processing {len(site_entries)} site(s) for recycle bin purge...")
+            
+            # Use batch function for efficient processing
+            batch_results = purge_site_recycle_bins_pnp_batch(
+                site_entries,
+                non_interactive=non_interactive,
+                client_id=app_config.get("app_id"),
+                tenant_id=app_config.get("tenant_id"),
+                client_secret=app_config.get("client_secret"),
+                certificate_path=app_config.get("certificate_path"),
+                certificate_password=app_config.get("certificate_password"),
+                certificate_thumbprint=app_config.get("certificate_thumbprint"),
+                timeout_seconds=max(1200, len(site_entries) * 75),
+            )
+            
+            # Process results
+            total_purged = 0
+            total_empty = 0
+            total_purge_fail = 0
+            
+            for entry in site_entries:
+                site_url = entry["url"]
+                site_name = entry["name"]
+                result = batch_results.get(site_url, {})
+                status = result.get("status", "failed")
+                purged = int(result.get("purged", 0) or 0)
+                message = result.get("message", "")
                 
-                # Try REST API first (uses app permissions), fall back to PnP PowerShell
-                purged, purge_fail = purge_site_recycle_bin_rest(site_url)
-                if purge_fail > 0:
-                    # REST API failed, try PnP PowerShell as fallback
-                    print_info("  REST API failed, trying PnP PowerShell...")
-                    purged, purge_fail = purge_site_recycle_bin_pnp(site_url)
-                total_purged += purged
-                total_purge_fail += purge_fail
-                
-                if purged > 0:
-                    print_success(f"  Purged {purged} items from recycle bin")
-                elif purge_fail > 0:
-                    print_warning(f"  Failed to purge recycle bin")
+                if status == "purged":
+                    total_purged += purged
+                    print_success(f"  {site_name}: purged {purged} item(s)")
+                elif status == "empty":
+                    total_empty += 1
+                    print_info(f"  {site_name}: recycle bin empty")
+                elif status == "skipped":
+                    print_warning(f"  {site_name}: skipped ({message})")
                 else:
-                    print_info(f"  Recycle bin is empty")
+                    total_purge_fail += 1
+                    if is_unauthorized_message(message):
+                        print_warning(f"  {site_name}: unauthorized for app-only auth")
+                    elif message:
+                        print_warning(f"  {site_name}: failed ({message})")
+                    else:
+                        print_warning(f"  {site_name}: failed")
             
             print()
             if total_purged > 0:
                 print_success(f"Permanently deleted {total_purged} items from recycle bins")
+            if total_empty > 0:
+                print_info(f"{total_empty} site(s) already had empty recycle bins")
             if total_purge_fail > 0:
                 print_warning(f"Failed to purge {total_purge_fail} sites (may require additional permissions)")
 
