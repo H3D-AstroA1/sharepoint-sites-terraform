@@ -1482,14 +1482,82 @@ def get_site_root_items(site_id: str, access_token: str) -> List[Dict[str, Any]]
     return items
 
 
-def get_site_recycle_bin_items(site_id: str, access_token: str) -> List[Dict[str, Any]]:
-    """Get all items from a site's document library recycle bin.
+def check_pnp_module_installed() -> bool:
+    """Check if PnP PowerShell module is installed."""
+    ps_exe = get_powershell_executable()
     
-    Uses the SharePoint REST API to access the recycle bin.
-    """
-    items = []
+    ps_script = '''
+$module = Get-Module -ListAvailable -Name "PnP.PowerShell" | Select-Object -First 1
+if ($module) {
+    Write-Output "INSTALLED"
+} else {
+    Write-Output "NOT_INSTALLED"
+}
+'''
     
-    # First get the site URL
+    try:
+        result = subprocess.run(
+            [ps_exe, "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        return "INSTALLED" in result.stdout
+    except Exception:
+        return False
+
+
+def install_pnp_module() -> bool:
+    """Install PnP PowerShell module."""
+    ps_exe = get_powershell_executable()
+    
+    print_info("Installing PnP.PowerShell module...")
+    print_info("This may take a few minutes...")
+    
+    ps_script = '''
+$ErrorActionPreference = "Stop"
+try {
+    # Check if already installed
+    $existing = Get-Module -ListAvailable -Name "PnP.PowerShell" | Select-Object -First 1
+    if ($existing) {
+        Write-Output "Already installed"
+        exit 0
+    }
+    
+    # Install the module
+    Install-Module -Name "PnP.PowerShell" -Scope CurrentUser -Force -AllowClobber -SkipPublisherCheck
+    Write-Output "SUCCESS"
+} catch {
+    Write-Error $_.Exception.Message
+    exit 1
+}
+'''
+    
+    try:
+        result = subprocess.run(
+            [ps_exe, "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 minutes for installation
+        )
+        
+        if result.returncode == 0:
+            print_success("PnP.PowerShell module installed successfully")
+            return True
+        else:
+            print_error(f"Failed to install PnP.PowerShell: {result.stderr}")
+            return False
+    except subprocess.TimeoutExpired:
+        print_error("Installation timed out")
+        return False
+    except Exception as e:
+        print_error(f"Error installing PnP.PowerShell: {e}")
+        return False
+
+
+def get_site_url_from_id(site_id: str, access_token: str) -> Optional[str]:
+    """Get the SharePoint site URL from site ID using Graph API."""
     try:
         site_url_req = f"https://graph.microsoft.com/v1.0/sites/{site_id}"
         req = urllib.request.Request(site_url_req)
@@ -1497,113 +1565,190 @@ def get_site_recycle_bin_items(site_id: str, access_token: str) -> List[Dict[str
         
         with urllib.request.urlopen(req, timeout=30) as response:
             site_data = json.loads(response.read().decode())
-            site_url = site_data.get("webUrl", "")
-            
-        if not site_url:
-            return items
-            
-        # Use SharePoint REST API to get recycle bin items
-        recycle_url = f"{site_url}/_api/web/RecycleBin?$top=5000"
+            return site_data.get("webUrl", "")
+    except Exception:
+        return None
+
+
+def get_site_recycle_bin_items_pnp(site_url: str) -> List[Dict[str, Any]]:
+    """Get all items from a site's recycle bin using PnP PowerShell.
+    
+    This properly authenticates to SharePoint and can access the recycle bin.
+    """
+    ps_exe = get_powershell_executable()
+    items = []
+    
+    ps_script = f'''
+$ErrorActionPreference = "Stop"
+try {{
+    # Connect to SharePoint site (will prompt for credentials if needed)
+    Connect-PnPOnline -Url "{site_url}" -Interactive -ErrorAction Stop
+    
+    # Get recycle bin items
+    $recycleBinItems = Get-PnPRecycleBinItem -ErrorAction Stop
+    
+    if ($recycleBinItems) {{
+        # Output as JSON
+        $recycleBinItems | Select-Object Id, Title, ItemType, DirName, DeletedByEmail, DeletedDate, ItemState, Size | ConvertTo-Json -Compress
+    }} else {{
+        Write-Output "[]"
+    }}
+    
+    # Disconnect
+    Disconnect-PnPOnline -ErrorAction SilentlyContinue
+}} catch {{
+    Write-Error $_.Exception.Message
+    exit 1
+}}
+'''
+    
+    try:
+        result = subprocess.run(
+            [ps_exe, "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
         
-        req = urllib.request.Request(recycle_url)
-        req.add_header("Authorization", f"Bearer {access_token}")
-        req.add_header("Accept", "application/json;odata=verbose")
-        
-        with urllib.request.urlopen(req, timeout=60) as response:
-            data = json.loads(response.read().decode())
-            results = data.get("d", {}).get("results", [])
-            items = results
+        if result.returncode == 0 and result.stdout.strip():
+            output = result.stdout.strip()
+            # Handle single item vs array
+            if output.startswith('['):
+                items = json.loads(output)
+            elif output.startswith('{'):
+                items = [json.loads(output)]
+        elif result.stderr:
+            # Don't print error here, let caller handle it
+            pass
             
+    except subprocess.TimeoutExpired:
+        pass
+    except json.JSONDecodeError:
+        pass
     except Exception:
         pass
     
     return items
 
 
-def purge_site_recycle_bin(site_id: str, access_token: str) -> Tuple[int, int]:
-    """Permanently delete all items from a site's recycle bin.
+def get_site_recycle_bin_items(site_id: str, access_token: str) -> List[Dict[str, Any]]:
+    """Get all items from a site's document library recycle bin.
+    
+    Note: Graph API doesn't have a direct recycle bin endpoint for sites.
+    This function returns an empty list - use get_site_recycle_bin_items_pnp()
+    with the site URL for actual recycle bin access.
+    """
+    # Graph API doesn't support site recycle bin access
+    # Return empty list - the PnP PowerShell method should be used instead
+    return []
+
+
+def get_site_recycle_bin_count(site_id: str, access_token: str) -> int:
+    """Get count of items in site recycle bin.
+    
+    Note: This always returns 0 as Graph API doesn't support recycle bin access.
+    Use PnP PowerShell for actual recycle bin operations.
+    """
+    return 0
+
+
+def purge_site_recycle_bin_pnp(site_url: str, first_stage_only: bool = False) -> Tuple[int, int]:
+    """Permanently delete all items from a site's recycle bin using PnP PowerShell.
+    
+    Args:
+        site_url: The SharePoint site URL
+        first_stage_only: If True, only clear first-stage recycle bin.
+                         If False, clear both first and second stage.
     
     Returns (success_count, fail_count).
     """
-    success_count = 0
-    fail_count = 0
+    ps_exe = get_powershell_executable()
     
-    # First get the site URL
-    try:
-        site_url_req = f"https://graph.microsoft.com/v1.0/sites/{site_id}"
-        req = urllib.request.Request(site_url_req)
-        req.add_header("Authorization", f"Bearer {access_token}")
+    # Build the PowerShell script
+    second_stage_cmd = "" if first_stage_only else """
+    # Also clear second-stage recycle bin
+    Write-Host "Clearing second-stage recycle bin..."
+    $secondStageItems = Get-PnPRecycleBinItem -SecondStage -ErrorAction SilentlyContinue
+    $secondStageCount = 0
+    if ($secondStageItems) {
+        $secondStageCount = @($secondStageItems).Count
+        Clear-PnPRecycleBinItem -SecondStage -Force -ErrorAction SilentlyContinue
+    }
+    $totalCount = $totalCount + $secondStageCount
+"""
+    
+    ps_script = f'''
+$ErrorActionPreference = "Stop"
+try {{
+    # Connect to SharePoint site (will prompt for credentials if needed)
+    Write-Host "Connecting to SharePoint site..."
+    Connect-PnPOnline -Url "{site_url}" -Interactive -ErrorAction Stop
+    Write-Host "Connected successfully!"
+    
+    # Get count of items in recycle bin first
+    $recycleBinItems = Get-PnPRecycleBinItem -ErrorAction SilentlyContinue
+    $totalCount = 0
+    
+    if ($recycleBinItems) {{
+        $totalCount = @($recycleBinItems).Count
+        Write-Host "Found $totalCount items in first-stage recycle bin"
         
-        with urllib.request.urlopen(req, timeout=30) as response:
-            site_data = json.loads(response.read().decode())
-            site_url = site_data.get("webUrl", "")
-            
-        if not site_url:
+        # Clear the recycle bin
+        Write-Host "Clearing first-stage recycle bin..."
+        Clear-PnPRecycleBinItem -All -Force -ErrorAction Stop
+        Write-Host "First-stage recycle bin cleared!"
+    }} else {{
+        Write-Host "First-stage recycle bin is empty"
+    }}
+    {second_stage_cmd}
+    # Output result
+    Write-Output "SUCCESS:$totalCount"
+    
+    # Disconnect
+    Disconnect-PnPOnline -ErrorAction SilentlyContinue
+}} catch {{
+    Write-Error $_.Exception.Message
+    exit 1
+}}
+'''
+    
+    try:
+        result = subprocess.run(
+            [ps_exe, "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 minutes for large recycle bins
+        )
+        
+        if result.returncode == 0:
+            # Parse the success count
+            for line in result.stdout.split('\n'):
+                if line.startswith("SUCCESS:"):
+                    count = int(line.split(":")[1])
+                    return count, 0
             return 0, 0
+        else:
+            return 0, 1
             
-        # Use SharePoint REST API to delete all recycle bin items
-        # First, try to delete all at once
-        purge_all_url = f"{site_url}/_api/web/RecycleBin/DeleteAll()"
-        
-        req = urllib.request.Request(purge_all_url, method="POST")
-        req.add_header("Authorization", f"Bearer {access_token}")
-        req.add_header("Accept", "application/json;odata=verbose")
-        req.add_header("Content-Type", "application/json;odata=verbose")
-        req.add_header("Content-Length", "0")
-        
-        with urllib.request.urlopen(req, timeout=120) as response:
-            if response.status in [200, 204]:
-                # Get count of items that were in recycle bin
-                items = get_site_recycle_bin_items(site_id, access_token)
-                # If we got here, all items were deleted
-                return 1, 0  # Return 1 to indicate success (bulk operation)
-                
-    except urllib.error.HTTPError as e:
-        # If bulk delete fails, try individual deletion
-        pass
-    except Exception:
-        pass
+    except subprocess.TimeoutExpired:
+        print_error("Operation timed out")
+        return 0, 1
+    except Exception as e:
+        print_error(f"Error purging recycle bin: {e}")
+        return 0, 1
+
+
+def purge_site_recycle_bin(site_id: str, access_token: str) -> Tuple[int, int]:
+    """Permanently delete all items from a site's recycle bin.
     
-    # Fallback: delete items individually
-    items = get_site_recycle_bin_items(site_id, access_token)
+    Note: This function uses Graph API which doesn't support recycle bin operations.
+    Use purge_site_recycle_bin_pnp() with the site URL for actual purging.
     
-    if not items:
-        return 0, 0
-    
-    try:
-        site_url_req = f"https://graph.microsoft.com/v1.0/sites/{site_id}"
-        req = urllib.request.Request(site_url_req)
-        req.add_header("Authorization", f"Bearer {access_token}")
-        
-        with urllib.request.urlopen(req, timeout=30) as response:
-            site_data = json.loads(response.read().decode())
-            site_url = site_data.get("webUrl", "")
-    except Exception:
-        return 0, len(items)
-    
-    for item in items:
-        item_id = item.get("Id", "")
-        if not item_id:
-            fail_count += 1
-            continue
-            
-        try:
-            delete_url = f"{site_url}/_api/web/RecycleBin('{item_id}')"
-            
-            req = urllib.request.Request(delete_url, method="DELETE")
-            req.add_header("Authorization", f"Bearer {access_token}")
-            req.add_header("Accept", "application/json;odata=verbose")
-            req.add_header("IF-MATCH", "*")
-            
-            with urllib.request.urlopen(req, timeout=30) as response:
-                if response.status in [200, 204]:
-                    success_count += 1
-                else:
-                    fail_count += 1
-        except Exception:
-            fail_count += 1
-    
-    return success_count, fail_count
+    Returns (success_count, fail_count).
+    """
+    # Graph API doesn't support recycle bin operations
+    # This is a stub - use purge_site_recycle_bin_pnp() instead
+    return 0, 0
 
 
 def delete_site(site_id: str, access_token: str) -> bool:
@@ -1889,7 +2034,19 @@ def delete_files_mode(sites: List[Dict[str, Any]], access_token: str, purge_recy
         
         if purge_recycle_bin:
             print()
-            print_step(6, "Purging Site Recycle Bins")
+            print_step(6, "Purging Site Recycle Bins (using PnP PowerShell)")
+            
+            # Check if PnP module is installed
+            if not check_pnp_module_installed():
+                print_warning("PnP.PowerShell module is not installed")
+                install_choice = input(f"  {Colors.YELLOW}Install PnP.PowerShell module? (Y/n): {Colors.NC}").strip().lower()
+                if install_choice != 'n':
+                    if not install_pnp_module():
+                        print_error("Could not install PnP.PowerShell. Skipping recycle bin purge.")
+                        return
+                else:
+                    print_info("Skipping recycle bin purge")
+                    return
             
             total_purged = 0
             total_purge_fail = 0
@@ -1898,17 +2055,26 @@ def delete_files_mode(sites: List[Dict[str, Any]], access_token: str, purge_recy
                 site_id = site.get("id", "")
                 site_name = site.get("displayName", site.get("name", "Unknown"))
                 
+                # Get site URL from Graph API
+                site_url = get_site_url_from_id(site_id, access_token)
+                
+                if not site_url:
+                    print_warning(f"  Could not get URL for site: {site_name}")
+                    total_purge_fail += 1
+                    continue
+                
                 print()
                 print_info(f"Purging recycle bin: {site_name}")
+                print_info(f"  Site URL: {site_url}")
                 
-                purged, purge_fail = purge_site_recycle_bin(site_id, access_token)
+                purged, purge_fail = purge_site_recycle_bin_pnp(site_url)
                 total_purged += purged
                 total_purge_fail += purge_fail
                 
                 if purged > 0:
                     print_success(f"  Purged {purged} items from recycle bin")
                 elif purge_fail > 0:
-                    print_warning(f"  Failed to purge {purge_fail} items")
+                    print_warning(f"  Failed to purge recycle bin")
                 else:
                     print_info(f"  Recycle bin is empty")
             
@@ -1916,7 +2082,7 @@ def delete_files_mode(sites: List[Dict[str, Any]], access_token: str, purge_recy
             if total_purged > 0:
                 print_success(f"Permanently deleted {total_purged} items from recycle bins")
             if total_purge_fail > 0:
-                print_warning(f"Failed to purge {total_purge_fail} items (may require additional permissions)")
+                print_warning(f"Failed to purge {total_purge_fail} sites (may require additional permissions)")
 
 def delete_selected_files_mode(sites: List[Dict[str, Any]], access_token: str) -> None:
     """Interactively select and delete specific files from sites."""
@@ -2423,7 +2589,21 @@ Selection Syntax (for --select-sites and --select-files):
     
     # Handle site document library recycle bin purge
     if args.purge_site_recycle:
-        print_step(4, "Purge Site Files/Folders Recycle Bins")
+        print_step(4, "Purge Site Files/Folders Recycle Bins (using PnP PowerShell)")
+        
+        # Check if PnP module is installed
+        if not check_pnp_module_installed():
+            print_warning("PnP.PowerShell module is not installed")
+            print_info("This module is required to access site recycle bins")
+            print()
+            install_choice = input(f"  {Colors.YELLOW}Install PnP.PowerShell module? (Y/n): {Colors.NC}").strip().lower()
+            if install_choice != 'n':
+                if not install_pnp_module():
+                    print_error("Could not install PnP.PowerShell. Cannot proceed.")
+                    sys.exit(1)
+            else:
+                print_warning("Cannot purge recycle bins without PnP.PowerShell")
+                sys.exit(0)
         
         # Get sites first
         sites = get_sharepoint_sites(access_token)
@@ -2448,6 +2628,7 @@ Selection Syntax (for --select-sites and --select-files):
         # Confirm before purging
         if not args.yes:
             print_warning("This will permanently delete all items from site recycle bins!")
+            print_info("You will be prompted to authenticate to each site via browser")
             print()
             for site in sites[:10]:
                 name = site.get("displayName", site.get("name", "Unknown"))
@@ -2460,7 +2641,7 @@ Selection Syntax (for --select-sites and --select-files):
                 print_warning("Operation cancelled")
                 sys.exit(0)
         
-        # Purge recycle bins
+        # Purge recycle bins using PnP PowerShell
         total_purged = 0
         total_failed = 0
         
@@ -2468,25 +2649,34 @@ Selection Syntax (for --select-sites and --select-files):
             site_id = site.get("id", "")
             site_name = site.get("displayName", site.get("name", "Unknown"))
             
+            # Get site URL from Graph API
+            site_url = get_site_url_from_id(site_id, access_token)
+            
+            if not site_url:
+                print_warning(f"  Could not get URL for site: {site_name}")
+                total_failed += 1
+                continue
+            
             print()
             print_info(f"Purging recycle bin: {site_name}")
+            print_info(f"  Site URL: {site_url}")
             
-            purged, failed = purge_site_recycle_bin(site_id, access_token)
+            purged, failed = purge_site_recycle_bin_pnp(site_url)
             total_purged += purged
             total_failed += failed
             
             if purged > 0:
-                print_success(f"  Purged items from recycle bin")
+                print_success(f"  Purged {purged} items from recycle bin")
             elif failed > 0:
-                print_warning(f"  Failed to purge some items")
+                print_warning(f"  Failed to purge recycle bin")
             else:
                 print_info(f"  Recycle bin is empty")
         
         print()
         if total_purged > 0:
-            print_success(f"Purged recycle bins from {len(sites)} sites")
+            print_success(f"Purged recycle bins from {len(sites)} sites ({total_purged} total items)")
         if total_failed > 0:
-            print_warning(f"Some items could not be purged (may require additional permissions)")
+            print_warning(f"Failed to purge {total_failed} sites (may require additional permissions)")
         
         sys.exit(0)
     

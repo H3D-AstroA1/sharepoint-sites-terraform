@@ -828,7 +828,55 @@ The module may be installed in a different PowerShell version's module path.
 
 ---
 
-### Issue 22: 403 Forbidden When Accessing SharePoint Sites
+### Issue 22: Site Recycle Bin Shows Empty (PnP PowerShell Required)
+
+**Symptom:**
+When using menu option `[8] Purge site files/folders recycle bin`, the script reports "Recycle bin is empty" even though you can see items in the SharePoint site's recycle bin in the browser.
+
+**Cause:**
+The Microsoft Graph API does not provide direct access to SharePoint site recycle bins. The Graph API token cannot be used with SharePoint REST API endpoints (`/_api/web/RecycleBin`) because they require SharePoint-specific authentication.
+
+**Solution:**
+The cleanup script now uses **PnP PowerShell** to access site recycle bins. PnP PowerShell properly authenticates to SharePoint and can access the recycle bin.
+
+1. **The script will automatically prompt to install PnP.PowerShell** if not already installed:
+   ```
+   ⚠ PnP.PowerShell module is not installed
+   Install PnP.PowerShell module? (Y/n):
+   ```
+
+2. **Manual installation** (if needed):
+   ```powershell
+   # Install PnP.PowerShell module
+   Install-Module -Name "PnP.PowerShell" -Scope CurrentUser -Force -AllowClobber
+   ```
+
+3. **Authentication**: When purging recycle bins, you'll be prompted to authenticate via browser for each site. This is required because PnP PowerShell uses interactive authentication.
+
+**Understanding the Three Recycle Bins:**
+
+SharePoint has multiple recycle bins at different levels:
+
+| Recycle Bin | What It Contains | How to Purge | Menu Option |
+|-------------|------------------|--------------|-------------|
+| **M365 Groups Recycle Bin** | Deleted M365 Groups (Azure AD) | `--purge-deleted` | [6] |
+| **SharePoint Site Recycle Bin** | Deleted SharePoint sites | `--purge-spo-recycle` | [7] |
+| **Site Document Library Recycle Bin** | Deleted files/folders within a site | `--purge-site-recycle` | [8] |
+
+**Example Usage:**
+```bash
+# Via menu
+python scripts/menu.py
+# Select [3] Delete Files or Sites
+# Select [8] Purge site files/folders recycle bin
+
+# Via command line
+python scripts/cleanup.py --purge-site-recycle --site "Company Announcements"
+```
+
+---
+
+### Issue 23: 403 Forbidden When Accessing SharePoint Sites
 
 **Error Message:**
 ```
@@ -915,7 +963,7 @@ curl -H "Authorization: Bearer $(az account get-access-token --resource https://
 
 ---
 
-### Issue 23: 403 Errors on Specific Sites During File Population
+### Issue 24: 403 Errors on Specific Sites During File Population
 
 **Error Message:**
 ```
@@ -955,7 +1003,7 @@ python populate_files.py --site "specific-site-name" --files 10
 
 ---
 
-### Issue 24: M365 Groups Fallback When Sites API Returns 403
+### Issue 25: M365 Groups Fallback When Sites API Returns 403
 
 **Symptom:**
 ```
@@ -984,7 +1032,7 @@ Once the custom app is configured with admin consent, the scripts will use the S
 
 ---
 
-### Issue 25: Deleted Sites Reappear in SharePoint Admin Center
+### Issue 26: Deleted Sites Reappear in SharePoint Admin Center
 
 **Symptom:**
 After deleting SharePoint sites via the cleanup script, the sites still appear in the SharePoint Admin Center's "Active sites" list, or they reappear after being manually deleted.
@@ -1035,7 +1083,7 @@ Get-SPODeletedSite | Remove-SPODeletedSite
 
 ---
 
-### Issue 26: System Sites Protected from File Population
+### Issue 27: System Sites Protected from File Population
 
 **Symptom:**
 When running "Populate Sites with Files", some sites are skipped with a message like:
