@@ -2219,7 +2219,6 @@ def list_sharepoint_sites_menu() -> None:
     
     # ALWAYS try M365 Groups API to get group-connected sites (created via Terraform)
     # These are the sites users typically want to manage
-    print(f"  {Colors.YELLOW}ℹ{Colors.NC} Checking Microsoft 365 Groups for additional sites...")
     try:
         # Try without filter first to see all groups, then filter client-side
         # The $filter with groupTypes can be problematic with some permissions
@@ -2232,21 +2231,8 @@ def list_sharepoint_sites_menu() -> None:
             data = json.loads(response.read().decode())
             groups = data.get("value", [])
             
-            print(f"  {Colors.CYAN}ℹ{Colors.NC} Groups API returned {len(groups)} total groups")
-            
             # Filter to only M365 Groups (Unified) - these have SharePoint sites
             unified_groups = [g for g in groups if 'Unified' in g.get('groupTypes', [])]
-            print(f"  {Colors.CYAN}ℹ{Colors.NC} Of those, {len(unified_groups)} are M365 Groups (Unified)")
-            
-            if unified_groups:
-                print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(unified_groups)} M365 Groups with SharePoint sites")
-                for g in unified_groups[:5]:  # Show first 5 for debug
-                    print(f"      - {g.get('displayName', 'Unknown')}")
-            elif groups:
-                # Show what types of groups we found
-                print(f"  {Colors.YELLOW}ℹ{Colors.NC} Groups found are not M365 Groups (no SharePoint sites):")
-                for g in groups[:3]:
-                    print(f"      - {g.get('displayName', 'Unknown')} (types: {g.get('groupTypes', [])})")
             
             # Convert unified groups to sites format
             for group in unified_groups:
@@ -2284,7 +2270,6 @@ def list_sharepoint_sites_menu() -> None:
     
     # Also check for DELETED M365 Groups - these may still have SharePoint sites visible
     # This explains why sites "reappear" after deletion - the groups are soft-deleted
-    print(f"  {Colors.YELLOW}ℹ{Colors.NC} Checking for deleted M365 Groups (recycle bin)...")
     deleted_groups_count = 0
     try:
         deleted_url = "https://graph.microsoft.com/v1.0/directory/deletedItems/microsoft.graph.group?$select=id,displayName,groupTypes,deletedDateTime&$top=100"
@@ -2299,23 +2284,9 @@ def list_sharepoint_sites_menu() -> None:
             # Filter to M365 Groups only
             deleted_unified = [g for g in deleted_groups if 'Unified' in g.get('groupTypes', [])]
             deleted_groups_count = len(deleted_unified)
-            
-            if deleted_unified:
-                print(f"  {Colors.YELLOW}⚠{Colors.NC} Found {len(deleted_unified)} DELETED M365 Groups in recycle bin!")
-                print(f"  {Colors.DIM}  These groups' SharePoint sites may still appear in Admin Center{Colors.NC}")
-                for g in deleted_unified[:5]:
-                    deleted_date = g.get('deletedDateTime', 'Unknown')[:10] if g.get('deletedDateTime') else 'Unknown'
-                    print(f"      - {g.get('displayName', 'Unknown')} (deleted: {deleted_date})")
-                print(f"  {Colors.YELLOW}ℹ{Colors.NC} Use cleanup menu option [7] to permanently purge deleted groups")
-            else:
-                print(f"  {Colors.GREEN}✓{Colors.NC} No deleted M365 Groups found in recycle bin")
-    except urllib.error.HTTPError as e:
-        if e.code == 403:
-            print(f"  {Colors.YELLOW}ℹ{Colors.NC} No access to deleted items (need Directory.Read.All)")
-        else:
-            print(f"  {Colors.DIM}  Could not check deleted groups: {e.code}{Colors.NC}")
-    except Exception as e:
-        print(f"  {Colors.DIM}  Could not check deleted groups: {str(e)}{Colors.NC}")
+    except Exception:
+        # Silently ignore errors checking deleted groups
+        pass
     
     # Categorize sites into deletable and system sites
     deletable_sites, system_sites = categorize_sites(sites)
@@ -2335,6 +2306,8 @@ def list_sharepoint_sites_menu() -> None:
     print()
     total_sites = len(deletable_sites) + len(system_sites)
     print(f"  {Colors.GREEN}✓{Colors.NC} Found {total_sites} SharePoint sites")
+    if deleted_groups_count > 0:
+        print(f"  {Colors.YELLOW}⚠{Colors.NC} {deleted_groups_count} deleted groups in recycle bin (use cleanup to purge)")
     print()
     
     # Display deletable sites first
