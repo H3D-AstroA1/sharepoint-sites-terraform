@@ -2603,7 +2603,12 @@ def manage_app_registration_menu() -> None:
             
             if total_to_add == 0:
                 print(f"  {Colors.GREEN}All permissions are already configured!{Colors.NC}")
-                print(f"  {Colors.DIM}No changes needed.{Colors.NC}")
+                print()
+                # Still check and update redirect URIs even if permissions are complete
+                print(f"  {Colors.DIM}Checking redirect URIs for PnP PowerShell...{Colors.NC}")
+                update_app_redirect_uris(app_id)
+                print()
+                print(f"  {Colors.DIM}No permission changes needed.{Colors.NC}")
                 input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
                 continue
             
