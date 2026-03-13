@@ -1896,13 +1896,18 @@ def purge_site_recycle_bin_pnp(site_url: str, first_stage_only: bool = False, cl
     $totalCount = $totalCount + $secondStageCount
 """
     
-    # Build connection command based on whether we have a client_id
+    # Build connection command - use -UseWebLogin which is most reliable
+    # -UseWebLogin opens a browser for authentication and works without app registration
     if client_id:
+        # Try Interactive first with client_id, fall back to UseWebLogin
         connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -Interactive -ClientId "{client_id}" -ErrorAction Stop'
+        fallback_cmd = f'Connect-PnPOnline -Url "{site_url}" -UseWebLogin -ErrorAction Stop'
         auth_method = "Interactive with registered app"
     else:
-        connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -DeviceLogin -ErrorAction Stop'
-        auth_method = "Device Login"
+        # Use WebLogin directly - most reliable without app registration
+        connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -UseWebLogin -ErrorAction Stop'
+        fallback_cmd = connect_cmd  # Same command for fallback
+        auth_method = "Web Login (browser)"
     
     ps_script = f'''
 $ErrorActionPreference = "Stop"
@@ -1917,10 +1922,10 @@ try {{
         {connect_cmd}
         Write-Host "Connected successfully!"
     }} catch {{
-        # Fall back to Device Login if Interactive fails
-        Write-Host "Primary auth failed, trying Device Login..."
-        Connect-PnPOnline -Url "{site_url}" -DeviceLogin -ErrorAction Stop
-        Write-Host "Connected via Device Login!"
+        # Fall back to UseWebLogin if Interactive fails
+        Write-Host "Primary auth failed, trying Web Login..."
+        {fallback_cmd}
+        Write-Host "Connected via Web Login!"
     }}
     
     # Get count of items in recycle bin first
