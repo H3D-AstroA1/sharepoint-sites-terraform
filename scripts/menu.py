@@ -2453,6 +2453,13 @@ def manage_app_registration_menu() -> None:
             print(f"    • {Colors.GREEN}full_access_as_app{Colors.NC} - Full mailbox access via EWS")
             print(f"      {Colors.DIM}(Required for backdated timestamps and no [Draft] prefix){Colors.NC}")
             print()
+            print(f"  {Colors.CYAN}SharePoint Online API (Delegated - for PnP PowerShell):{Colors.NC}")
+            print(f"    • {Colors.GREEN}AllSites.FullControl{Colors.NC} - Full control of all site collections")
+            print(f"    • {Colors.GREEN}AllSites.Manage{Colors.NC} - Create, edit and delete items and lists")
+            print(f"    • {Colors.GREEN}AllSites.Write{Colors.NC} - Edit or delete items in all site collections")
+            print(f"    • {Colors.GREEN}AllSites.Read{Colors.NC} - Read items in all site collections")
+            print(f"      {Colors.DIM}(Required for PnP PowerShell site recycle bin operations){Colors.NC}")
+            print()
             print(f"  {Colors.DIM}These permissions are required for SharePoint and email features.{Colors.NC}")
             print()
             
