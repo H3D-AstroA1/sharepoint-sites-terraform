@@ -1301,6 +1301,7 @@ def get_app_permissions(app_id: str) -> Dict[str, Any]:
     # Reverse lookup for permission IDs to names
     permission_id_to_name = {v: k for k, v in GRAPH_PERMISSION_IDS.items()}
     ews_permission_id_to_name = {v: k for k, v in EWS_PERMISSION_IDS.items()}
+    sharepoint_permission_id_to_name = {v: k for k, v in SHAREPOINT_PERMISSION_IDS.items()}
     
     try:
         # Get app registration details including required resource access
@@ -1338,6 +1339,15 @@ def get_app_permissions(app_id: str) -> Dict[str, Any]:
                             "id": perm_id,
                             "type": perm_type,
                             "api": "Exchange Online"
+                        })
+                    # Check if it's a SharePoint Online permission
+                    elif resource_app_id == SHAREPOINT_ONLINE_API_ID:
+                        perm_name = sharepoint_permission_id_to_name.get(perm_id, f"Unknown ({perm_id[:8]}...)")
+                        result["configured_permissions"].append({
+                            "name": perm_name,
+                            "id": perm_id,
+                            "type": perm_type,
+                            "api": "SharePoint Online"
                         })
         
         # Get service principal to check consented permissions
@@ -2424,7 +2434,10 @@ def manage_app_registration_menu() -> None:
                 input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
                 continue
             
-            print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
+            # Get app ID for permission check
+            app_id = app_config.get('app_id') if app_config else existing_app.get('appId')
+            
+            print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
             print(f"  {Colors.WHITE}App to Update:{Colors.NC}")
             if app_config:
                 print(f"    • Name:      {Colors.YELLOW}{app_config.get('display_name', CUSTOM_APP_NAME)}{Colors.NC}")
@@ -2433,35 +2446,106 @@ def manage_app_registration_menu() -> None:
             elif existing_app:
                 print(f"    • Name:      {Colors.YELLOW}{existing_app.get('displayName', CUSTOM_APP_NAME)}{Colors.NC}")
                 print(f"    • App ID:    {existing_app.get('appId', 'Unknown')}")
-            print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
+            print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
             print()
-            print(f"  {Colors.WHITE}This will add the following permissions:{Colors.NC}")
+            
+            # Get existing permissions
+            print(f"  {Colors.DIM}Checking existing permissions...{Colors.NC}")
+            existing_perms = get_app_permissions(app_id)
+            existing_perm_names = {p.get("name") for p in existing_perms.get("configured_permissions", [])}
+            
+            # Count what needs to be added
+            graph_to_add = []
+            graph_existing = []
+            ews_to_add = []
+            ews_existing = []
+            sp_to_add = []
+            sp_existing = []
+            
+            # Check Graph permissions
+            for perm_name in GRAPH_PERMISSION_IDS.keys():
+                if perm_name in existing_perm_names:
+                    graph_existing.append(perm_name)
+                else:
+                    graph_to_add.append(perm_name)
+            
+            # Check EWS permissions
+            for perm_name in EWS_PERMISSION_IDS.keys():
+                if perm_name in existing_perm_names:
+                    ews_existing.append(perm_name)
+                else:
+                    ews_to_add.append(perm_name)
+            
+            # Check SharePoint permissions
+            for perm_name in SHAREPOINT_PERMISSION_IDS.keys():
+                if perm_name in existing_perm_names:
+                    sp_existing.append(perm_name)
+                else:
+                    sp_to_add.append(perm_name)
+            
+            total_to_add = len(graph_to_add) + len(ews_to_add) + len(sp_to_add)
+            total_existing = len(graph_existing) + len(ews_existing) + len(sp_existing)
+            
             print()
+            print(f"  {Colors.WHITE}Permission Status:{Colors.NC}")
+            print(f"    • {Colors.GREEN}Already configured:{Colors.NC} {total_existing} permissions")
+            print(f"    • {Colors.YELLOW}To be added:{Colors.NC} {total_to_add} permissions")
+            print()
+            
+            # Show Microsoft Graph permissions
             print(f"  {Colors.CYAN}Microsoft Graph API:{Colors.NC}")
-            print(f"    • {Colors.GREEN}Mail.ReadWrite{Colors.NC} - Read and write mail in all mailboxes")
-            print(f"    • {Colors.GREEN}User.Read.All{Colors.NC} - Read all users' profiles")
-            print(f"    • {Colors.GREEN}Sites.Read.All{Colors.NC} - Read SharePoint sites")
-            print(f"    • {Colors.GREEN}Sites.ReadWrite.All{Colors.NC} - Read and write SharePoint sites")
-            print(f"    • {Colors.GREEN}Sites.FullControl.All{Colors.NC} - Full control of SharePoint sites")
-            print(f"      {Colors.DIM}(Required for deleting SharePoint sites){Colors.NC}")
-            print(f"    • {Colors.GREEN}Files.ReadWrite.All{Colors.NC} - Read and write files")
-            print(f"    • {Colors.GREEN}Group.Read.All{Colors.NC} - Read groups")
-            print(f"    • {Colors.GREEN}Group.ReadWrite.All{Colors.NC} - Read and write groups")
-            print(f"      {Colors.DIM}(Required for deleting M365 Group-connected sites){Colors.NC}")
+            perm_descriptions = {
+                "Mail.ReadWrite": "Read and write mail in all mailboxes",
+                "User.Read.All": "Read all users' profiles",
+                "Sites.Read.All": "Read SharePoint sites",
+                "Sites.ReadWrite.All": "Read and write SharePoint sites",
+                "Sites.FullControl.All": "Full control of SharePoint sites",
+                "Files.ReadWrite.All": "Read and write files",
+                "Group.Read.All": "Read groups",
+                "Group.ReadWrite.All": "Read and write groups",
+            }
+            for perm_name in GRAPH_PERMISSION_IDS.keys():
+                desc = perm_descriptions.get(perm_name, "")
+                if perm_name in existing_perm_names:
+                    print(f"    {Colors.GREEN}✓{Colors.NC} {Colors.DIM}{perm_name}{Colors.NC} - {desc}")
+                else:
+                    print(f"    {Colors.YELLOW}○{Colors.NC} {Colors.GREEN}{perm_name}{Colors.NC} - {desc}")
             print()
+            
+            # Show Exchange Online permissions
             print(f"  {Colors.CYAN}Exchange Online (EWS):{Colors.NC}")
-            print(f"    • {Colors.GREEN}full_access_as_app{Colors.NC} - Full mailbox access via EWS")
-            print(f"      {Colors.DIM}(Required for backdated timestamps and no [Draft] prefix){Colors.NC}")
+            for perm_name in EWS_PERMISSION_IDS.keys():
+                if perm_name in existing_perm_names:
+                    print(f"    {Colors.GREEN}✓{Colors.NC} {Colors.DIM}{perm_name}{Colors.NC} - Full mailbox access via EWS")
+                else:
+                    print(f"    {Colors.YELLOW}○{Colors.NC} {Colors.GREEN}{perm_name}{Colors.NC} - Full mailbox access via EWS")
             print()
+            
+            # Show SharePoint Online permissions
             print(f"  {Colors.CYAN}SharePoint Online API (Delegated - for PnP PowerShell):{Colors.NC}")
-            print(f"    • {Colors.GREEN}AllSites.FullControl{Colors.NC} - Full control of all site collections")
-            print(f"    • {Colors.GREEN}AllSites.Manage{Colors.NC} - Create, edit and delete items and lists")
-            print(f"    • {Colors.GREEN}AllSites.Write{Colors.NC} - Edit or delete items in all site collections")
-            print(f"    • {Colors.GREEN}AllSites.Read{Colors.NC} - Read items in all site collections")
-            print(f"      {Colors.DIM}(Required for PnP PowerShell site recycle bin operations){Colors.NC}")
+            sp_descriptions = {
+                "AllSites.FullControl": "Full control of all site collections",
+                "AllSites.Manage": "Create, edit and delete items and lists",
+                "AllSites.Write": "Edit or delete items in all site collections",
+                "AllSites.Read": "Read items in all site collections",
+            }
+            for perm_name in SHAREPOINT_PERMISSION_IDS.keys():
+                desc = sp_descriptions.get(perm_name, "")
+                if perm_name in existing_perm_names:
+                    print(f"    {Colors.GREEN}✓{Colors.NC} {Colors.DIM}{perm_name}{Colors.NC} - {desc}")
+                else:
+                    print(f"    {Colors.YELLOW}○{Colors.NC} {Colors.GREEN}{perm_name}{Colors.NC} - {desc}")
             print()
-            print(f"  {Colors.DIM}These permissions are required for SharePoint and email features.{Colors.NC}")
+            
+            print(f"  {Colors.DIM}Legend: {Colors.GREEN}✓{Colors.NC}{Colors.DIM} = Already configured, {Colors.YELLOW}○{Colors.NC}{Colors.DIM} = Will be added{Colors.NC}")
             print()
+            
+            if total_to_add == 0:
+                print(f"  {Colors.GREEN}All permissions are already configured!{Colors.NC}")
+                print(f"  {Colors.DIM}No changes needed.{Colors.NC}")
+                input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+                continue
+            
             
             confirm = input(f"  {Colors.YELLOW}Proceed? (Y/N/C to cancel):{Colors.NC} ").strip().lower()
             
