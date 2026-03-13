@@ -3643,6 +3643,7 @@ def main() -> None:
             print()
             print(f"    {Colors.CYAN}[6]{Colors.NC} Purge M365 Groups recycle bin (Azure AD)")
             print(f"    {Colors.CYAN}[7]{Colors.NC} Purge SharePoint site recycle bin")
+            print(f"    {Colors.CYAN}[8]{Colors.NC} Purge site files/folders recycle bin")
             print(f"    {Colors.WHITE}[B]{Colors.NC} Back to main menu")
             print()
             
@@ -3685,6 +3686,13 @@ def main() -> None:
                 else:
                     print(f"  {Colors.RED}✗{Colors.NC} Tenant name is required")
                     input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            elif sub_choice == '8':
+                # Purge site files/folders recycle bin
+                site_filter = get_site_filter()
+                args = ["--purge-site-recycle"]
+                if site_filter:
+                    args.extend(["--site", site_filter])
+                run_script("cleanup.py", args)
             # else: back to menu
             
         elif choice == '4':

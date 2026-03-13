@@ -1481,6 +1481,131 @@ def get_site_root_items(site_id: str, access_token: str) -> List[Dict[str, Any]]
     
     return items
 
+
+def get_site_recycle_bin_items(site_id: str, access_token: str) -> List[Dict[str, Any]]:
+    """Get all items from a site's document library recycle bin.
+    
+    Uses the SharePoint REST API to access the recycle bin.
+    """
+    items = []
+    
+    # First get the site URL
+    try:
+        site_url_req = f"https://graph.microsoft.com/v1.0/sites/{site_id}"
+        req = urllib.request.Request(site_url_req)
+        req.add_header("Authorization", f"Bearer {access_token}")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            site_data = json.loads(response.read().decode())
+            site_url = site_data.get("webUrl", "")
+            
+        if not site_url:
+            return items
+            
+        # Use SharePoint REST API to get recycle bin items
+        recycle_url = f"{site_url}/_api/web/RecycleBin?$top=5000"
+        
+        req = urllib.request.Request(recycle_url)
+        req.add_header("Authorization", f"Bearer {access_token}")
+        req.add_header("Accept", "application/json;odata=verbose")
+        
+        with urllib.request.urlopen(req, timeout=60) as response:
+            data = json.loads(response.read().decode())
+            results = data.get("d", {}).get("results", [])
+            items = results
+            
+    except Exception:
+        pass
+    
+    return items
+
+
+def purge_site_recycle_bin(site_id: str, access_token: str) -> Tuple[int, int]:
+    """Permanently delete all items from a site's recycle bin.
+    
+    Returns (success_count, fail_count).
+    """
+    success_count = 0
+    fail_count = 0
+    
+    # First get the site URL
+    try:
+        site_url_req = f"https://graph.microsoft.com/v1.0/sites/{site_id}"
+        req = urllib.request.Request(site_url_req)
+        req.add_header("Authorization", f"Bearer {access_token}")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            site_data = json.loads(response.read().decode())
+            site_url = site_data.get("webUrl", "")
+            
+        if not site_url:
+            return 0, 0
+            
+        # Use SharePoint REST API to delete all recycle bin items
+        # First, try to delete all at once
+        purge_all_url = f"{site_url}/_api/web/RecycleBin/DeleteAll()"
+        
+        req = urllib.request.Request(purge_all_url, method="POST")
+        req.add_header("Authorization", f"Bearer {access_token}")
+        req.add_header("Accept", "application/json;odata=verbose")
+        req.add_header("Content-Type", "application/json;odata=verbose")
+        req.add_header("Content-Length", "0")
+        
+        with urllib.request.urlopen(req, timeout=120) as response:
+            if response.status in [200, 204]:
+                # Get count of items that were in recycle bin
+                items = get_site_recycle_bin_items(site_id, access_token)
+                # If we got here, all items were deleted
+                return 1, 0  # Return 1 to indicate success (bulk operation)
+                
+    except urllib.error.HTTPError as e:
+        # If bulk delete fails, try individual deletion
+        pass
+    except Exception:
+        pass
+    
+    # Fallback: delete items individually
+    items = get_site_recycle_bin_items(site_id, access_token)
+    
+    if not items:
+        return 0, 0
+    
+    try:
+        site_url_req = f"https://graph.microsoft.com/v1.0/sites/{site_id}"
+        req = urllib.request.Request(site_url_req)
+        req.add_header("Authorization", f"Bearer {access_token}")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            site_data = json.loads(response.read().decode())
+            site_url = site_data.get("webUrl", "")
+    except Exception:
+        return 0, len(items)
+    
+    for item in items:
+        item_id = item.get("Id", "")
+        if not item_id:
+            fail_count += 1
+            continue
+            
+        try:
+            delete_url = f"{site_url}/_api/web/RecycleBin('{item_id}')"
+            
+            req = urllib.request.Request(delete_url, method="DELETE")
+            req.add_header("Authorization", f"Bearer {access_token}")
+            req.add_header("Accept", "application/json;odata=verbose")
+            req.add_header("IF-MATCH", "*")
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                if response.status in [200, 204]:
+                    success_count += 1
+                else:
+                    fail_count += 1
+        except Exception:
+            fail_count += 1
+    
+    return success_count, fail_count
+
+
 def delete_site(site_id: str, access_token: str) -> bool:
     """Delete a SharePoint site.
     
@@ -1725,8 +1850,14 @@ def list_files_mode(sites: List[Dict[str, Any]], access_token: str) -> None:
         
         print(f"    {Colors.GREEN}Total: {len(files)} items{Colors.NC}")
 
-def delete_files_mode(sites: List[Dict[str, Any]], access_token: str) -> None:
-    """Delete all files from selected sites."""
+def delete_files_mode(sites: List[Dict[str, Any]], access_token: str, purge_recycle_bin: bool = False) -> None:
+    """Delete all files from selected sites.
+    
+    Args:
+        sites: List of SharePoint sites to delete files from
+        access_token: Microsoft Graph access token
+        purge_recycle_bin: If True, also permanently delete files from recycle bin
+    """
     print_step(5, "Delete Files from Sites")
     
     total_success = 0
@@ -1745,6 +1876,47 @@ def delete_files_mode(sites: List[Dict[str, Any]], access_token: str) -> None:
     print_success(f"Deleted {total_success} items successfully")
     if total_fail > 0:
         print_warning(f"Failed to delete {total_fail} items")
+    
+    # Ask about purging recycle bin if not already specified
+    if total_success > 0:
+        print()
+        print_info("Deleted files are now in the site recycle bin (recoverable for 93 days)")
+        
+        if not purge_recycle_bin:
+            print()
+            purge_choice = input(f"  {Colors.YELLOW}Permanently delete from recycle bin? (y/N): {Colors.NC}").strip().lower()
+            purge_recycle_bin = purge_choice == 'y'
+        
+        if purge_recycle_bin:
+            print()
+            print_step(6, "Purging Site Recycle Bins")
+            
+            total_purged = 0
+            total_purge_fail = 0
+            
+            for site in sites:
+                site_id = site.get("id", "")
+                site_name = site.get("displayName", site.get("name", "Unknown"))
+                
+                print()
+                print_info(f"Purging recycle bin: {site_name}")
+                
+                purged, purge_fail = purge_site_recycle_bin(site_id, access_token)
+                total_purged += purged
+                total_purge_fail += purge_fail
+                
+                if purged > 0:
+                    print_success(f"  Purged {purged} items from recycle bin")
+                elif purge_fail > 0:
+                    print_warning(f"  Failed to purge {purge_fail} items")
+                else:
+                    print_info(f"  Recycle bin is empty")
+            
+            print()
+            if total_purged > 0:
+                print_success(f"Permanently deleted {total_purged} items from recycle bins")
+            if total_purge_fail > 0:
+                print_warning(f"Failed to purge {total_purge_fail} items (may require additional permissions)")
 
 def delete_selected_files_mode(sites: List[Dict[str, Any]], access_token: str) -> None:
     """Interactively select and delete specific files from sites."""
@@ -2089,6 +2261,11 @@ Selection Syntax (for --select-sites and --select-files):
         help='Permanently delete sites from SharePoint recycle bin (requires SPO PowerShell)'
     )
     parser.add_argument(
+        '--purge-site-recycle',
+        action='store_true',
+        help='Purge files/folders from site document library recycle bins'
+    )
+    parser.add_argument(
         '--tenant',
         type=str,
         metavar='NAME',
@@ -2100,7 +2277,7 @@ Selection Syntax (for --select-sites and --select-files):
     # Determine if this is a read-only operation
     is_read_only = (args.list_sites or args.list_files or args.list_groups or args.list_deleted) and not (
         args.delete_files or args.delete_sites or args.delete_all or
-        args.delete_groups or args.purge_deleted or args.purge_spo_recycle or args.select_files
+        args.delete_groups or args.purge_deleted or args.purge_spo_recycle or args.purge_site_recycle or args.select_files
     )
     
     # Clear screen and show appropriate banner
@@ -2242,6 +2419,75 @@ Selection Syntax (for --select-sites and --select-files):
         print_info(f"SharePoint Admin URL: {admin_url}")
         
         purge_spo_deleted_sites_mode(admin_url, args.yes)
+        sys.exit(0)
+    
+    # Handle site document library recycle bin purge
+    if args.purge_site_recycle:
+        print_step(4, "Purge Site Files/Folders Recycle Bins")
+        
+        # Get sites first
+        sites = get_sharepoint_sites(access_token)
+        
+        if not sites:
+            print_warning("No SharePoint sites found")
+            sys.exit(0)
+        
+        # Filter sites if specified
+        if args.site:
+            filter_term = args.site.lower()
+            sites = [s for s in sites if filter_term in s.get("displayName", "").lower() or
+                     filter_term in s.get("name", "").lower()]
+            if not sites:
+                print_error(f"No sites found matching '{args.site}'")
+                sys.exit(1)
+            print_info(f"Filtered to {len(sites)} sites matching '{args.site}'")
+        
+        print_success(f"Found {len(sites)} sites")
+        print()
+        
+        # Confirm before purging
+        if not args.yes:
+            print_warning("This will permanently delete all items from site recycle bins!")
+            print()
+            for site in sites[:10]:
+                name = site.get("displayName", site.get("name", "Unknown"))
+                print(f"    - {name}")
+            if len(sites) > 10:
+                print(f"    ... and {len(sites) - 10} more")
+            print()
+            confirm = input(f"  {Colors.YELLOW}Proceed with purging recycle bins? (y/N): {Colors.NC}").strip().lower()
+            if confirm != 'y':
+                print_warning("Operation cancelled")
+                sys.exit(0)
+        
+        # Purge recycle bins
+        total_purged = 0
+        total_failed = 0
+        
+        for site in sites:
+            site_id = site.get("id", "")
+            site_name = site.get("displayName", site.get("name", "Unknown"))
+            
+            print()
+            print_info(f"Purging recycle bin: {site_name}")
+            
+            purged, failed = purge_site_recycle_bin(site_id, access_token)
+            total_purged += purged
+            total_failed += failed
+            
+            if purged > 0:
+                print_success(f"  Purged items from recycle bin")
+            elif failed > 0:
+                print_warning(f"  Failed to purge some items")
+            else:
+                print_info(f"  Recycle bin is empty")
+        
+        print()
+        if total_purged > 0:
+            print_success(f"Purged recycle bins from {len(sites)} sites")
+        if total_failed > 0:
+            print_warning(f"Some items could not be purged (may require additional permissions)")
+        
         sys.exit(0)
     
     # Step 4: Get SharePoint sites (or fall back to Groups if Sites API fails)

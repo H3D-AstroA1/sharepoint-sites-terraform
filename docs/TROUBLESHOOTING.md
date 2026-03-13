@@ -733,6 +733,7 @@ python menu.py
 # Select [3] Delete Files or Sites
 # Select [6] Purge M365 Groups recycle bin
 # Select [7] Purge SharePoint site recycle bin
+# Select [8] Purge site files/folders recycle bin
 ```
 
 ---

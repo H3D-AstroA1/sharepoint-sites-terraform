@@ -507,11 +507,18 @@ python cleanup.py --purge-deleted
 # Purge SharePoint sites from SharePoint Admin Center recycle bin
 # Replace 'contoso' with your tenant name (e.g., contoso.sharepoint.com)
 python cleanup.py --purge-spo-recycle --tenant contoso
+
+# Purge files/folders from site document library recycle bins
+python cleanup.py --purge-site-recycle
+
+# Purge recycle bin for specific sites only
+python cleanup.py --purge-site-recycle --site hr
 ```
 
 Or use the main menu:
 - Option **[6]**: Purge M365 Groups recycle bin (Azure AD)
 - Option **[7]**: Purge SharePoint site recycle bin
+- Option **[8]**: Purge site files/folders recycle bin
 
 > ⚠️ **Note**: The SharePoint site recycle bin purge requires the **SharePoint Online PowerShell module** (`Microsoft.Online.SharePoint.PowerShell`). The script will automatically install it if not present (Windows only).
 
@@ -531,6 +538,7 @@ Options:
   --select-files       Interactively select specific files to delete
   --purge-deleted      Permanently delete M365 Groups from Azure AD recycle bin
   --purge-spo-recycle  Permanently delete sites from SharePoint recycle bin
+  --purge-site-recycle Purge files/folders from site document library recycle bins
   --tenant NAME        SharePoint tenant name (required with --purge-spo-recycle)
   -y, --yes            Skip confirmation prompts (use with caution!)
 ```

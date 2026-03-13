@@ -1069,18 +1069,162 @@ def create_folder_in_sharepoint(
         print_error(f"Error creating folder {folder_name}: {e}")
         return False
 
+def generate_random_past_date(months_back: int = 12) -> datetime:
+    """Generate a random date within the past N months."""
+    now = datetime.now()
+    days_back = random.randint(1, months_back * 30)
+    return now - timedelta(days=days_back)
+
+
+def generate_random_modified_date(created_date: datetime) -> datetime:
+    """Generate a random modified date between created date and now."""
+    now = datetime.now()
+    if created_date >= now:
+        return now
+    days_diff = (now - created_date).days
+    if days_diff <= 0:
+        return now
+    days_after_created = random.randint(0, days_diff)
+    return created_date + timedelta(days=days_after_created)
+
+
+def get_sharepoint_site_url(site_id: str, access_token: str) -> Optional[str]:
+    """Get the SharePoint site URL from site ID."""
+    try:
+        url = f"https://graph.microsoft.com/v1.0/sites/{site_id}"
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {access_token}")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode())
+            web_url = data.get("webUrl")
+            return web_url if web_url else None
+    except Exception:
+        return None
+
+
+def get_list_item_id(site_id: str, file_path: str, access_token: str) -> Optional[str]:
+    """Get the list item ID for a file in SharePoint."""
+    try:
+        encoded_path = urllib.parse.quote(file_path)
+        url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root:/{encoded_path}"
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {access_token}")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode())
+            # Get the SharePoint list item info
+            sp_item = data.get("sharepointIds", {})
+            return sp_item.get("listItemId")
+    except Exception:
+        return None
+
+
+def update_file_metadata_via_rest(
+    site_url: str,
+    list_item_id: str,
+    access_token: str,
+    created_date: Optional[datetime] = None,
+    modified_date: Optional[datetime] = None,
+    author_id: Optional[str] = None,
+    editor_id: Optional[str] = None
+) -> bool:
+    """Update file metadata (timestamps and author) via SharePoint REST API.
+    
+    This allows setting custom Created/Modified dates and Author/Editor fields.
+    Falls back gracefully if the operation fails.
+    """
+    try:
+        # Build the update payload
+        update_data = {}
+        
+        if created_date:
+            update_data["Created"] = created_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+        if modified_date:
+            update_data["Modified"] = modified_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+        if author_id:
+            # Author field requires the user's lookup ID, not the Azure AD ID
+            # This is complex and may not work directly - keeping for future enhancement
+            pass
+        if editor_id:
+            # Same as Author
+            pass
+        
+        if not update_data:
+            return True  # Nothing to update
+        
+        # SharePoint REST API endpoint for updating list item
+        # Note: This requires the list name, which is typically "Documents" for document libraries
+        rest_url = f"{site_url}/_api/web/lists/getbytitle('Documents')/items({list_item_id})"
+        
+        payload = json.dumps(update_data).encode('utf-8')
+        
+        req = urllib.request.Request(rest_url, data=payload, method="PATCH")
+        req.add_header("Authorization", f"Bearer {access_token}")
+        req.add_header("Content-Type", "application/json;odata=verbose")
+        req.add_header("Accept", "application/json;odata=verbose")
+        req.add_header("IF-MATCH", "*")  # Required for updates
+        req.add_header("X-HTTP-Method", "MERGE")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            return response.status in [200, 204]
+    except Exception:
+        # Silently fail - file was still uploaded, just without custom metadata
+        return False
+
+
+# Global counters for REST API metadata updates
+_metadata_update_success = 0
+_metadata_update_failed = 0
+_metadata_update_skipped = 0
+_metadata_skip_no_site_url = 0
+_metadata_skip_no_list_item = 0
+
+
+def reset_metadata_counters():
+    """Reset the metadata update counters."""
+    global _metadata_update_success, _metadata_update_failed, _metadata_update_skipped
+    global _metadata_skip_no_site_url, _metadata_skip_no_list_item
+    _metadata_update_success = 0
+    _metadata_update_failed = 0
+    _metadata_update_skipped = 0
+    _metadata_skip_no_site_url = 0
+    _metadata_skip_no_list_item = 0
+
+
+def get_metadata_stats() -> Dict[str, int]:
+    """Get the metadata update statistics."""
+    return {
+        "success": _metadata_update_success,
+        "failed": _metadata_update_failed,
+        "skipped": _metadata_update_skipped,
+        "skip_no_site_url": _metadata_skip_no_site_url,
+        "skip_no_list_item": _metadata_skip_no_list_item
+    }
+
+
 def upload_file_to_sharepoint(
     site_id: str,
     folder_path: str,
     file_name: str,
     file_content: bytes,
-    access_token: str
+    access_token: str,
+    user: Optional[Dict[str, Any]] = None,
+    set_custom_dates: bool = True
 ) -> bool:
-    """Upload a file to SharePoint using Microsoft Graph API."""
+    """Upload a file to SharePoint using Microsoft Graph API.
+    
+    Optionally sets custom timestamps via SharePoint REST API for realism.
+    Tracks metadata update success/failure for reporting.
+    """
+    global _metadata_update_success, _metadata_update_failed, _metadata_update_skipped
+    global _metadata_skip_no_site_url, _metadata_skip_no_list_item
     # Encode the file path
     if folder_path:
-        encoded_path = urllib.parse.quote(f"{folder_path}/{file_name}")
+        file_path = f"{folder_path}/{file_name}"
+        encoded_path = urllib.parse.quote(file_path)
     else:
+        file_path = file_name
         encoded_path = urllib.parse.quote(file_name)
     
     url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root:/{encoded_path}:/content"
@@ -1091,7 +1235,45 @@ def upload_file_to_sharepoint(
         req.add_header("Content-Type", "application/octet-stream")
         
         with urllib.request.urlopen(req, timeout=60) as response:
-            return response.status in [200, 201]
+            upload_success = response.status in [200, 201]
+            
+            # Try to set custom timestamps if upload succeeded
+            if upload_success and set_custom_dates:
+                try:
+                    # Generate random past dates for realism
+                    created_date = generate_random_past_date(months_back=12)
+                    modified_date = generate_random_modified_date(created_date)
+                    
+                    # Get site URL and list item ID
+                    site_url = get_sharepoint_site_url(site_id, access_token)
+                    if site_url:
+                        list_item_id = get_list_item_id(site_id, file_path, access_token)
+                        if list_item_id:
+                            # Try to update metadata via REST API
+                            metadata_result = update_file_metadata_via_rest(
+                                site_url=site_url,
+                                list_item_id=list_item_id,
+                                access_token=access_token,
+                                created_date=created_date,
+                                modified_date=modified_date,
+                                author_id=user.get("id") if user else None
+                            )
+                            if metadata_result:
+                                _metadata_update_success += 1
+                            else:
+                                _metadata_update_failed += 1
+                        else:
+                            _metadata_update_skipped += 1
+                            _metadata_skip_no_list_item += 1
+                    else:
+                        _metadata_update_skipped += 1
+                        _metadata_skip_no_site_url += 1
+                except Exception:
+                    _metadata_update_failed += 1
+            elif upload_success:
+                _metadata_update_skipped += 1  # Custom dates disabled
+            
+            return upload_success
     except urllib.error.HTTPError as e:
         if e.code == 409:  # Conflict - file already exists
             return True
@@ -1628,6 +1810,8 @@ Examples:
     print_step(9, "Generate and Upload Files")
     
     print()
+    # Reset metadata counters before starting
+    reset_metadata_counters()
     start_time = datetime.now()
     
     # Use appropriate distribution function based on mode
@@ -1670,8 +1854,28 @@ Examples:
     if fail > 0:
         print(f"    {Colors.RED}✗ Failed:{Colors.NC} {fail} files")
     print(f"    {Colors.BLUE}⏱ Duration:{Colors.NC} {duration:.1f} seconds")
-    print(f"    {Colors.BLUE}📊 Rate:{Colors.NC} {success / duration:.1f} files/second")
+    if duration > 0:
+        print(f"    {Colors.BLUE}📊 Rate:{Colors.NC} {success / duration:.1f} files/second")
     print()
+    
+    # Display metadata update statistics (REST API for custom timestamps)
+    metadata_stats = get_metadata_stats()
+    total_metadata_attempts = metadata_stats["success"] + metadata_stats["failed"] + metadata_stats["skipped"]
+    if total_metadata_attempts > 0:
+        print(f"  {Colors.WHITE}Custom Timestamps (REST API):{Colors.NC}")
+        if metadata_stats["success"] > 0:
+            print(f"    {Colors.GREEN}✓ Timestamps set:{Colors.NC} {metadata_stats['success']} files")
+        if metadata_stats["failed"] > 0:
+            print(f"    {Colors.RED}✗ REST API failed:{Colors.NC} {metadata_stats['failed']} files")
+            print(f"      {Colors.YELLOW}(May require Sites.FullControl.All permission){Colors.NC}")
+        if metadata_stats["skipped"] > 0:
+            print(f"    {Colors.YELLOW}⊘ Skipped:{Colors.NC} {metadata_stats['skipped']} files")
+            # Show detailed breakdown of why skipped
+            if metadata_stats.get("skip_no_site_url", 0) > 0:
+                print(f"      - No site URL: {metadata_stats['skip_no_site_url']} (Graph API lookup failed)")
+            if metadata_stats.get("skip_no_list_item", 0) > 0:
+                print(f"      - No list item ID: {metadata_stats['skip_no_list_item']} (SharePoint IDs not available)")
+        print()
     
     if success > 0:
         print_success("Files have been uploaded to your SharePoint sites!")
