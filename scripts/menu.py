@@ -662,13 +662,14 @@ def create_custom_app() -> Optional[Dict[str, Any]]:
         # Step 1: Create the app registration with redirect URI
         print(f"  {Colors.DIM}Step 1/4: Creating app registration...{Colors.NC}")
         
-        # Create app with a web redirect URI (required for admin consent)
-        # Using portal.azure.com as redirect - shows Azure Portal after consent (cleaner UX)
+        # Create app with redirect URIs:
+        # - https://portal.azure.com - for admin consent (shows Azure Portal after consent)
+        # - http://localhost - for PnP PowerShell interactive authentication (uses dynamic port)
         create_result = subprocess.run(
             [az_path, "ad", "app", "create",
              "--display-name", CUSTOM_APP_NAME,
              "--sign-in-audience", "AzureADMyOrg",
-             "--web-redirect-uris", "https://portal.azure.com",
+             "--web-redirect-uris", "https://portal.azure.com", "http://localhost",
              "-o", "json"],
             capture_output=True,
             text=True,
@@ -1003,6 +1004,62 @@ def delete_custom_app() -> bool:
         print_error(f"Failed to delete app: {e}")
         return False
 
+def update_app_redirect_uris(app_id: str) -> bool:
+    """Update redirect URIs on an existing app registration.
+    
+    Adds http://localhost for PnP PowerShell interactive authentication.
+    """
+    az_path = find_azure_cli_path()
+    if not az_path:
+        return False
+    
+    try:
+        # Get current redirect URIs
+        app_result = subprocess.run(
+            [az_path, "ad", "app", "show", "--id", app_id, "--query", "web.redirectUris", "-o", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        current_uris = []
+        if app_result.returncode == 0 and app_result.stdout.strip():
+            try:
+                current_uris = json.loads(app_result.stdout) or []
+            except json.JSONDecodeError:
+                current_uris = []
+        
+        # Required URIs for PnP PowerShell
+        required_uris = ["https://portal.azure.com", "http://localhost"]
+        
+        # Check if we need to add any URIs
+        uris_to_add = [uri for uri in required_uris if uri not in current_uris]
+        
+        if not uris_to_add:
+            return True  # All URIs already present
+        
+        # Add missing URIs
+        new_uris = current_uris + uris_to_add
+        
+        # Update the app with new redirect URIs
+        update_result = subprocess.run(
+            [az_path, "ad", "app", "update", "--id", app_id, "--web-redirect-uris"] + new_uris,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if update_result.returncode == 0:
+            print(f"  {Colors.GREEN}✓{Colors.NC} Added redirect URI: http://localhost (for PnP PowerShell)")
+            return True
+        else:
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} Could not update redirect URIs: {update_result.stderr.strip()[:50]}")
+            return False
+            
+    except Exception as e:
+        print(f"  {Colors.YELLOW}⚠{Colors.NC} Could not update redirect URIs: {str(e)[:50]}")
+        return False
+
 def update_app_permissions() -> bool:
     """Update all permissions on an existing app registration.
     
@@ -1057,6 +1114,10 @@ def update_app_permissions() -> bool:
                     existing_perm_ids.add(access.get("id", ""))
     except Exception:
         pass  # If we can't get existing permissions, we'll try to add all
+    
+    # Also update redirect URIs for PnP PowerShell support
+    print(f"  {Colors.DIM}Checking redirect URIs...{Colors.NC}")
+    update_app_redirect_uris(app_id)
     
     print()
     
