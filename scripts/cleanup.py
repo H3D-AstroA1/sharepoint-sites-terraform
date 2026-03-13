@@ -1966,10 +1966,13 @@ def purge_site_recycle_bin_pnp(site_url: str, first_stage_only: bool = False, cl
     # Build connection command - use -Interactive with ClientId
     if client_id:
         connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -Interactive -ClientId "{client_id}" -ErrorAction Stop'
+        # Admin URL connection command (for Set-PnPTenantSite)
+        connect_admin_cmd = f'Connect-PnPOnline -Url $adminUrl -Interactive -ClientId "{client_id}" -ErrorAction Stop'
         auth_method = "Interactive with registered app"
     else:
         # Without client_id, use -Interactive without ClientId (uses PnP's default app)
         connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -Interactive -ErrorAction Stop'
+        connect_admin_cmd = 'Connect-PnPOnline -Url $adminUrl -Interactive -ErrorAction Stop'
         auth_method = "Interactive (PnP default app)"
     
     ps_script = f'''
@@ -1985,19 +1988,41 @@ try {{
     Write-Host "Connected successfully!"
     
     # First, ensure current user is Site Collection Admin (required to access recycle bin)
+    # We need to use Set-PnPTenantSite from the Admin site to grant this
     Write-Host "Ensuring Site Collection Admin access..."
     try {{
         $web = Get-PnPWeb
         $currentUser = Get-PnPProperty -ClientObject $web -Property CurrentUser
         $userEmail = $currentUser.Email
+        $siteUrl = "{site_url}"
+        
         if ($userEmail) {{
-            Write-Host "Adding $userEmail as Site Collection Administrator..."
-            # Use Add-PnPSiteCollectionAdmin (correct cmdlet name)
-            Add-PnPSiteCollectionAdmin -Owners $userEmail -ErrorAction SilentlyContinue
-            Write-Host "Site Collection Admin access granted"
+            Write-Host "Current user: $userEmail"
+            
+            # Extract tenant name from site URL to build admin URL
+            $uri = [System.Uri]$siteUrl
+            $tenantName = $uri.Host.Split('.')[0]
+            $adminUrl = "https://$tenantName-admin.sharepoint.com"
+            
+            Write-Host "Connecting to SharePoint Admin site: $adminUrl"
+            
+            # Disconnect from current site and connect to admin site
+            Disconnect-PnPOnline -ErrorAction SilentlyContinue
+            {connect_admin_cmd}
+            
+            Write-Host "Adding $userEmail as Site Collection Administrator via Admin API..."
+            # Use Set-PnPTenantSite to add the user as Site Collection Admin
+            Set-PnPTenantSite -Url $siteUrl -Owners $userEmail -ErrorAction Stop
+            Write-Host "Site Collection Admin access granted!"
+            
+            # Reconnect to the original site
+            Disconnect-PnPOnline -ErrorAction SilentlyContinue
+            {connect_cmd}
+            Write-Host "Reconnected to site"
         }}
     }} catch {{
-        Write-Host "Note: Could not add as Site Collection Admin (may already be admin): $_"
+        Write-Host "Note: Could not add as Site Collection Admin: $_"
+        Write-Host "Continuing anyway - you may already be an admin or have sufficient permissions"
     }}
     
     $totalCount = 0
