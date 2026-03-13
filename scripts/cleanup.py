@@ -1896,18 +1896,14 @@ def purge_site_recycle_bin_pnp(site_url: str, first_stage_only: bool = False, cl
     $totalCount = $totalCount + $secondStageCount
 """
     
-    # Build connection command - use -UseWebLogin which is most reliable
-    # -UseWebLogin opens a browser for authentication and works without app registration
+    # Build connection command - use -Interactive with ClientId
     if client_id:
-        # Try Interactive first with client_id, fall back to UseWebLogin
         connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -Interactive -ClientId "{client_id}" -ErrorAction Stop'
-        fallback_cmd = f'Connect-PnPOnline -Url "{site_url}" -UseWebLogin -ErrorAction Stop'
         auth_method = "Interactive with registered app"
     else:
-        # Use WebLogin directly - most reliable without app registration
-        connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -UseWebLogin -ErrorAction Stop'
-        fallback_cmd = connect_cmd  # Same command for fallback
-        auth_method = "Web Login (browser)"
+        # Without client_id, use -Interactive without ClientId (uses PnP's default app)
+        connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -Interactive -ErrorAction Stop'
+        auth_method = "Interactive (PnP default app)"
     
     ps_script = f'''
 $ErrorActionPreference = "Stop"
@@ -1917,16 +1913,9 @@ try {{
     Write-Host "Connecting to SharePoint site..."
     Write-Host "Authentication method: {auth_method}"
     
-    # Try primary authentication method
-    try {{
-        {connect_cmd}
-        Write-Host "Connected successfully!"
-    }} catch {{
-        # Fall back to UseWebLogin if Interactive fails
-        Write-Host "Primary auth failed, trying Web Login..."
-        {fallback_cmd}
-        Write-Host "Connected via Web Login!"
-    }}
+    # Connect using Interactive authentication
+    {connect_cmd}
+    Write-Host "Connected successfully!"
     
     # Get count of items in recycle bin first
     $recycleBinItems = Get-PnPRecycleBinItem -ErrorAction SilentlyContinue
