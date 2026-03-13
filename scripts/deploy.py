@@ -211,12 +211,13 @@ class Colors:
     CYAN = '\033[0;36m'
     WHITE = '\033[1;37m'
     BOLD = '\033[1m'
+    DIM = '\033[2m'  # Dim/faint text
     NC = '\033[0m'  # No Color
 
     @classmethod
     def disable(cls):
         """Disable colors (for non-TTY output)."""
-        cls.RED = cls.GREEN = cls.YELLOW = cls.CYAN = cls.WHITE = cls.BOLD = cls.NC = ''
+        cls.RED = cls.GREEN = cls.YELLOW = cls.CYAN = cls.WHITE = cls.BOLD = cls.DIM = cls.NC = ''
 
 
 # Disable colors if not a TTY or on Windows without color support
@@ -1687,7 +1688,12 @@ def select_site_mode(args, step_num: int = 1) -> Tuple[str, List[Dict]]:
     print()
     print(f"  {Colors.WHITE}Sites to be created:{Colors.NC}")
     for site in sites:
-        print(f"    - {site['name']} ({site['display_name']})")
+        # Show the actual URL name (without hyphens/special chars) that SharePoint will use
+        url_name = ''.join(c for c in site['name'] if c.isalnum())
+        if site.get('template') == 'SITEPAGEPUBLISHING#0':
+            url_name = url_name + 'site'
+        print(f"    - {site['display_name']}")
+        print(f"      {Colors.DIM}URL: /sites/{url_name}{Colors.NC}")
     
     print()
     if not confirm("Continue with these sites?"):
