@@ -1483,8 +1483,14 @@ def get_site_root_items(site_id: str, access_token: str) -> List[Dict[str, Any]]
 
 
 def check_pnp_module_installed() -> bool:
-    """Check if PnP PowerShell module is installed."""
-    ps_exe = get_powershell_executable()
+    """Check if PnP PowerShell module is installed.
+    
+    Prefers PowerShell 7 (pwsh) since PnP.PowerShell is typically installed there.
+    Falls back to Windows PowerShell if pwsh is not available.
+    """
+    # Prefer PowerShell 7 (pwsh) since that's where PnP is typically installed
+    pwsh = get_pwsh_executable()
+    ps_exe = pwsh if pwsh else get_powershell_executable()
     
     ps_script = '''
 $module = Get-Module -ListAvailable -Name "PnP.PowerShell" | Select-Object -First 1
@@ -1497,56 +1503,240 @@ if ($module) {
     
     try:
         result = subprocess.run(
-            [ps_exe, "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+            [ps_exe, "-ExecutionPolicy", "Bypass", "-NoProfile", "-Command", ps_script],
             capture_output=True,
             text=True,
             timeout=30
         )
         
-        return "INSTALLED" in result.stdout
-    except Exception:
+        # Check for exact match to avoid false positives
+        output = result.stdout.strip()
+        is_installed = output == "INSTALLED"
+        
+        # Debug output
+        if not is_installed:
+            ps_type = "pwsh" if pwsh else "powershell"
+            print_info(f"  PnP module check ({ps_type}): {output}")
+        
+        return is_installed
+    except Exception as e:
+        print_warning(f"  Could not check PnP module: {e}")
         return False
+
+
+def get_pwsh_executable() -> Optional[str]:
+    """Get PowerShell 7 (pwsh) executable path if available."""
+    # Check common locations for pwsh
+    pwsh_paths = [
+        "pwsh",  # In PATH
+        r"C:\Program Files\PowerShell\7\pwsh.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe"),
+    ]
+    
+    for path in pwsh_paths:
+        try:
+            result = subprocess.run(
+                [path, "-Version"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                return path
+        except Exception:
+            continue
+    
+    return None
 
 
 def install_pnp_module() -> bool:
     """Install PnP PowerShell module."""
-    ps_exe = get_powershell_executable()
+    # Prefer PowerShell 7 (pwsh) for better module management
+    pwsh = get_pwsh_executable()
+    ps_exe = pwsh if pwsh else get_powershell_executable()
     
-    print_info("Installing PnP.PowerShell module...")
+    if pwsh:
+        print_info("Installing PnP.PowerShell module using PowerShell 7...")
+    else:
+        print_info("Installing PnP.PowerShell module using Windows PowerShell...")
     print_info("This may take a few minutes...")
     
+    # PowerShell script for installation - handles PowerShellGet issues
     ps_script = '''
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
+$ProgressPreference = "SilentlyContinue"
+
+# Ensure TLS 1.2 is used
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+# Check if already installed
+$existing = Get-Module -ListAvailable -Name "PnP.PowerShell" | Select-Object -First 1
+if ($existing) {
+    Write-Output "SUCCESS:Already installed"
+    exit 0
+}
+
+Write-Host "Installing PnP.PowerShell module..."
+
+# First, ensure NuGet provider is installed (required for Install-Module)
+Write-Host "Ensuring NuGet provider is available..."
 try {
-    # Check if already installed
-    $existing = Get-Module -ListAvailable -Name "PnP.PowerShell" | Select-Object -First 1
-    if ($existing) {
-        Write-Output "Already installed"
+    $nuget = Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue | Where-Object { $_.Version -ge [Version]"2.8.5.201" }
+    if (-not $nuget) {
+        Write-Host "Installing NuGet provider..."
+        Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser -ErrorAction Stop | Out-Null
+    }
+} catch {
+    Write-Host "NuGet provider setup: $($_.Exception.Message)"
+}
+
+# Set PSGallery as trusted to avoid prompts
+try {
+    Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
+} catch {
+    # Ignore errors
+}
+
+# Method 1: Standard Install-Module
+Write-Host "Trying standard Install-Module..."
+try {
+    Install-Module -Name "PnP.PowerShell" -Repository PSGallery -Scope CurrentUser -Force -AllowClobber -AcceptLicense -ErrorAction Stop
+    Write-Output "SUCCESS:Installed"
+    exit 0
+} catch {
+    Write-Host "Method 1 failed: $($_.Exception.Message)"
+}
+
+# Method 2: Try with SkipPublisherCheck
+Write-Host "Trying Install-Module with SkipPublisherCheck..."
+try {
+    Install-Module -Name "PnP.PowerShell" -Repository PSGallery -Scope CurrentUser -Force -AllowClobber -SkipPublisherCheck -ErrorAction Stop
+    Write-Output "SUCCESS:Installed"
+    exit 0
+} catch {
+    Write-Host "Method 2 failed: $($_.Exception.Message)"
+}
+
+# Method 3: Try updating PowerShellGet first
+Write-Host "Trying to update PowerShellGet..."
+try {
+    # Import PackageManagement first
+    Import-Module PackageManagement -Force -ErrorAction SilentlyContinue
+    
+    # Try to install/update PowerShellGet
+    Install-Module -Name PowerShellGet -Force -AllowClobber -Scope CurrentUser -ErrorAction SilentlyContinue
+    
+    # Now try PnP again
+    Install-Module -Name "PnP.PowerShell" -Repository PSGallery -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+    Write-Output "SUCCESS:Installed after PowerShellGet update"
+    exit 0
+} catch {
+    Write-Host "Method 3 failed: $($_.Exception.Message)"
+}
+
+# Method 4: Direct download from PSGallery using Save-Module
+Write-Host "Trying Save-Module approach..."
+try {
+    $modulePath = Join-Path $env:USERPROFILE "Documents\\WindowsPowerShell\\Modules\\PnP.PowerShell"
+    if (-not (Test-Path $modulePath)) {
+        New-Item -ItemType Directory -Path $modulePath -Force | Out-Null
+    }
+    Save-Module -Name "PnP.PowerShell" -Path (Split-Path $modulePath -Parent) -Force -ErrorAction Stop
+    Write-Output "SUCCESS:Installed via Save-Module"
+    exit 0
+} catch {
+    Write-Host "Method 4 failed: $($_.Exception.Message)"
+}
+
+# Method 5: Use PowerShell 7's PSResourceGet if available
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+    Write-Host "Trying PSResourceGet (PowerShell 7)..."
+    try {
+        # PSResourceGet is built into PS7
+        Install-PSResource -Name "PnP.PowerShell" -Scope CurrentUser -TrustRepository -ErrorAction Stop
+        Write-Output "SUCCESS:Installed via PSResourceGet"
+        exit 0
+    } catch {
+        Write-Host "PSResourceGet method failed: $($_.Exception.Message)"
+    }
+}
+
+# Method 6: Direct web download as last resort
+Write-Host "Trying direct download from PSGallery..."
+try {
+    $apiUrl = "https://www.powershellgallery.com/api/v2/package/PnP.PowerShell"
+    $tempZip = Join-Path $env:TEMP "PnP.PowerShell.zip"
+    $modulePath = Join-Path $env:USERPROFILE "Documents\\WindowsPowerShell\\Modules\\PnP.PowerShell"
+    
+    # Download the nupkg (it's a zip file)
+    Invoke-WebRequest -Uri $apiUrl -OutFile $tempZip -UseBasicParsing -ErrorAction Stop
+    
+    # Extract to module path
+    if (Test-Path $modulePath) {
+        Remove-Item $modulePath -Recurse -Force
+    }
+    Expand-Archive -Path $tempZip -DestinationPath $modulePath -Force
+    
+    # Clean up temp file
+    Remove-Item $tempZip -Force -ErrorAction SilentlyContinue
+    
+    # Verify installation
+    $installed = Get-Module -ListAvailable -Name "PnP.PowerShell" | Select-Object -First 1
+    if ($installed) {
+        Write-Output "SUCCESS:Installed via direct download"
         exit 0
     }
-    
-    # Install the module
-    Install-Module -Name "PnP.PowerShell" -Scope CurrentUser -Force -AllowClobber -SkipPublisherCheck
-    Write-Output "SUCCESS"
 } catch {
-    Write-Error $_.Exception.Message
-    exit 1
+    Write-Host "Direct download failed: $($_.Exception.Message)"
 }
+
+Write-Host "FAILED:All installation methods failed"
+exit 1
 '''
     
     try:
         result = subprocess.run(
-            [ps_exe, "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+            [ps_exe, "-ExecutionPolicy", "Bypass", "-NoProfile", "-Command", ps_script],
             capture_output=True,
             text=True,
-            timeout=300  # 5 minutes for installation
+            timeout=600  # 10 minutes for installation
         )
         
-        if result.returncode == 0:
+        # Check if SUCCESS is in output
+        if "SUCCESS:" in result.stdout:
             print_success("PnP.PowerShell module installed successfully")
             return True
         else:
-            print_error(f"Failed to install PnP.PowerShell: {result.stderr}")
+            # Show the actual error
+            all_output = result.stdout + "\n" + result.stderr
+            print_warning("Automatic installation failed")
+            print()
+            
+            # Show what was tried
+            if result.stdout:
+                for line in result.stdout.split('\n'):
+                    if line.strip() and not line.startswith('SUCCESS'):
+                        print(f"    {line.strip()}")
+            
+            # Check if it's a permissions issue
+            if "administrator" in all_output.lower() or "access denied" in all_output.lower():
+                print()
+                print_info("This may require administrator privileges.")
+            
+            # Provide manual installation instructions
+            print()
+            print_info("Please install PnP.PowerShell manually:")
+            print_info("  Option 1 - Using PowerShell 7 (recommended):")
+            print_info("    1. Install PowerShell 7: winget install Microsoft.PowerShell")
+            print_info("    2. Open PowerShell 7 (pwsh)")
+            print_info("    3. Run: Install-Module -Name PnP.PowerShell -Force")
+            print()
+            print_info("  Option 2 - Using Windows PowerShell as Admin:")
+            print_info("    1. Open PowerShell as Administrator")
+            print_info("    2. Run: Install-Module -Name PnP.PowerShell -Force")
+            print()
+            print_info("  Option 3 - Using winget:")
+            print_info("    winget install --id=PnP.PowerShell -e")
             return False
     except subprocess.TimeoutExpired:
         print_error("Installation timed out")
@@ -1557,7 +1747,11 @@ try {
 
 
 def get_site_url_from_id(site_id: str, access_token: str) -> Optional[str]:
-    """Get the SharePoint site URL from site ID using Graph API."""
+    """Get the SharePoint site URL from site ID using Graph API.
+    
+    Note: Some special sites (like 'My workspace', OneDrive, etc.) may not have
+    accessible URLs via Graph API.
+    """
     try:
         site_url_req = f"https://graph.microsoft.com/v1.0/sites/{site_id}"
         req = urllib.request.Request(site_url_req)
@@ -1565,7 +1759,16 @@ def get_site_url_from_id(site_id: str, access_token: str) -> Optional[str]:
         
         with urllib.request.urlopen(req, timeout=30) as response:
             site_data = json.loads(response.read().decode())
-            return site_data.get("webUrl", "")
+            web_url = site_data.get("webUrl", "")
+            
+            # Validate the URL looks like a SharePoint site URL
+            if web_url and "sharepoint.com" in web_url:
+                return web_url
+            return None
+    except urllib.error.HTTPError as e:
+        # 403 = Access denied, 404 = Not found
+        # These are expected for special sites like OneDrive
+        return None
     except Exception:
         return None
 
@@ -1574,8 +1777,11 @@ def get_site_recycle_bin_items_pnp(site_url: str) -> List[Dict[str, Any]]:
     """Get all items from a site's recycle bin using PnP PowerShell.
     
     This properly authenticates to SharePoint and can access the recycle bin.
+    Prefers PowerShell 7 (pwsh) since PnP.PowerShell is typically installed there.
     """
-    ps_exe = get_powershell_executable()
+    # Prefer PowerShell 7 (pwsh) since that's where PnP is typically installed
+    pwsh = get_pwsh_executable()
+    ps_exe = pwsh if pwsh else get_powershell_executable()
     items = []
     
     ps_script = f'''
@@ -1652,17 +1858,30 @@ def get_site_recycle_bin_count(site_id: str, access_token: str) -> int:
     return 0
 
 
-def purge_site_recycle_bin_pnp(site_url: str, first_stage_only: bool = False) -> Tuple[int, int]:
+def purge_site_recycle_bin_pnp(site_url: str, first_stage_only: bool = False, client_id: Optional[str] = None) -> Tuple[int, int]:
     """Permanently delete all items from a site's recycle bin using PnP PowerShell.
     
     Args:
         site_url: The SharePoint site URL
         first_stage_only: If True, only clear first-stage recycle bin.
                          If False, clear both first and second stage.
+        client_id: Optional Azure AD app client ID for authentication.
+                  If provided, uses -Interactive with -ClientId.
+                  If not provided, falls back to -DeviceLogin.
     
     Returns (success_count, fail_count).
+    
+    Prefers PowerShell 7 (pwsh) since PnP.PowerShell is typically installed there.
     """
-    ps_exe = get_powershell_executable()
+    # Prefer PowerShell 7 (pwsh) since that's where PnP is typically installed
+    pwsh = get_pwsh_executable()
+    ps_exe = pwsh if pwsh else get_powershell_executable()
+    
+    # Try to get client_id from app config if not provided
+    if not client_id:
+        app_config = load_app_config()
+        if app_config:
+            client_id = app_config.get("app_id")
     
     # Build the PowerShell script
     second_stage_cmd = "" if first_stage_only else """
@@ -1677,13 +1896,32 @@ def purge_site_recycle_bin_pnp(site_url: str, first_stage_only: bool = False) ->
     $totalCount = $totalCount + $secondStageCount
 """
     
+    # Build connection command based on whether we have a client_id
+    if client_id:
+        connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -Interactive -ClientId "{client_id}" -ErrorAction Stop'
+        auth_method = "Interactive with registered app"
+    else:
+        connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -DeviceLogin -ErrorAction Stop'
+        auth_method = "Device Login"
+    
     ps_script = f'''
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 try {{
-    # Connect to SharePoint site (will prompt for credentials if needed)
+    # Connect to SharePoint site using {auth_method}
     Write-Host "Connecting to SharePoint site..."
-    Connect-PnPOnline -Url "{site_url}" -Interactive -ErrorAction Stop
-    Write-Host "Connected successfully!"
+    Write-Host "Authentication method: {auth_method}"
+    
+    # Try primary authentication method
+    try {{
+        {connect_cmd}
+        Write-Host "Connected successfully!"
+    }} catch {{
+        # Fall back to Device Login if Interactive fails
+        Write-Host "Primary auth failed, trying Device Login..."
+        Connect-PnPOnline -Url "{site_url}" -DeviceLogin -ErrorAction Stop
+        Write-Host "Connected via Device Login!"
+    }}
     
     # Get count of items in recycle bin first
     $recycleBinItems = Get-PnPRecycleBinItem -ErrorAction SilentlyContinue
@@ -1713,21 +1951,46 @@ try {{
 '''
     
     try:
-        result = subprocess.run(
-            [ps_exe, "-ExecutionPolicy", "Bypass", "-Command", ps_script],
-            capture_output=True,
-            text=True,
-            timeout=300  # 5 minutes for large recycle bins
+        # Create a temp file to capture the result
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as result_file:
+            result_path = result_file.name
+        
+        # Modify script to write result to file
+        ps_script_with_output = ps_script.replace(
+            'Write-Output "SUCCESS:$totalCount"',
+            f'Write-Output "SUCCESS:$totalCount" | Out-File -FilePath "{result_path}" -Encoding UTF8'
         )
         
+        # Run WITHOUT capture_output so browser can open for interactive auth
+        # This allows the user to see the authentication prompts
+        print_info("    Opening browser for authentication...")
+        result = subprocess.run(
+            [ps_exe, "-ExecutionPolicy", "Bypass", "-NoProfile", "-Command", ps_script_with_output],
+            timeout=300,  # 5 minutes for large recycle bins
+            # Don't capture output - let it go to console so user can see auth prompts
+        )
+        
+        # Read result from temp file
+        try:
+            with open(result_path, 'r', encoding='utf-8') as f:
+                output = f.read().strip()
+            os.unlink(result_path)  # Clean up temp file
+        except Exception:
+            output = ""
+            try:
+                os.unlink(result_path)
+            except Exception:
+                pass
+        
         if result.returncode == 0:
-            # Parse the success count
-            for line in result.stdout.split('\n'):
-                if line.startswith("SUCCESS:"):
-                    count = int(line.split(":")[1])
-                    return count, 0
+            # Parse the success count from file
+            if output.startswith("SUCCESS:"):
+                count = int(output.split(":")[1].strip())
+                return count, 0
             return 0, 0
         else:
+            print_error(f"  PnP PowerShell failed (exit code: {result.returncode})")
             return 0, 1
             
     except subprocess.TimeoutExpired:

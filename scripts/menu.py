@@ -429,6 +429,9 @@ MICROSOFT_GRAPH_API_ID = "00000003-0000-0000-c000-000000000000"
 # Office 365 Exchange Online API ID (for EWS permissions)
 EXCHANGE_ONLINE_API_ID = "00000002-0000-0ff1-ce00-000000000000"
 
+# SharePoint Online API ID (for PnP PowerShell delegated permissions)
+SHAREPOINT_ONLINE_API_ID = "00000003-0000-0ff1-ce00-000000000000"
+
 # Microsoft Graph API permission IDs (Application permissions)
 # These are the GUIDs for the specific permissions we need
 GRAPH_PERMISSION_IDS = {
@@ -449,6 +452,19 @@ GRAPH_PERMISSION_IDS = {
 EWS_PERMISSION_IDS = {
     # full_access_as_app - Full access to all mailboxes via EWS
     "full_access_as_app": "dc890d15-9560-4a4c-9b7f-a736ec74ec40"
+}
+
+# SharePoint Online API permission IDs (Delegated permissions for PnP PowerShell)
+# These are required for PnP PowerShell interactive authentication
+SHAREPOINT_PERMISSION_IDS = {
+    # AllSites.FullControl - Full control of all site collections (delegated)
+    "AllSites.FullControl": "56680e0d-d2a3-4ae1-80d8-3c4f2c4b5f4c",
+    # AllSites.Manage - Create, edit, and delete items and lists (delegated)
+    "AllSites.Manage": "b3f70a70-8a4b-4f95-9573-d71c496a53f4",
+    # AllSites.Write - Edit or delete items in all site collections (delegated)
+    "AllSites.Write": "640ddd16-e5b7-4d71-9690-3f4022f5acd3",
+    # AllSites.Read - Read items in all site collections (delegated)
+    "AllSites.Read": "4e0d77b0-96ba-4398-af14-3baa780278f4",
 }
 
 # Required permissions for SharePoint and Email operations
@@ -705,6 +721,24 @@ def create_custom_app() -> Optional[Dict[str, Any]]:
                 print(f"    {Colors.GREEN}✓{Colors.NC} Added: EWS.{perm_name}")
             else:
                 print(f"    {Colors.YELLOW}⚠{Colors.NC} EWS.{perm_name}: {add_perm_result.stderr.strip()[:50]}")
+        
+        # Add SharePoint Online API permissions (Delegated - for PnP PowerShell)
+        print(f"  {Colors.DIM}Adding SharePoint Online permissions for PnP PowerShell...{Colors.NC}")
+        for perm_name, perm_id in SHAREPOINT_PERMISSION_IDS.items():
+            add_perm_result = subprocess.run(
+                [az_path, "ad", "app", "permission", "add",
+                 "--id", app_id,
+                 "--api", SHAREPOINT_ONLINE_API_ID,
+                 "--api-permissions", f"{perm_id}=Scope"],  # Scope = Delegated permission
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if add_perm_result.returncode == 0:
+                print(f"    {Colors.GREEN}✓{Colors.NC} Added: SharePoint.{perm_name}")
+            else:
+                print(f"    {Colors.YELLOW}⚠{Colors.NC} SharePoint.{perm_name}: {add_perm_result.stderr.strip()[:50]}")
         
         # Step 3: Create a service principal for the app
         print(f"  {Colors.DIM}Step 3/4: Creating service principal...{Colors.NC}")
@@ -1097,6 +1131,41 @@ def update_app_permissions() -> bool:
                     print(f"    {Colors.YELLOW}⚠{Colors.NC} EWS.{perm_name}: {add_perm_result.stderr.strip()[:50]}")
         except Exception as e:
             print(f"    {Colors.RED}✗{Colors.NC} EWS.{perm_name}: {str(e)[:50]}")
+    
+    # Add SharePoint Online API permissions (Delegated - for PnP PowerShell)
+    print()
+    print(f"  {Colors.WHITE}SharePoint Online API permissions (for PnP PowerShell):{Colors.NC}")
+    
+    for perm_name, perm_id in SHAREPOINT_PERMISSION_IDS.items():
+        # Check if permission already exists
+        if perm_id in existing_perm_ids:
+            print(f"    {Colors.DIM}○ Already exists: SharePoint.{perm_name}{Colors.NC}")
+            skipped_count += 1
+            continue
+        
+        try:
+            add_perm_result = subprocess.run(
+                [az_path, "ad", "app", "permission", "add",
+                 "--id", app_id,
+                 "--api", SHAREPOINT_ONLINE_API_ID,
+                 "--api-permissions", f"{perm_id}=Scope"],  # Scope = Delegated permission
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if add_perm_result.returncode == 0:
+                print(f"    {Colors.GREEN}✓{Colors.NC} Added: SharePoint.{perm_name}")
+                added_count += 1
+            else:
+                # Check if permission already exists (fallback check)
+                if "already exists" in add_perm_result.stderr.lower() or "already been added" in add_perm_result.stderr.lower():
+                    print(f"    {Colors.DIM}○ Already exists: SharePoint.{perm_name}{Colors.NC}")
+                    skipped_count += 1
+                else:
+                    print(f"    {Colors.YELLOW}⚠{Colors.NC} SharePoint.{perm_name}: {add_perm_result.stderr.strip()[:50]}")
+        except Exception as e:
+            print(f"    {Colors.RED}✗{Colors.NC} SharePoint.{perm_name}: {str(e)[:50]}")
     
     print()
     print(f"  {Colors.WHITE}Summary:{Colors.NC}")
@@ -1496,6 +1565,179 @@ def install_exchangelib() -> bool:
         return False
 
 
+def get_pwsh_executable() -> Optional[str]:
+    """Get PowerShell 7 (pwsh) executable path if available."""
+    pwsh_paths = [
+        "pwsh",  # In PATH
+        r"C:\Program Files\PowerShell\7\pwsh.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe"),
+    ]
+    
+    for path in pwsh_paths:
+        try:
+            result = subprocess.run(
+                [path, "-Version"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                return path
+        except Exception:
+            continue
+    
+    return None
+
+
+def get_powershell_executable() -> str:
+    """Get the PowerShell executable path."""
+    # Try pwsh (PowerShell 7) first
+    pwsh = get_pwsh_executable()
+    if pwsh:
+        return pwsh
+    
+    # Fall back to Windows PowerShell
+    if os.name == 'nt':
+        return "powershell.exe"
+    return "pwsh"
+
+
+def check_pnp_module_installed() -> tuple:
+    """Check if PnP PowerShell module is installed and return (installed, version)."""
+    ps_exe = get_powershell_executable()
+    
+    try:
+        result = subprocess.run(
+            [ps_exe, "-ExecutionPolicy", "Bypass", "-NoProfile", "-Command",
+             "if (Get-Module -ListAvailable -Name 'PnP.PowerShell') { "
+             "$m = Get-Module -ListAvailable -Name 'PnP.PowerShell' | Select-Object -First 1; "
+             "Write-Output \"INSTALLED:$($m.Version)\" } else { Write-Output 'NOT_INSTALLED' }"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        output = result.stdout.strip()
+        if output.startswith("INSTALLED:"):
+            version = output.replace("INSTALLED:", "").strip()
+            return True, version
+        return False, None
+    except Exception:
+        return False, None
+
+
+def install_pnp_module() -> bool:
+    """Install PnP PowerShell module."""
+    # Prefer PowerShell 7 (pwsh) for better module management
+    pwsh = get_pwsh_executable()
+    ps_exe = pwsh if pwsh else get_powershell_executable()
+    
+    if pwsh:
+        print(f"  {Colors.YELLOW}Installing PnP.PowerShell module using PowerShell 7...{Colors.NC}")
+    else:
+        print(f"  {Colors.YELLOW}Installing PnP.PowerShell module using Windows PowerShell...{Colors.NC}")
+    print(f"  {Colors.DIM}This may take a few minutes...{Colors.NC}")
+    
+    # PowerShell script for installation - handles PowerShellGet issues
+    ps_script = '''
+$ErrorActionPreference = "Continue"
+$ProgressPreference = "SilentlyContinue"
+
+# Ensure TLS 1.2 is used
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+# Check if already installed
+$existing = Get-Module -ListAvailable -Name "PnP.PowerShell" | Select-Object -First 1
+if ($existing) {
+    Write-Output "SUCCESS:Already installed"
+    exit 0
+}
+
+# First, ensure NuGet provider is installed
+try {
+    $nuget = Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue | Where-Object { $_.Version -ge [Version]"2.8.5.201" }
+    if (-not $nuget) {
+        Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser -ErrorAction Stop | Out-Null
+    }
+} catch { }
+
+# Set PSGallery as trusted
+try {
+    Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
+} catch { }
+
+# Method 1: Standard Install-Module
+try {
+    Install-Module -Name "PnP.PowerShell" -Repository PSGallery -Scope CurrentUser -Force -AllowClobber -AcceptLicense -ErrorAction Stop
+    Write-Output "SUCCESS:Installed"
+    exit 0
+} catch { }
+
+# Method 2: Try with SkipPublisherCheck
+try {
+    Install-Module -Name "PnP.PowerShell" -Repository PSGallery -Scope CurrentUser -Force -AllowClobber -SkipPublisherCheck -ErrorAction Stop
+    Write-Output "SUCCESS:Installed"
+    exit 0
+} catch { }
+
+# Method 3: Try updating PowerShellGet first
+try {
+    Import-Module PackageManagement -Force -ErrorAction SilentlyContinue
+    Install-Module -Name PowerShellGet -Force -AllowClobber -Scope CurrentUser -ErrorAction SilentlyContinue
+    Install-Module -Name "PnP.PowerShell" -Repository PSGallery -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+    Write-Output "SUCCESS:Installed"
+    exit 0
+} catch { }
+
+# Method 4: Direct download from PSGallery
+try {
+    $modulePath = Join-Path $env:USERPROFILE "Documents\\WindowsPowerShell\\Modules\\PnP.PowerShell"
+    if (-not (Test-Path $modulePath)) {
+        New-Item -ItemType Directory -Path $modulePath -Force | Out-Null
+    }
+    Save-Module -Name "PnP.PowerShell" -Path (Split-Path $modulePath -Parent) -Force -ErrorAction Stop
+    Write-Output "SUCCESS:Installed"
+    exit 0
+} catch { }
+
+# Method 5: PSResourceGet for PowerShell 7
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+    try {
+        Install-PSResource -Name "PnP.PowerShell" -Scope CurrentUser -TrustRepository -ErrorAction Stop
+        Write-Output "SUCCESS:Installed"
+        exit 0
+    } catch { }
+}
+
+Write-Output "FAILED"
+exit 1
+'''
+    
+    try:
+        result = subprocess.run(
+            [ps_exe, "-ExecutionPolicy", "Bypass", "-NoProfile", "-Command", ps_script],
+            capture_output=True,
+            text=True,
+            timeout=600  # 10 minutes for installation
+        )
+        
+        if "SUCCESS:" in result.stdout:
+            print(f"  {Colors.GREEN}✓{Colors.NC} PnP.PowerShell module installed successfully")
+            return True
+        else:
+            print(f"  {Colors.RED}✗{Colors.NC} Automatic installation failed")
+            print(f"  {Colors.DIM}  Please install manually:{Colors.NC}")
+            print(f"  {Colors.DIM}  1. Open PowerShell as Administrator{Colors.NC}")
+            print(f"  {Colors.DIM}  2. Run: Install-Module -Name PnP.PowerShell -Force{Colors.NC}")
+            return False
+    except subprocess.TimeoutExpired:
+        print(f"  {Colors.RED}✗{Colors.NC} Installation timed out")
+        return False
+    except Exception as e:
+        print(f"  {Colors.RED}✗{Colors.NC} Failed to install PnP.PowerShell: {e}")
+        return False
+
+
 def check_prerequisites(auto_install: bool = False) -> dict:
     """Check all prerequisites and optionally install missing ones."""
     results = {
@@ -1504,6 +1746,7 @@ def check_prerequisites(auto_install: bool = False) -> dict:
         "terraform": {"installed": False, "version": None},
         "pyyaml": {"installed": False, "version": None},
         "exchangelib": {"installed": False, "version": None},
+        "pnp_powershell": {"installed": False, "version": None},
         "azure_login": {"logged_in": False, "account_info": None},
         "graph_permissions": {"has_permissions": False, "error": None}
     }
@@ -1555,6 +1798,22 @@ def check_prerequisites(auto_install: bool = False) -> dict:
             results["exchangelib"]["installed"] = exchangelib_installed
             results["exchangelib"]["version"] = exchangelib_version
     
+    # Check PnP.PowerShell (required for site recycle bin operations - Windows only)
+    if os.name == 'nt':  # Windows only
+        pnp_installed, pnp_version = check_pnp_module_installed()
+        if pnp_installed:
+            results["pnp_powershell"]["installed"] = True
+            results["pnp_powershell"]["version"] = pnp_version
+        elif auto_install:
+            if install_pnp_module():
+                pnp_installed, pnp_version = check_pnp_module_installed()
+                results["pnp_powershell"]["installed"] = pnp_installed
+                results["pnp_powershell"]["version"] = pnp_version
+    else:
+        # On non-Windows, mark as N/A
+        results["pnp_powershell"]["installed"] = None  # N/A
+        results["pnp_powershell"]["version"] = "N/A (Windows only)"
+    
     return results
 
 def display_prerequisites_status(results: dict) -> None:
@@ -1590,6 +1849,16 @@ def display_prerequisites_status(results: dict) -> None:
         print(f"  {Colors.GREEN}✓{Colors.NC} exchangelib: {results['exchangelib']['version']} (for EWS email timestamps)")
     else:
         print(f"  {Colors.YELLOW}⚠{Colors.NC} exchangelib: Not installed (optional - enables proper email timestamps)")
+    
+    # PnP.PowerShell (for site recycle bin operations - Windows only)
+    pnp_result = results.get("pnp_powershell", {})
+    if pnp_result.get("installed") is None:
+        # N/A on non-Windows
+        print(f"  {Colors.DIM}─{Colors.NC} PnP.PowerShell: N/A (Windows only)")
+    elif pnp_result.get("installed"):
+        print(f"  {Colors.GREEN}✓{Colors.NC} PnP.PowerShell: {pnp_result['version']} (for site recycle bin)")
+    else:
+        print(f"  {Colors.YELLOW}⚠{Colors.NC} PnP.PowerShell: Not installed (required for site recycle bin purge)")
     
     # Azure Login
     if results["azure_cli"]["installed"]:
@@ -1628,9 +1897,13 @@ def display_prerequisites_status(results: dict) -> None:
     )
     pyyaml_ok = results.get("pyyaml", {}).get("installed", False)
     
+    # PnP.PowerShell check (only on Windows, None means N/A)
+    pnp_result = results.get("pnp_powershell", {})
+    pnp_ok = pnp_result.get("installed") is True or pnp_result.get("installed") is None  # True or N/A
+    
     graph_ok = results.get("graph_permissions", {}).get("has_permissions", False)
     
-    if all_installed and pyyaml_ok and results["azure_login"]["logged_in"] and graph_ok:
+    if all_installed and pyyaml_ok and pnp_ok and results["azure_login"]["logged_in"] and graph_ok:
         print(f"  {Colors.GREEN}{Colors.BOLD}✓ All prerequisites met! Ready to proceed.{Colors.NC}")
     elif all_installed and results["azure_login"]["logged_in"] and not graph_ok:
         print(f"  {Colors.YELLOW}{Colors.BOLD}⚠ Graph API permissions missing.{Colors.NC}")
@@ -1638,6 +1911,9 @@ def display_prerequisites_status(results: dict) -> None:
     elif all_installed and not pyyaml_ok:
         print(f"  {Colors.YELLOW}{Colors.BOLD}⚠ PyYAML not installed (required for email population).{Colors.NC}")
         print(f"  {Colors.DIM}  Run 'pip install pyyaml' or select auto-install below.{Colors.NC}")
+    elif all_installed and not pnp_ok:
+        print(f"  {Colors.YELLOW}{Colors.BOLD}⚠ PnP.PowerShell not installed (required for site recycle bin purge).{Colors.NC}")
+        print(f"  {Colors.DIM}  Installation will be offered below.{Colors.NC}")
     elif all_installed:
         print(f"  {Colors.YELLOW}{Colors.BOLD}⚠ Tools installed but not logged into Azure.{Colors.NC}")
         print(f"  {Colors.DIM}  Run 'az login' to authenticate.{Colors.NC}")
@@ -1763,6 +2039,45 @@ def run_prerequisites_check_menu() -> None:
             else:
                 print_error("Failed to install exchangelib. Try manually: pip install exchangelib")
                 print_info("The tool will use Graph API fallback (with limitations).")
+    
+    # Check PnP.PowerShell and offer to install if missing (Windows only)
+    if os.name == 'nt':  # Windows only
+        pnp_status = results.get("pnp_powershell", {})
+        if pnp_status.get("installed") is False:  # Explicitly False, not None (N/A)
+            print()
+            print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
+            print(f"  {Colors.WHITE}{Colors.BOLD}PnP.PowerShell Installation{Colors.NC}")
+            print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
+            print()
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} PnP.PowerShell is required for site recycle bin purge operations.")
+            print(f"  {Colors.DIM}  Without it, you cannot permanently delete items from site recycle bins.{Colors.NC}")
+            print()
+            print(f"  {Colors.WHITE}Would you like to install PnP.PowerShell now?{Colors.NC}")
+            print()
+            print(f"    {Colors.GREEN}[Y]{Colors.NC} Yes, install PnP.PowerShell automatically")
+            print(f"    {Colors.RED}[N]{Colors.NC} No, I'll install it later")
+            print()
+            
+            choice = input(f"  {Colors.YELLOW}Choice:{Colors.NC} ").strip().lower()
+            
+            if choice == 'y':
+                print()
+                if install_pnp_module():
+                    print_success("PnP.PowerShell installed successfully!")
+                    results["pnp_powershell"] = {"installed": True, "version": "installed"}
+                else:
+                    print_error("Automatic installation failed.")
+                    print()
+                    print_info("Please install PnP.PowerShell manually using one of these methods:")
+                    print_info("  Option 1 - PowerShell 7 (recommended):")
+                    print_info("    winget install Microsoft.PowerShell")
+                    print_info("    pwsh -Command \"Install-Module -Name PnP.PowerShell -Force\"")
+                    print()
+                    print_info("  Option 2 - Windows PowerShell as Admin:")
+                    print_info("    Install-Module -Name PnP.PowerShell -Force")
+                    print()
+                    print_info("  Option 3 - Using winget:")
+                    print_info("    winget install --id=PnP.PowerShell -e")
     
     # Check Graph API permissions and automatically grant consent if needed
     if results["azure_login"]["logged_in"]:
