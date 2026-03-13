@@ -741,6 +741,24 @@ def create_custom_app() -> Optional[Dict[str, Any]]:
             else:
                 print(f"    {Colors.YELLOW}⚠{Colors.NC} SharePoint.{perm_name}: {add_perm_result.stderr.strip()[:50]}")
         
+        # Add public client redirect URIs for PnP PowerShell interactive auth
+        print(f"  {Colors.DIM}Adding public client redirect URIs for PnP PowerShell...{Colors.NC}")
+        public_uris = [
+            "http://localhost",
+            "https://login.microsoftonline.com/common/oauth2/nativeclient",
+            "urn:ietf:wg:oauth:2.0:oob"
+        ]
+        update_result = subprocess.run(
+            [az_path, "ad", "app", "update", "--id", app_id, "--public-client-redirect-uris"] + public_uris,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if update_result.returncode == 0:
+            print(f"    {Colors.GREEN}✓{Colors.NC} Added public client redirect URIs")
+        else:
+            print(f"    {Colors.YELLOW}⚠{Colors.NC} Could not add redirect URIs: {update_result.stderr.strip()[:50]}")
+        
         # Step 3: Create a service principal for the app
         print(f"  {Colors.DIM}Step 3/4: Creating service principal...{Colors.NC}")
         
@@ -1007,53 +1025,61 @@ def delete_custom_app() -> bool:
 def update_app_redirect_uris(app_id: str) -> bool:
     """Update redirect URIs on an existing app registration.
     
-    Adds http://localhost for PnP PowerShell interactive authentication.
+    Adds public client redirect URI for PnP PowerShell interactive authentication.
+    PnP PowerShell requires the app to be configured as a public client (mobile/desktop app).
     """
     az_path = find_azure_cli_path()
     if not az_path:
         return False
     
     try:
-        # Get current redirect URIs
+        # Check if public client redirect URIs are already configured
         app_result = subprocess.run(
-            [az_path, "ad", "app", "show", "--id", app_id, "--query", "web.redirectUris", "-o", "json"],
+            [az_path, "ad", "app", "show", "--id", app_id, "--query", "publicClient.redirectUris", "-o", "json"],
             capture_output=True,
             text=True,
             timeout=30
         )
         
-        current_uris = []
+        current_public_uris = []
         if app_result.returncode == 0 and app_result.stdout.strip():
             try:
-                current_uris = json.loads(app_result.stdout) or []
+                current_public_uris = json.loads(app_result.stdout) or []
             except json.JSONDecodeError:
-                current_uris = []
+                current_public_uris = []
         
-        # Required URIs for PnP PowerShell
-        required_uris = ["https://portal.azure.com", "http://localhost"]
+        # Required public client redirect URIs for PnP PowerShell
+        # These are the standard URIs used by PnP PowerShell for interactive auth
+        required_public_uris = [
+            "http://localhost",
+            "https://login.microsoftonline.com/common/oauth2/nativeclient",
+            "urn:ietf:wg:oauth:2.0:oob"
+        ]
         
         # Check if we need to add any URIs
-        uris_to_add = [uri for uri in required_uris if uri not in current_uris]
+        uris_to_add = [uri for uri in required_public_uris if uri not in current_public_uris]
         
         if not uris_to_add:
-            return True  # All URIs already present
+            print(f"  {Colors.GREEN}✓{Colors.NC} Public client redirect URIs already configured")
+            return True
         
         # Add missing URIs
-        new_uris = current_uris + uris_to_add
+        new_uris = current_public_uris + uris_to_add
         
-        # Update the app with new redirect URIs
+        # Update the app with public client redirect URIs
+        # This configures the app as a "Mobile and desktop applications" platform
         update_result = subprocess.run(
-            [az_path, "ad", "app", "update", "--id", app_id, "--web-redirect-uris"] + new_uris,
+            [az_path, "ad", "app", "update", "--id", app_id, "--public-client-redirect-uris"] + new_uris,
             capture_output=True,
             text=True,
             timeout=30
         )
         
         if update_result.returncode == 0:
-            print(f"  {Colors.GREEN}✓{Colors.NC} Added redirect URI: http://localhost (for PnP PowerShell)")
+            print(f"  {Colors.GREEN}✓{Colors.NC} Added public client redirect URIs for PnP PowerShell")
             return True
         else:
-            print(f"  {Colors.YELLOW}⚠{Colors.NC} Could not update redirect URIs: {update_result.stderr.strip()[:50]}")
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} Could not update redirect URIs: {update_result.stderr.strip()[:80]}")
             return False
             
     except Exception as e:
