@@ -467,6 +467,17 @@ SHAREPOINT_PERMISSION_IDS = {
     "AllSites.Read": "4e0d77b0-96ba-4398-af14-3baa780278f4",
 }
 
+# SharePoint Online API Application permission IDs (for app-only/client credentials access)
+# These are required for REST API access without user context
+SHAREPOINT_APP_PERMISSION_IDS = {
+    # Sites.FullControl.All - Full control of all site collections (application)
+    "Sites.FullControl.All": "678536fe-1083-478a-9c59-b99265e6b0d3",
+    # Sites.ReadWrite.All - Read and write items in all site collections (application)
+    "Sites.ReadWrite.All": "9bff6588-13f2-4c48-bbf2-ddab62256b36",
+    # Sites.Read.All - Read items in all site collections (application)
+    "Sites.Read.All": "d13f72ca-a275-4b96-b789-48ebcc4da984",
+}
+
 # Required permissions for SharePoint and Email operations
 REQUIRED_GRAPH_PERMISSIONS = [
     "Sites.Read.All",
@@ -724,7 +735,7 @@ def create_custom_app() -> Optional[Dict[str, Any]]:
                 print(f"    {Colors.YELLOW}⚠{Colors.NC} EWS.{perm_name}: {add_perm_result.stderr.strip()[:50]}")
         
         # Add SharePoint Online API permissions (Delegated - for PnP PowerShell)
-        print(f"  {Colors.DIM}Adding SharePoint Online permissions for PnP PowerShell...{Colors.NC}")
+        print(f"  {Colors.DIM}Adding SharePoint Online delegated permissions for PnP PowerShell...{Colors.NC}")
         for perm_name, perm_id in SHAREPOINT_PERMISSION_IDS.items():
             add_perm_result = subprocess.run(
                 [az_path, "ad", "app", "permission", "add",
@@ -737,7 +748,25 @@ def create_custom_app() -> Optional[Dict[str, Any]]:
             )
             
             if add_perm_result.returncode == 0:
-                print(f"    {Colors.GREEN}✓{Colors.NC} Added: SharePoint.{perm_name}")
+                print(f"    {Colors.GREEN}✓{Colors.NC} Added: SharePoint.{perm_name} (delegated)")
+            else:
+                print(f"    {Colors.YELLOW}⚠{Colors.NC} SharePoint.{perm_name}: {add_perm_result.stderr.strip()[:50]}")
+        
+        # Add SharePoint Online application permissions (for REST API app-only access)
+        print(f"  {Colors.DIM}Adding SharePoint Online application permissions for REST API...{Colors.NC}")
+        for perm_name, perm_id in SHAREPOINT_APP_PERMISSION_IDS.items():
+            add_perm_result = subprocess.run(
+                [az_path, "ad", "app", "permission", "add",
+                 "--id", app_id,
+                 "--api", SHAREPOINT_ONLINE_API_ID,
+                 "--api-permissions", f"{perm_id}=Role"],  # Role = Application permission
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if add_perm_result.returncode == 0:
+                print(f"    {Colors.GREEN}✓{Colors.NC} Added: SharePoint.{perm_name} (application)")
             else:
                 print(f"    {Colors.YELLOW}⚠{Colors.NC} SharePoint.{perm_name}: {add_perm_result.stderr.strip()[:50]}")
         
@@ -758,6 +787,19 @@ def create_custom_app() -> Optional[Dict[str, Any]]:
             print(f"    {Colors.GREEN}✓{Colors.NC} Added public client redirect URIs")
         else:
             print(f"    {Colors.YELLOW}⚠{Colors.NC} Could not add redirect URIs: {update_result.stderr.strip()[:50]}")
+        
+        # Enable public client flows (required for PnP PowerShell -Interactive without client_secret)
+        print(f"  {Colors.DIM}Enabling public client flows for interactive auth...{Colors.NC}")
+        public_client_result = subprocess.run(
+            [az_path, "ad", "app", "update", "--id", app_id, "--is-fallback-public-client", "true"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if public_client_result.returncode == 0:
+            print(f"    {Colors.GREEN}✓{Colors.NC} Enabled public client flows")
+        else:
+            print(f"    {Colors.YELLOW}⚠{Colors.NC} Could not enable public client flows: {public_client_result.stderr.strip()[:50]}")
         
         # Step 3: Create a service principal for the app
         print(f"  {Colors.DIM}Step 3/4: Creating service principal...{Colors.NC}")
@@ -860,6 +902,90 @@ def grant_consent_for_custom_app(app_id: str) -> bool:
         return False
     except Exception as e:
         print_error(f"Failed to grant consent: {e}")
+        return False
+
+def regenerate_client_secret() -> bool:
+    """Regenerate the client secret for the custom app.
+    
+    This is needed for SharePoint REST API access which requires
+    client credentials flow with a client secret.
+    """
+    az_path = find_azure_cli_path()
+    if not az_path:
+        print_error("Azure CLI not found")
+        return False
+    
+    # Load existing app config
+    app_config = load_app_config()
+    if not app_config:
+        # Try to find existing app
+        existing_app = find_existing_app()
+        if not existing_app:
+            print_error("No app registration found. Please create one first.")
+            return False
+        app_id = existing_app.get("appId")
+        app_config = {
+            "app_id": app_id,
+            "object_id": existing_app.get("id"),
+            "display_name": existing_app.get("displayName", CUSTOM_APP_NAME),
+            "tenant_id": get_tenant_id()
+        }
+    else:
+        app_id = app_config.get("app_id")
+    
+    if not app_id:
+        print_error("App ID not found")
+        return False
+    
+    print()
+    print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+    print(f"  {Colors.WHITE}{Colors.BOLD}Regenerating Client Secret{Colors.NC}")
+    print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+    print()
+    print(f"  {Colors.WHITE}App ID:{Colors.NC} {app_id}")
+    print()
+    
+    try:
+        print(f"  {Colors.DIM}Creating new client secret...{Colors.NC}")
+        
+        secret_result = subprocess.run(
+            [az_path, "ad", "app", "credential", "reset",
+             "--id", app_id,
+             "--append",
+             "--display-name", f"SharePoint-Tool-Secret-{int(__import__('time').time())}",
+             "--years", "1",
+             "-o", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if secret_result.returncode == 0:
+            secret_data = json.loads(secret_result.stdout)
+            client_secret = secret_data.get("password")
+            
+            if client_secret:
+                # Update the app config with the new secret
+                app_config["client_secret"] = client_secret
+                save_app_config(app_config)
+                
+                print(f"  {Colors.GREEN}✓{Colors.NC} Client secret created successfully!")
+                print()
+                print(f"  {Colors.DIM}The secret has been saved to the app configuration.{Colors.NC}")
+                print(f"  {Colors.DIM}SharePoint REST API access should now work.{Colors.NC}")
+                return True
+            else:
+                print_error("Secret was created but password not returned")
+                return False
+        else:
+            print_error(f"Failed to create secret: {secret_result.stderr.strip()[:100]}")
+            return False
+            
+    except subprocess.TimeoutExpired:
+        print_error("Command timed out")
+        return False
+    except Exception as e:
+        print_error(f"Failed to create secret: {e}")
         return False
 
 def open_consent_url_for_custom_app(app_id: str) -> bool:
@@ -1061,26 +1187,52 @@ def update_app_redirect_uris(app_id: str) -> bool:
         
         if not uris_to_add:
             print(f"  {Colors.GREEN}✓{Colors.NC} Public client redirect URIs already configured")
-            return True
+        else:
+            # Add missing URIs
+            new_uris = current_public_uris + uris_to_add
+            
+            # Update the app with public client redirect URIs
+            # This configures the app as a "Mobile and desktop applications" platform
+            update_result = subprocess.run(
+                [az_path, "ad", "app", "update", "--id", app_id, "--public-client-redirect-uris"] + new_uris,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if update_result.returncode == 0:
+                print(f"  {Colors.GREEN}✓{Colors.NC} Added public client redirect URIs for PnP PowerShell")
+            else:
+                print(f"  {Colors.YELLOW}⚠{Colors.NC} Could not update redirect URIs: {update_result.stderr.strip()[:80]}")
+                return False
         
-        # Add missing URIs
-        new_uris = current_public_uris + uris_to_add
-        
-        # Update the app with public client redirect URIs
-        # This configures the app as a "Mobile and desktop applications" platform
-        update_result = subprocess.run(
-            [az_path, "ad", "app", "update", "--id", app_id, "--public-client-redirect-uris"] + new_uris,
+        # Always check and enable public client flows (required for PnP PowerShell -Interactive without client_secret)
+        # This allows the app to be used without a client_secret for interactive authentication
+        # First check if it's already enabled
+        check_result = subprocess.run(
+            [az_path, "ad", "app", "show", "--id", app_id, "--query", "isFallbackPublicClient", "-o", "tsv"],
             capture_output=True,
             text=True,
             timeout=30
         )
         
-        if update_result.returncode == 0:
-            print(f"  {Colors.GREEN}✓{Colors.NC} Added public client redirect URIs for PnP PowerShell")
-            return True
+        is_public_client = check_result.returncode == 0 and check_result.stdout.strip().lower() == "true"
+        
+        if is_public_client:
+            print(f"  {Colors.GREEN}✓{Colors.NC} Public client flows already enabled")
         else:
-            print(f"  {Colors.YELLOW}⚠{Colors.NC} Could not update redirect URIs: {update_result.stderr.strip()[:80]}")
-            return False
+            public_client_result = subprocess.run(
+                [az_path, "ad", "app", "update", "--id", app_id, "--is-fallback-public-client", "true"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if public_client_result.returncode == 0:
+                print(f"  {Colors.GREEN}✓{Colors.NC} Enabled public client flows for interactive auth")
+            else:
+                print(f"  {Colors.YELLOW}⚠{Colors.NC} Could not enable public client flows: {public_client_result.stderr.strip()[:50]}")
+        
+        return True
             
     except Exception as e:
         print(f"  {Colors.YELLOW}⚠{Colors.NC} Could not update redirect URIs: {str(e)[:50]}")
@@ -1221,12 +1373,12 @@ def update_app_permissions() -> bool:
     
     # Add SharePoint Online API permissions (Delegated - for PnP PowerShell)
     print()
-    print(f"  {Colors.WHITE}SharePoint Online API permissions (for PnP PowerShell):{Colors.NC}")
+    print(f"  {Colors.WHITE}SharePoint Online API delegated permissions (for PnP PowerShell):{Colors.NC}")
     
     for perm_name, perm_id in SHAREPOINT_PERMISSION_IDS.items():
         # Check if permission already exists
         if perm_id in existing_perm_ids:
-            print(f"    {Colors.DIM}○ Already exists: SharePoint.{perm_name}{Colors.NC}")
+            print(f"    {Colors.DIM}○ Already exists: SharePoint.{perm_name} (delegated){Colors.NC}")
             skipped_count += 1
             continue
         
@@ -1242,12 +1394,47 @@ def update_app_permissions() -> bool:
             )
             
             if add_perm_result.returncode == 0:
-                print(f"    {Colors.GREEN}✓{Colors.NC} Added: SharePoint.{perm_name}")
+                print(f"    {Colors.GREEN}✓{Colors.NC} Added: SharePoint.{perm_name} (delegated)")
                 added_count += 1
             else:
                 # Check if permission already exists (fallback check)
                 if "already exists" in add_perm_result.stderr.lower() or "already been added" in add_perm_result.stderr.lower():
-                    print(f"    {Colors.DIM}○ Already exists: SharePoint.{perm_name}{Colors.NC}")
+                    print(f"    {Colors.DIM}○ Already exists: SharePoint.{perm_name} (delegated){Colors.NC}")
+                    skipped_count += 1
+                else:
+                    print(f"    {Colors.YELLOW}⚠{Colors.NC} SharePoint.{perm_name}: {add_perm_result.stderr.strip()[:50]}")
+        except Exception as e:
+            print(f"    {Colors.RED}✗{Colors.NC} SharePoint.{perm_name}: {str(e)[:50]}")
+    
+    # Add SharePoint Online API application permissions (for REST API app-only access)
+    print()
+    print(f"  {Colors.WHITE}SharePoint Online API application permissions (for REST API):{Colors.NC}")
+    
+    for perm_name, perm_id in SHAREPOINT_APP_PERMISSION_IDS.items():
+        # Check if permission already exists
+        if perm_id in existing_perm_ids:
+            print(f"    {Colors.DIM}○ Already exists: SharePoint.{perm_name} (application){Colors.NC}")
+            skipped_count += 1
+            continue
+        
+        try:
+            add_perm_result = subprocess.run(
+                [az_path, "ad", "app", "permission", "add",
+                 "--id", app_id,
+                 "--api", SHAREPOINT_ONLINE_API_ID,
+                 "--api-permissions", f"{perm_id}=Role"],  # Role = Application permission
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if add_perm_result.returncode == 0:
+                print(f"    {Colors.GREEN}✓{Colors.NC} Added: SharePoint.{perm_name} (application)")
+                added_count += 1
+            else:
+                # Check if permission already exists (fallback check)
+                if "already exists" in add_perm_result.stderr.lower() or "already been added" in add_perm_result.stderr.lower():
+                    print(f"    {Colors.DIM}○ Already exists: SharePoint.{perm_name} (application){Colors.NC}")
                     skipped_count += 1
                 else:
                     print(f"    {Colors.YELLOW}⚠{Colors.NC} SharePoint.{perm_name}: {add_perm_result.stderr.strip()[:50]}")
@@ -1389,6 +1576,8 @@ def get_app_permissions(app_id: str) -> Dict[str, Any]:
     permission_id_to_name = {v: k for k, v in GRAPH_PERMISSION_IDS.items()}
     ews_permission_id_to_name = {v: k for k, v in EWS_PERMISSION_IDS.items()}
     sharepoint_permission_id_to_name = {v: k for k, v in SHAREPOINT_PERMISSION_IDS.items()}
+    # Add SharePoint application permissions to the lookup
+    sharepoint_permission_id_to_name.update({v: k for k, v in SHAREPOINT_APP_PERMISSION_IDS.items()})
     
     try:
         # Get app registration details including required resource access
@@ -1498,6 +1687,7 @@ def run_graph_permissions_check() -> None:
             # Group by API and deduplicate by permission name
             graph_perms = [p for p in perm_info["configured_permissions"] if p["api"] == "Microsoft Graph"]
             ews_perms = [p for p in perm_info["configured_permissions"] if p["api"] == "Exchange Online"]
+            sp_perms = [p for p in perm_info["configured_permissions"] if p["api"] == "SharePoint Online"]
             
             # Deduplicate permissions by name (keep unique names only)
             seen_graph = set()
@@ -1514,6 +1704,13 @@ def run_graph_permissions_check() -> None:
                     seen_ews.add(p["name"])
                     unique_ews_perms.append(p)
             
+            seen_sp = set()
+            unique_sp_perms = []
+            for p in sp_perms:
+                if p["name"] not in seen_sp:
+                    seen_sp.add(p["name"])
+                    unique_sp_perms.append(p)
+            
             if unique_graph_perms:
                 print(f"    {Colors.CYAN}Microsoft Graph API:{Colors.NC}")
                 for perm in unique_graph_perms:
@@ -1527,6 +1724,23 @@ def run_graph_permissions_check() -> None:
                 print(f"    {Colors.CYAN}Exchange Online (EWS):{Colors.NC}")
                 for perm in unique_ews_perms:
                     print(f"      {Colors.GREEN}✓{Colors.NC} {perm['name']}")
+                print()
+            
+            if unique_sp_perms:
+                print(f"    {Colors.CYAN}SharePoint Online API:{Colors.NC}")
+                # Separate delegated (Scope) and application (Role) permissions
+                delegated_perms = [p for p in unique_sp_perms if p.get("type") == "Scope"]
+                app_perms = [p for p in unique_sp_perms if p.get("type") == "Role"]
+                
+                if delegated_perms:
+                    print(f"      {Colors.DIM}Delegated (for PnP PowerShell):{Colors.NC}")
+                    for perm in delegated_perms:
+                        print(f"        {Colors.GREEN}✓{Colors.NC} {perm['name']}")
+                
+                if app_perms:
+                    print(f"      {Colors.DIM}Application (for REST API):{Colors.NC}")
+                    for perm in app_perms:
+                        print(f"        {Colors.GREEN}✓{Colors.NC} {perm['name']}")
                 print()
             
             # Check for missing required permissions
@@ -2422,7 +2636,13 @@ def manage_app_registration_menu() -> None:
         print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Remove the custom app from Azure AD{Colors.NC}                   {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.BLUE}[4]{Colors.NC} {Colors.WHITE}🔄 Update Permissions{Colors.NC}                                  {Colors.CYAN}│{Colors.NC}")
-        print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Add all required permissions (Graph + EWS){Colors.NC}            {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Add all required permissions (Graph + EWS + SharePoint){Colors.NC}  {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.MAGENTA}[5]{Colors.NC} {Colors.WHITE}✅ Grant Admin Consent{Colors.NC}                                 {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Grant admin consent for all permissions{Colors.NC}                {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.YELLOW}[6]{Colors.NC} {Colors.WHITE}🔑 Regenerate Client Secret{Colors.NC}                            {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Create new secret for SharePoint REST API access{Colors.NC}        {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}├──────────────────────────────────────────────────────────────┤{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
@@ -2563,15 +2783,24 @@ def manage_app_registration_menu() -> None:
                 else:
                     ews_to_add.append(perm_name)
             
-            # Check SharePoint permissions
+            # Check SharePoint delegated permissions
             for perm_name in SHAREPOINT_PERMISSION_IDS.keys():
                 if perm_name in existing_perm_names:
                     sp_existing.append(perm_name)
                 else:
                     sp_to_add.append(perm_name)
             
-            total_to_add = len(graph_to_add) + len(ews_to_add) + len(sp_to_add)
-            total_existing = len(graph_existing) + len(ews_existing) + len(sp_existing)
+            # Check SharePoint application permissions
+            sp_app_to_add = []
+            sp_app_existing = []
+            for perm_name in SHAREPOINT_APP_PERMISSION_IDS.keys():
+                if perm_name in existing_perm_names:
+                    sp_app_existing.append(perm_name)
+                else:
+                    sp_app_to_add.append(perm_name)
+            
+            total_to_add = len(graph_to_add) + len(ews_to_add) + len(sp_to_add) + len(sp_app_to_add)
+            total_existing = len(graph_existing) + len(ews_existing) + len(sp_existing) + len(sp_app_existing)
             
             print()
             print(f"  {Colors.WHITE}Permission Status:{Colors.NC}")
@@ -2624,6 +2853,21 @@ def manage_app_registration_menu() -> None:
                     print(f"    {Colors.YELLOW}○{Colors.NC} {Colors.GREEN}{perm_name}{Colors.NC} - {desc}")
             print()
             
+            # Show SharePoint Online application permissions
+            print(f"  {Colors.CYAN}SharePoint Online API (Application - for REST API):{Colors.NC}")
+            sp_app_descriptions = {
+                "Sites.FullControl.All": "Full control of all site collections (app-only)",
+                "Sites.ReadWrite.All": "Read and write items in all site collections (app-only)",
+                "Sites.Read.All": "Read items in all site collections (app-only)",
+            }
+            for perm_name in SHAREPOINT_APP_PERMISSION_IDS.keys():
+                desc = sp_app_descriptions.get(perm_name, "")
+                if perm_name in existing_perm_names:
+                    print(f"    {Colors.GREEN}✓{Colors.NC} {Colors.DIM}{perm_name}{Colors.NC} - {desc}")
+                else:
+                    print(f"    {Colors.YELLOW}○{Colors.NC} {Colors.GREEN}{perm_name}{Colors.NC} - {desc}")
+            print()
+            
             print(f"  {Colors.DIM}Legend: {Colors.GREEN}✓{Colors.NC}{Colors.DIM} = Already configured, {Colors.YELLOW}○{Colors.NC}{Colors.DIM} = Will be added{Colors.NC}")
             print()
             
@@ -2654,6 +2898,110 @@ def manage_app_registration_menu() -> None:
             else:
                 print()
                 print(f"  {Colors.DIM}Update cancelled. (Enter Y to proceed, N or C to cancel){Colors.NC}")
+            
+            input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            
+        elif choice == '5':
+            # Grant admin consent
+            print()
+            if not check_azure_login():
+                print_error("Please log into Azure first")
+                input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+                continue
+            
+            # Check if app exists
+            app_config = load_app_config()
+            existing_app = find_existing_app()
+            
+            if not app_config and not existing_app:
+                print_error("No existing app registration found.")
+                print_info("Use option [1] to create a new app registration first.")
+                input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+                continue
+            
+            # Get app ID
+            app_id = app_config.get('app_id') if app_config else existing_app.get('appId')
+            app_name = app_config.get('display_name', CUSTOM_APP_NAME) if app_config else existing_app.get('displayName', CUSTOM_APP_NAME)
+            
+            print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+            print(f"  {Colors.WHITE}Granting Admin Consent for:{Colors.NC}")
+            print(f"    • Name:      {Colors.YELLOW}{app_name}{Colors.NC}")
+            print(f"    • App ID:    {app_id}")
+            print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+            print()
+            
+            print(f"  {Colors.WHITE}This will grant admin consent for all configured permissions.{Colors.NC}")
+            print(f"  {Colors.DIM}This is required for application permissions to work.{Colors.NC}")
+            print()
+            
+            # Try CLI-based consent first
+            print(f"  {Colors.DIM}Attempting to grant consent via Azure CLI...{Colors.NC}")
+            if grant_consent_for_custom_app(app_id):
+                print()
+                print(f"  {Colors.GREEN}✓{Colors.NC} Admin consent granted successfully!")
+                print()
+                print(f"  {Colors.DIM}All permissions should now be active.{Colors.NC}")
+                print(f"  {Colors.DIM}You can verify by using option [2] Check Permissions.{Colors.NC}")
+            else:
+                print()
+                print(f"  {Colors.YELLOW}⚠{Colors.NC} CLI-based consent failed. Opening browser for manual consent...")
+                print()
+                if open_consent_url_for_custom_app(app_id):
+                    print()
+                    print(f"  {Colors.GREEN}✓{Colors.NC} Browser opened for admin consent.")
+                    print(f"  {Colors.DIM}Please complete the consent in your browser.{Colors.NC}")
+                    print(f"  {Colors.DIM}After consenting, use option [2] to verify permissions.{Colors.NC}")
+                else:
+                    print()
+                    print(f"  {Colors.RED}✗{Colors.NC} Failed to open browser.")
+                    print()
+                    # Show manual URL
+                    tenant_id = app_config.get('tenant_id') if app_config else get_tenant_id()
+                    if tenant_id:
+                        consent_url = f"https://login.microsoftonline.com/{tenant_id}/adminconsent?client_id={app_id}"
+                        print(f"  {Colors.WHITE}Please open this URL manually:{Colors.NC}")
+                        print(f"  {Colors.CYAN}{consent_url}{Colors.NC}")
+            
+            input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            
+        elif choice == '6':
+            # Regenerate client secret
+            print()
+            if not check_azure_login():
+                print_error("Please log into Azure first")
+                input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+                continue
+            
+            # Check if app exists
+            app_config = load_app_config()
+            existing_app = find_existing_app()
+            
+            if not app_config and not existing_app:
+                print_error("No existing app registration found.")
+                print_info("Use option [1] to create a new app registration first.")
+                input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+                continue
+            
+            # Check if secret already exists
+            if app_config and app_config.get("client_secret"):
+                print()
+                print(f"  {Colors.YELLOW}⚠{Colors.NC} A client secret already exists in the configuration.")
+                print(f"  {Colors.DIM}Creating a new secret will not invalidate the old one.{Colors.NC}")
+                print()
+                confirm = input(f"  {Colors.YELLOW}Create a new secret anyway? (y/N):{Colors.NC} ").strip().lower()
+                if confirm != 'y':
+                    print()
+                    print(f"  {Colors.GREEN}✓{Colors.NC} Operation cancelled. Existing secret retained.")
+                    input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+                    continue
+            
+            if regenerate_client_secret():
+                print()
+                print(f"  {Colors.GREEN}✓{Colors.NC} Client secret regenerated successfully!")
+                print(f"  {Colors.DIM}SharePoint REST API access should now work.{Colors.NC}")
+            else:
+                print()
+                print(f"  {Colors.RED}✗{Colors.NC} Failed to regenerate client secret.")
             
             input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
             

@@ -1947,6 +1947,10 @@ def purge_site_recycle_bin_pnp(site_url: str, first_stage_only: bool = False, cl
     Returns (success_count, fail_count).
     
     Prefers PowerShell 7 (pwsh) since PnP.PowerShell is typically installed there.
+    
+    Note: To purge the second-stage (Site Collection) recycle bin, the user must be
+    a Site Collection Administrator. If not, the script will provide instructions
+    on how to add yourself as a Site Collection Admin via the SharePoint Admin Center.
     """
     # Prefer PowerShell 7 (pwsh) since that's where PnP is typically installed
     pwsh = get_pwsh_executable()
@@ -1958,76 +1962,33 @@ def purge_site_recycle_bin_pnp(site_url: str, first_stage_only: bool = False, cl
         if app_config:
             client_id = app_config.get("app_id")
     
-    # Build the PowerShell script
-    # Note: second_stage is now handled in the main script flow (checked first)
-    # This variable is kept for backwards compatibility but is now empty
-    second_stage_cmd = ""
-    
     # Build connection command
-    # Try to get client_id from app config if not provided
-    if not client_id:
-        app_config = load_app_config()
-        if app_config:
-            client_id = app_config.get("app_id")
-    
     if client_id:
         # Use -Interactive with ClientId - this uses the app registration
         connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -Interactive -ClientId "{client_id}" -ErrorAction Stop'
-        connect_admin_cmd = f'Connect-PnPOnline -Url $adminUrl -Interactive -ClientId "{client_id}" -ErrorAction Stop'
         auth_method = "Interactive with registered app"
     else:
         # Fallback to DeviceLogin if no app registration
         connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -DeviceLogin -ErrorAction Stop'
-        connect_admin_cmd = 'Connect-PnPOnline -Url $adminUrl -DeviceLogin -ErrorAction Stop'
         auth_method = "Device Login"
     
-    # Extract admin URL from site URL
+    # Extract admin URL from site URL for instructions
     import urllib.parse
     parsed = urllib.parse.urlparse(site_url)
     tenant_name = parsed.netloc.split('.')[0]
     admin_url = f"https://{tenant_name}-admin.sharepoint.com"
     
+    # Build the PowerShell script - simplified approach that directly connects to the site
     ps_script = f'''
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 $siteUrl = "{site_url}"
-$adminUrl = "{admin_url}"
-$wasAddedAsAdmin = $false
-$userEmail = $null
+$needsSiteCollectionAdmin = $false
 
 try {{
-    # STEP 1: Connect to SharePoint Admin site first to grant Site Collection Admin access
-    Write-Host "=== STEP 1: Grant Site Collection Admin Access ==="
-    Write-Host "Connecting to SharePoint Admin site: $adminUrl"
-    Write-Host "Authentication method: {auth_method}"
-    
-    {connect_admin_cmd}
-    Write-Host "Connected to Admin site successfully!"
-    
-    # Get current user email
-    $context = Get-PnPContext
-    $context.Load($context.Web.CurrentUser)
-    $context.ExecuteQuery()
-    $userEmail = $context.Web.CurrentUser.Email
-    Write-Host "Current user: $userEmail"
-    
-    # Add user as Site Collection Admin
-    Write-Host "Adding $userEmail as Site Collection Administrator for $siteUrl..."
-    try {{
-        Set-PnPTenantSite -Url $siteUrl -Owners $userEmail -ErrorAction Stop
-        Write-Host "Site Collection Admin access granted!"
-        $wasAddedAsAdmin = $true
-    }} catch {{
-        Write-Host "Note: Could not add as Site Collection Admin (may already be admin): $_"
-    }}
-    
-    # Disconnect from Admin site
-    Disconnect-PnPOnline -ErrorAction SilentlyContinue
-    
-    # STEP 2: Connect to the actual site and purge recycle bin
-    Write-Host ""
-    Write-Host "=== STEP 2: Purge Recycle Bin ==="
+    # Connect directly to the site
     Write-Host "Connecting to site: $siteUrl"
+    Write-Host "Authentication method: {auth_method}"
     
     {connect_cmd}
     Write-Host "Connected to site successfully!"
@@ -2036,27 +1997,40 @@ try {{
     
     # Check SECOND-STAGE recycle bin FIRST (Site Collection Recycle Bin)
     # Items deleted from first-stage go here, and AdminRecycleBin.aspx?view=5 shows these
+    Write-Host ""
     Write-Host "Checking second-stage recycle bin (Site Collection Recycle Bin)..."
-    $secondStageItems = Get-PnPRecycleBinItem -SecondStage -RowLimit 5000 -ErrorAction SilentlyContinue
     
-    if ($secondStageItems -and @($secondStageItems).Count -gt 0) {{
-        $secondStageCount = @($secondStageItems).Count
-        Write-Host "Found $secondStageCount items in second-stage recycle bin"
+    try {{
+        $secondStageItems = Get-PnPRecycleBinItem -SecondStage -RowLimit 5000 -ErrorAction Stop
         
-        # List first few items for debugging
-        Write-Host "Items found:"
-        $secondStageItems | Select-Object -First 5 | ForEach-Object {{ Write-Host "  - $($_.Title) ($($_.ItemType))" }}
-        
-        # Clear the second-stage recycle bin
-        Write-Host "Clearing second-stage recycle bin..."
-        Clear-PnPRecycleBinItem -SecondStage -Force -ErrorAction Stop
-        Write-Host "Second-stage recycle bin cleared!"
-        $totalCount = $totalCount + $secondStageCount
-    }} else {{
-        Write-Host "Second-stage recycle bin is empty"
+        if ($secondStageItems -and @($secondStageItems).Count -gt 0) {{
+            $secondStageCount = @($secondStageItems).Count
+            Write-Host "Found $secondStageCount items in second-stage recycle bin"
+            
+            # List first few items for debugging
+            Write-Host "Items found:"
+            $secondStageItems | Select-Object -First 5 | ForEach-Object {{ Write-Host "  - $($_.Title) ($($_.ItemType))" }}
+            
+            # Clear the second-stage recycle bin
+            Write-Host "Clearing second-stage recycle bin..."
+            Clear-PnPRecycleBinItem -SecondStage -Force -ErrorAction Stop
+            Write-Host "Second-stage recycle bin cleared!"
+            $totalCount = $totalCount + $secondStageCount
+        }} else {{
+            Write-Host "Second-stage recycle bin is empty"
+        }}
+    }} catch {{
+        $errorMsg = $_.Exception.Message
+        if ($errorMsg -match "Access is denied" -or $errorMsg -match "Access denied" -or $errorMsg -match "E_ACCESSDENIED" -or $errorMsg -match "unauthorized" -or $errorMsg -match "0x80070005") {{
+            Write-Host "PERMISSION_ERROR: Cannot access second-stage recycle bin - Site Collection Admin required"
+            $needsSiteCollectionAdmin = $true
+        }} else {{
+            Write-Host "Warning: Could not check second-stage recycle bin: $errorMsg"
+        }}
     }}
     
     # Now check first-stage recycle bin
+    Write-Host ""
     Write-Host "Checking first-stage recycle bin..."
     $recycleBinItems = Get-PnPRecycleBinItem -FirstStage -RowLimit 5000 -ErrorAction SilentlyContinue
     
@@ -2077,39 +2051,24 @@ try {{
         Write-Host "First-stage recycle bin is empty"
     }}
     
-    # Disconnect from site
-    Disconnect-PnPOnline -ErrorAction SilentlyContinue
-    
-    # STEP 3: Remove Site Collection Admin access (cleanup)
-    if ($wasAddedAsAdmin -and $userEmail) {{
-        Write-Host ""
-        Write-Host "=== STEP 3: Remove Site Collection Admin Access (Cleanup) ==="
-        Write-Host "Reconnecting to Admin site to remove Site Collection Admin access..."
-        
-        {connect_admin_cmd}
-        
-        Write-Host "Removing $userEmail as Site Collection Administrator..."
-        try {{
-            # Get current site admins and remove the user
-            $siteAdmins = Get-PnPTenantSite -Url $siteUrl -Detailed | Select-Object -ExpandProperty OwnerEmail
-            # Note: We can't easily remove a single admin, so we'll leave them as admin
-            # This is a limitation of the PnP cmdlets
-            Write-Host "Note: User remains as Site Collection Admin (removal requires manual action)"
-        }} catch {{
-            Write-Host "Note: Could not remove Site Collection Admin access: $_"
-        }}
-        
-        Disconnect-PnPOnline -ErrorAction SilentlyContinue
-    }}
-    {second_stage_cmd}
-    # Output result
-    Write-Output "SUCCESS:$totalCount"
-    
     # Disconnect
     Disconnect-PnPOnline -ErrorAction SilentlyContinue
+    
+    # Output result
+    if ($needsSiteCollectionAdmin) {{
+        Write-Output "NEEDS_ADMIN:$totalCount"
+    }} else {{
+        Write-Output "SUCCESS:$totalCount"
+    }}
+    
 }} catch {{
-    Write-Error $_.Exception.Message
-    exit 1
+    $errorMsg = $_.Exception.Message
+    if ($errorMsg -match "Access is denied" -or $errorMsg -match "Access denied" -or $errorMsg -match "E_ACCESSDENIED" -or $errorMsg -match "unauthorized" -or $errorMsg -match "0x80070005") {{
+        Write-Output "PERMISSION_ERROR:0"
+    }} else {{
+        Write-Error $errorMsg
+        exit 1
+    }}
 }}
 '''
     
@@ -2123,6 +2082,12 @@ try {{
         ps_script_with_output = ps_script.replace(
             'Write-Output "SUCCESS:$totalCount"',
             f'Write-Output "SUCCESS:$totalCount" | Out-File -FilePath "{result_path}" -Encoding UTF8'
+        ).replace(
+            'Write-Output "NEEDS_ADMIN:$totalCount"',
+            f'Write-Output "NEEDS_ADMIN:$totalCount" | Out-File -FilePath "{result_path}" -Encoding UTF8'
+        ).replace(
+            'Write-Output "PERMISSION_ERROR:0"',
+            f'Write-Output "PERMISSION_ERROR:0" | Out-File -FilePath "{result_path}" -Encoding UTF8'
         )
         
         # Run WITHOUT capture_output so browser can open for interactive auth
@@ -2135,22 +2100,48 @@ try {{
         )
         
         # Read result from temp file
+        output = ""
         try:
             with open(result_path, 'r', encoding='utf-8') as f:
                 output = f.read().strip()
             os.unlink(result_path)  # Clean up temp file
         except Exception:
-            output = ""
             try:
                 os.unlink(result_path)
             except Exception:
                 pass
         
-        if result.returncode == 0:
-            # Parse the success count from file
-            if output.startswith("SUCCESS:"):
-                count = int(output.split(":")[1].strip())
+        # Handle different result types
+        if output.startswith("PERMISSION_ERROR:") or output.startswith("NEEDS_ADMIN:"):
+            # Permission issue - provide instructions
+            count = 0
+            if ":" in output:
+                try:
+                    count = int(output.split(":")[1].strip())
+                except ValueError:
+                    pass
+            
+            print()
+            print(f"    {Colors.YELLOW}⚠ Site Collection Admin access required for second-stage recycle bin{Colors.NC}")
+            print()
+            print(f"    {Colors.CYAN}To add yourself as Site Collection Admin:{Colors.NC}")
+            print(f"    1. Go to: {admin_url}")
+            print(f"    2. Click 'Active sites' in the left menu")
+            print(f"    3. Find and select the site: {site_url}")
+            print(f"    4. Click 'Membership' tab → 'Site admins'")
+            print(f"    5. Add your account as a Site Collection Administrator")
+            print(f"    6. Run this purge operation again")
+            print()
+            
+            if count > 0:
+                print(f"    {Colors.GREEN}✓ First-stage recycle bin cleared: {count} items{Colors.NC}")
                 return count, 0
+            return 0, 1
+            
+        elif output.startswith("SUCCESS:"):
+            count = int(output.split(":")[1].strip())
+            return count, 0
+        elif result.returncode == 0:
             return 0, 0
         else:
             print_error(f"  PnP PowerShell failed (exit code: {result.returncode})")
