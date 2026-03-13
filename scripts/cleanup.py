@@ -1959,17 +1959,9 @@ def purge_site_recycle_bin_pnp(site_url: str, first_stage_only: bool = False, cl
             client_id = app_config.get("app_id")
     
     # Build the PowerShell script
-    second_stage_cmd = "" if first_stage_only else """
-    # Also clear second-stage recycle bin
-    Write-Host "Clearing second-stage recycle bin..."
-    $secondStageItems = Get-PnPRecycleBinItem -SecondStage -ErrorAction SilentlyContinue
-    $secondStageCount = 0
-    if ($secondStageItems) {
-        $secondStageCount = @($secondStageItems).Count
-        Clear-PnPRecycleBinItem -SecondStage -Force -ErrorAction SilentlyContinue
-    }
-    $totalCount = $totalCount + $secondStageCount
-"""
+    # Note: second_stage is now handled in the main script flow (checked first)
+    # This variable is kept for backwards compatibility but is now empty
+    second_stage_cmd = ""
     
     # Build connection command - use -Interactive with ClientId
     if client_id:
@@ -2000,44 +1992,57 @@ try {{
         $userEmail = $currentUser.Email
         if ($userEmail) {{
             Write-Host "Adding $userEmail as Site Collection Administrator..."
-            Set-PnPSiteCollectionAdmin -Owners $userEmail -ErrorAction SilentlyContinue
+            # Use Add-PnPSiteCollectionAdmin (correct cmdlet name)
+            Add-PnPSiteCollectionAdmin -Owners $userEmail -ErrorAction SilentlyContinue
             Write-Host "Site Collection Admin access granted"
         }}
     }} catch {{
         Write-Host "Note: Could not add as Site Collection Admin (may already be admin): $_"
     }}
     
-    # Get count of items in recycle bin first
-    # Use -RowLimit to ensure we get all items
-    Write-Host "Checking recycle bin..."
-    $recycleBinItems = Get-PnPRecycleBinItem -RowLimit 5000 -ErrorAction SilentlyContinue
     $totalCount = 0
     
+    # Check SECOND-STAGE recycle bin FIRST (Site Collection Recycle Bin)
+    # Items deleted from first-stage go here, and AdminRecycleBin.aspx?view=5 shows these
+    Write-Host "Checking second-stage recycle bin (Site Collection Recycle Bin)..."
+    $secondStageItems = Get-PnPRecycleBinItem -SecondStage -RowLimit 5000 -ErrorAction SilentlyContinue
+    
+    if ($secondStageItems -and @($secondStageItems).Count -gt 0) {{
+        $secondStageCount = @($secondStageItems).Count
+        Write-Host "Found $secondStageCount items in second-stage recycle bin"
+        
+        # List first few items for debugging
+        Write-Host "Items found:"
+        $secondStageItems | Select-Object -First 5 | ForEach-Object {{ Write-Host "  - $($_.Title) ($($_.ItemType))" }}
+        
+        # Clear the second-stage recycle bin
+        Write-Host "Clearing second-stage recycle bin..."
+        Clear-PnPRecycleBinItem -SecondStage -Force -ErrorAction Stop
+        Write-Host "Second-stage recycle bin cleared!"
+        $totalCount = $totalCount + $secondStageCount
+    }} else {{
+        Write-Host "Second-stage recycle bin is empty"
+    }}
+    
+    # Now check first-stage recycle bin
+    Write-Host "Checking first-stage recycle bin..."
+    $recycleBinItems = Get-PnPRecycleBinItem -FirstStage -RowLimit 5000 -ErrorAction SilentlyContinue
+    
     if ($recycleBinItems -and @($recycleBinItems).Count -gt 0) {{
-        $totalCount = @($recycleBinItems).Count
-        Write-Host "Found $totalCount items in first-stage recycle bin"
+        $firstStageCount = @($recycleBinItems).Count
+        Write-Host "Found $firstStageCount items in first-stage recycle bin"
         
         # List first few items for debugging
         Write-Host "Items found:"
         $recycleBinItems | Select-Object -First 5 | ForEach-Object {{ Write-Host "  - $($_.Title) ($($_.ItemType))" }}
         
-        # Clear the recycle bin
+        # Clear the first-stage recycle bin
         Write-Host "Clearing first-stage recycle bin..."
         Clear-PnPRecycleBinItem -All -Force -ErrorAction Stop
         Write-Host "First-stage recycle bin cleared!"
+        $totalCount = $totalCount + $firstStageCount
     }} else {{
-        # Try to get more info about why it's empty
-        Write-Host "First-stage recycle bin appears empty"
-        Write-Host "Checking with different method..."
-        $allItems = Get-PnPRecycleBinItem -FirstStage -RowLimit 5000 -ErrorAction SilentlyContinue
-        if ($allItems) {{
-            $totalCount = @($allItems).Count
-            Write-Host "Found $totalCount items using -FirstStage parameter"
-            Clear-PnPRecycleBinItem -All -Force -ErrorAction Stop
-            Write-Host "First-stage recycle bin cleared!"
-        }} else {{
-            Write-Host "First-stage recycle bin is empty"
-        }}
+        Write-Host "First-stage recycle bin is empty"
     }}
     {second_stage_cmd}
     # Output result
