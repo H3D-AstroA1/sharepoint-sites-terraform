@@ -28,6 +28,7 @@ import re
 import subprocess
 import sys
 import urllib.request
+import urllib.parse
 import zipfile
 import shutil
 from pathlib import Path
@@ -43,6 +44,7 @@ TERRAFORM_DIR = PROJECT_DIR / "terraform"
 CONFIG_DIR = PROJECT_DIR / "config"
 DEFAULT_CONFIG_FILE = CONFIG_DIR / "sites.json"
 ENVIRONMENTS_FILE = CONFIG_DIR / "environments.json"
+APP_CONFIG_FILE = SCRIPT_DIR / ".app_config.json"
 
 # Realistic organizational department site templates with visibility settings
 # Sites marked as "Public" are accessible to all employees
@@ -792,6 +794,363 @@ def generate_mixed_sites(dept_count: int, adhoc_count: int) -> List[Dict]:
     random.shuffle(all_sites)
     
     return all_sites
+
+
+# ============================================================================
+# AZURE AD DISCOVERY FUNCTIONS
+# ============================================================================
+
+def load_app_config() -> Optional[Dict]:
+    """Load the custom app configuration from file."""
+    if APP_CONFIG_FILE.exists():
+        try:
+            with open(APP_CONFIG_FILE, 'r') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return None
+
+
+def get_graph_access_token_via_client_credentials(app_config: Dict) -> Optional[str]:
+    """Get Microsoft Graph access token using client credentials flow."""
+    tenant_id = app_config.get("tenant_id")
+    client_id = app_config.get("app_id")
+    client_secret = app_config.get("client_secret")
+    
+    if not all([tenant_id, client_id, client_secret]):
+        return None
+    
+    token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    
+    data = urllib.parse.urlencode({
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "scope": "https://graph.microsoft.com/.default",
+        "grant_type": "client_credentials"
+    }).encode()
+    
+    try:
+        req = urllib.request.Request(token_url, data=data)
+        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode())
+            return result.get("access_token")
+    except Exception:
+        return None
+
+
+def get_graph_access_token() -> Optional[str]:
+    """Get Microsoft Graph access token.
+    
+    First tries to use custom app credentials if available,
+    then falls back to Azure CLI.
+    """
+    # Try custom app credentials first
+    app_config = load_app_config()
+    if app_config and app_config.get("client_secret"):
+        token = get_graph_access_token_via_client_credentials(app_config)
+        if token:
+            return token
+    
+    # Fall back to Azure CLI
+    try:
+        result = run_command([
+            "az", "account", "get-access-token",
+            "--resource", "https://graph.microsoft.com",
+            "--query", "accessToken",
+            "-o", "tsv"
+        ])
+        if result:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def discover_azure_ad_users(access_token: str, max_users: int = 100) -> List[Dict]:
+    """Discover Azure AD users from the tenant.
+    
+    Returns a list of users with their UPN (userPrincipalName) and display name.
+    Filters out guest users and service accounts.
+    """
+    users = []
+    
+    try:
+        # Get users, filtering for member users (not guests)
+        url = f"https://graph.microsoft.com/v1.0/users?$filter=userType eq 'Member'&$select=id,userPrincipalName,displayName,department,jobTitle&$top={max_users}"
+        
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {access_token}")
+        req.add_header("Content-Type", "application/json")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode())
+            
+            for user in result.get('value', []):
+                upn = user.get('userPrincipalName', '')
+                # Skip service accounts and system accounts
+                if upn and not upn.startswith('sync_') and not upn.startswith('admin_') and '#EXT#' not in upn:
+                    users.append({
+                        'id': user.get('id'),
+                        'upn': upn,
+                        'displayName': user.get('displayName', ''),
+                        'department': user.get('department', ''),
+                        'jobTitle': user.get('jobTitle', '')
+                    })
+    except Exception as e:
+        print_warning(f"Failed to discover Azure AD users: {e}")
+    
+    return users
+
+
+def discover_azure_ad_groups(access_token: str, max_groups: int = 50) -> List[Dict]:
+    """Discover Azure AD groups from the tenant.
+    
+    Returns a list of security groups and M365 groups.
+    Filters out dynamic groups and system groups.
+    """
+    groups = []
+    
+    try:
+        # Get groups - both security groups and M365 groups
+        url = f"https://graph.microsoft.com/v1.0/groups?$select=id,displayName,description,groupTypes,securityEnabled,mailEnabled&$top={max_groups}"
+        
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {access_token}")
+        req.add_header("Content-Type", "application/json")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode())
+            
+            for group in result.get('value', []):
+                display_name = group.get('displayName', '')
+                group_types = group.get('groupTypes', [])
+                
+                # Skip dynamic groups and system groups
+                if 'DynamicMembership' in group_types:
+                    continue
+                if display_name.startswith('All ') or display_name.startswith('System'):
+                    continue
+                
+                # Determine group type
+                is_m365 = 'Unified' in group_types
+                is_security = group.get('securityEnabled', False)
+                
+                groups.append({
+                    'id': group.get('id'),
+                    'displayName': display_name,
+                    'description': group.get('description', ''),
+                    'type': 'M365' if is_m365 else ('Security' if is_security else 'Distribution'),
+                    'isM365': is_m365,
+                    'isSecurity': is_security
+                })
+    except Exception as e:
+        print_warning(f"Failed to discover Azure AD groups: {e}")
+    
+    return groups
+
+
+def assign_random_owners_members(
+    sites: List[Dict],
+    users: List[Dict],
+    groups: List[Dict],
+    min_owners: int = 1,
+    max_owners: int = 3,
+    min_members: int = 0,
+    max_members: int = 5,
+    include_groups: bool = True
+) -> List[Dict]:
+    """Assign random Azure AD users and groups as owners/members to sites.
+    
+    Args:
+        sites: List of site dictionaries to modify
+        users: List of discovered Azure AD users
+        groups: List of discovered Azure AD groups
+        min_owners: Minimum number of owners per site
+        max_owners: Maximum number of owners per site
+        min_members: Minimum number of members per site
+        max_members: Maximum number of members per site
+        include_groups: Whether to include groups as members
+    
+    Returns:
+        Modified list of sites with owners and members assigned
+    """
+    if not users:
+        print_warning("No users available for assignment")
+        return sites
+    
+    # Get user UPNs for assignment
+    user_upns = [u['upn'] for u in users]
+    
+    # Get group IDs for assignment (only security groups work well as members)
+    group_ids = [g['id'] for g in groups if g.get('isSecurity')] if include_groups else []
+    
+    for site in sites:
+        # Assign random owners (always users, not groups)
+        num_owners = random.randint(min_owners, min(max_owners, len(user_upns)))
+        site['owners'] = random.sample(user_upns, num_owners)
+        
+        # Assign random members (can be users or groups)
+        num_members = random.randint(min_members, max_members)
+        if num_members > 0:
+            # Mix of users and groups
+            available_members = user_upns.copy()
+            if include_groups and group_ids:
+                available_members.extend(group_ids)
+            
+            # Remove owners from potential members to avoid duplicates
+            available_members = [m for m in available_members if m not in site['owners']]
+            
+            if available_members:
+                num_members = min(num_members, len(available_members))
+                site['members'] = random.sample(available_members, num_members)
+            else:
+                site['members'] = []
+        else:
+            site['members'] = []
+    
+    return sites
+
+
+def select_owner_assignment_mode(sites: List[Dict], admin_email: str) -> List[Dict]:
+    """Interactive menu to select how owners/members should be assigned to sites.
+    
+    Args:
+        sites: List of site dictionaries
+        admin_email: The SharePoint admin email (used as default owner)
+    
+    Returns:
+        Modified list of sites with owners/members assigned
+    """
+    print()
+    print(f"  {Colors.WHITE}How would you like to assign site owners and members?{Colors.NC}")
+    print()
+    print(f"  {Colors.CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{Colors.NC}")
+    print()
+    print(f"    [1] Admin Only (Default)")
+    print("        - Uses the SharePoint admin email as the sole owner")
+    print("        - No additional members")
+    print("        - Simplest option, good for testing")
+    print()
+    print(f"    [2] Discover Azure AD Users & Groups")
+    print("        - Queries Microsoft Graph API for real users/groups")
+    print("        - Randomly assigns users as owners (1-3 per site)")
+    print("        - Randomly assigns users/groups as members (0-5 per site)")
+    print("        - Most realistic option for production-like environments")
+    print()
+    print(f"    [3] Skip Owner Assignment")
+    print("        - Leave owners/members empty")
+    print("        - Sites will be created with default permissions")
+    print()
+    print(f"  {Colors.CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{Colors.NC}")
+    print()
+    
+    while True:
+        choice_input = input(f"  Enter your choice (1-3): ").strip()
+        try:
+            choice = int(choice_input)
+            if 1 <= choice <= 3:
+                break
+            print_warning("Please enter 1, 2, or 3.")
+        except ValueError:
+            print_warning("Please enter 1, 2, or 3.")
+    
+    if choice == 1:
+        # Admin only - use the admin email as owner
+        print()
+        print_info("Using admin email as sole owner for all sites")
+        for site in sites:
+            site['owners'] = [admin_email]
+            site['members'] = []
+        print_success(f"Assigned {admin_email} as owner to all {len(sites)} sites")
+        
+    elif choice == 2:
+        # Discover Azure AD users and groups
+        print()
+        print_info("Discovering Azure AD users and groups...")
+        
+        # Get access token
+        access_token = get_graph_access_token()
+        if not access_token:
+            print_warning("Could not get access token. Falling back to admin-only mode.")
+            print_info("Make sure you have set up the app registration via the main menu.")
+            for site in sites:
+                site['owners'] = [admin_email]
+                site['members'] = []
+            return sites
+        
+        # Discover users
+        print_info("Querying Azure AD for users...")
+        users = discover_azure_ad_users(access_token, max_users=100)
+        print_success(f"Found {len(users)} users")
+        
+        # Discover groups
+        print_info("Querying Azure AD for groups...")
+        groups = discover_azure_ad_groups(access_token, max_groups=50)
+        print_success(f"Found {len(groups)} groups")
+        
+        if not users:
+            print_warning("No users found. Falling back to admin-only mode.")
+            for site in sites:
+                site['owners'] = [admin_email]
+                site['members'] = []
+            return sites
+        
+        # Show discovered users/groups summary
+        print()
+        print(f"  {Colors.WHITE}Discovered Azure AD Identities:{Colors.NC}")
+        print()
+        
+        # Show sample users
+        print(f"    {Colors.CYAN}Users (sample):{Colors.NC}")
+        for user in users[:5]:
+            dept = f" - {user['department']}" if user.get('department') else ""
+            print(f"      • {user['displayName']} ({user['upn']}){dept}")
+        if len(users) > 5:
+            print(f"      ... and {len(users) - 5} more")
+        
+        # Show sample groups
+        if groups:
+            print()
+            print(f"    {Colors.CYAN}Groups (sample):{Colors.NC}")
+            for group in groups[:5]:
+                print(f"      • {group['displayName']} ({group['type']})")
+            if len(groups) > 5:
+                print(f"      ... and {len(groups) - 5} more")
+        
+        print()
+        
+        # Ask about including groups as members
+        include_groups = False
+        if groups:
+            include_groups_input = input("  Include groups as site members? (y/N): ").strip().lower()
+            include_groups = include_groups_input == 'y'
+        
+        # Assign random owners/members
+        print()
+        print_info("Assigning random owners and members to sites...")
+        sites = assign_random_owners_members(
+            sites, users, groups,
+            min_owners=1, max_owners=3,
+            min_members=0, max_members=5,
+            include_groups=include_groups
+        )
+        
+        # Show assignment summary
+        total_owners = sum(len(s.get('owners', [])) for s in sites)
+        total_members = sum(len(s.get('members', [])) for s in sites)
+        print_success(f"Assigned {total_owners} owners and {total_members} members across {len(sites)} sites")
+        
+    else:
+        # Skip owner assignment
+        print()
+        print_info("Skipping owner assignment - sites will use default permissions")
+        for site in sites:
+            site['owners'] = []
+            site['members'] = []
+    
+    return sites
 
 
 def format_terraform_sites_block(sites: List[Dict]) -> str:
@@ -1682,6 +2041,11 @@ Examples:
     
     current_step += 1
     
+    # Owner/Member Assignment
+    print_step(current_step, "Configure Site Owners & Members")
+    sites = select_owner_assignment_mode(sites, admin_email)
+    current_step += 1
+    
     # Review configuration
     print_step(current_step, "Review Configuration")
     
@@ -1703,11 +2067,18 @@ Examples:
     print(f"  | M365 Tenant:      {m365_tenant}")
     print(f"  | Admin Email:      {admin_email}")
     print(f"  {Colors.CYAN}+{'-' * 75}+{Colors.NC}")
-    print(f"  {Colors.CYAN}| SHAREPOINT SITES ({len(sites)} sites){' ' * (53 - len(str(len(sites))))}|{Colors.NC}")
+    # Calculate owner/member totals
+    total_owners = sum(len(s.get('owners', [])) for s in sites)
+    total_members = sum(len(s.get('members', [])) for s in sites)
+    
+    print(f"  {Colors.CYAN}| SHAREPOINT SITES ({len(sites)} sites, {total_owners} owners, {total_members} members){' ' * max(0, 30 - len(str(len(sites))) - len(str(total_owners)) - len(str(total_members)))}|{Colors.NC}")
     print(f"  {Colors.CYAN}+{'-' * 75}+{Colors.NC}")
     
     for i, site in enumerate(sites, 1):
-        print(f"  | {i}. {site['name']}")
+        owners_count = len(site.get('owners', []))
+        members_count = len(site.get('members', []))
+        owner_info = f" [{owners_count}O/{members_count}M]" if owners_count > 0 or members_count > 0 else ""
+        print(f"  | {i}. {site['name']}{owner_info}")
     
     print(f"  {Colors.CYAN}+{'-' * 75}+{Colors.NC}")
     print()
