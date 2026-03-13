@@ -269,6 +269,190 @@ SCENARIOS = ["Billing_Inquiry", "Technical_Support", "Account_Setup", "Complaint
 TOPICS = ["Password_Reset", "VPN_Setup", "Email_Configuration", "Software_Installation"]
 
 # ============================================================================
+# USER-NAMED FILE TEMPLATES (for Azure AD mode)
+# ============================================================================
+# These templates create files that appear to be created by specific users
+# Format: {user_name} is replaced with actual Azure AD user display names
+
+USER_FILE_TEMPLATES = [
+    # Personal documents
+    {"name": "{user_name} - Meeting Notes {date}.docx", "type": "word"},
+    {"name": "{user_name} - Project Update {date}.docx", "type": "word"},
+    {"name": "{user_name} - Weekly Report {date}.docx", "type": "word"},
+    {"name": "{user_name} - Action Items {date}.docx", "type": "word"},
+    {"name": "{user_name} - Draft Proposal.docx", "type": "word"},
+    {"name": "{user_name} - Research Notes.docx", "type": "word"},
+    
+    # Spreadsheets
+    {"name": "{user_name} - Expense Report {month}_{year}.xlsx", "type": "excel"},
+    {"name": "{user_name} - Time Tracking {month}_{year}.xlsx", "type": "excel"},
+    {"name": "{user_name} - Budget Analysis.xlsx", "type": "excel"},
+    {"name": "{user_name} - Data Analysis {date}.xlsx", "type": "excel"},
+    {"name": "{user_name} - Project Timeline.xlsx", "type": "excel"},
+    
+    # Presentations
+    {"name": "{user_name} - Team Presentation {date}.pptx", "type": "powerpoint"},
+    {"name": "{user_name} - Status Update Q{quarter}_{year}.pptx", "type": "powerpoint"},
+    {"name": "{user_name} - Training Materials.pptx", "type": "powerpoint"},
+    {"name": "{user_name} - Project Overview.pptx", "type": "powerpoint"},
+    
+    # PDFs
+    {"name": "{user_name} - Signed Agreement {date}.pdf", "type": "pdf"},
+    {"name": "{user_name} - Certificate.pdf", "type": "pdf"},
+    {"name": "{user_name} - Reference Document.pdf", "type": "pdf"},
+]
+
+# Shared/collaborative file templates
+SHARED_FILE_TEMPLATES = [
+    {"name": "Shared by {user_name} - {topic} Document.docx", "type": "word"},
+    {"name": "Review Request from {user_name} - {topic}.docx", "type": "word"},
+    {"name": "Feedback from {user_name} - {topic}.docx", "type": "word"},
+    {"name": "{user_name} and Team - Collaboration Notes.docx", "type": "word"},
+    {"name": "Approved by {user_name} - {topic}.pdf", "type": "pdf"},
+]
+
+# Topics for shared files
+SHARED_TOPICS = [
+    "Budget", "Contract", "Proposal", "Report", "Policy", "Procedure",
+    "Guidelines", "Strategy", "Plan", "Analysis", "Review", "Assessment"
+]
+
+# ============================================================================
+# AZURE AD DISCOVERY FUNCTIONS
+# ============================================================================
+
+def discover_azure_ad_users(access_token: str, max_users: int = 50) -> List[Dict[str, Any]]:
+    """Discover Azure AD users from the tenant.
+    
+    Returns a list of users with their display names and UPNs.
+    Filters out guest users and service accounts.
+    """
+    users = []
+    try:
+        # Get member users only (exclude guests)
+        # URL-encode the filter parameter to handle spaces
+        filter_param = urllib.parse.quote("userType eq 'Member'")
+        url = f"https://graph.microsoft.com/v1.0/users?$filter={filter_param}&$select=id,userPrincipalName,displayName,department,jobTitle&$top={max_users}"
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {access_token}")
+        req.add_header("Content-Type", "application/json")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode())
+            for user in data.get("value", []):
+                upn = user.get("userPrincipalName", "")
+                display_name = user.get("displayName", "")
+                
+                # Skip service accounts and system users
+                if not display_name or "@" not in upn:
+                    continue
+                if any(skip in upn.lower() for skip in ["admin", "service", "system", "sync", "mailbox"]):
+                    continue
+                if any(skip in display_name.lower() for skip in ["admin", "service", "system"]):
+                    continue
+                
+                users.append({
+                    "id": user.get("id", ""),
+                    "upn": upn,
+                    "displayName": display_name,
+                    "department": user.get("department", ""),
+                    "jobTitle": user.get("jobTitle", "")
+                })
+    except Exception as e:
+        print_warning(f"Could not discover Azure AD users: {e}")
+    
+    return users
+
+
+def discover_azure_ad_groups(access_token: str, max_groups: int = 30) -> List[Dict[str, Any]]:
+    """Discover Azure AD groups from the tenant.
+    
+    Returns a list of groups suitable for folder naming.
+    Filters out system groups and dynamic groups.
+    """
+    groups = []
+    try:
+        url = f"https://graph.microsoft.com/v1.0/groups?$select=id,displayName,description,groupTypes,securityEnabled,mailEnabled&$top={max_groups}"
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {access_token}")
+        req.add_header("Content-Type", "application/json")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode())
+            for group in data.get("value", []):
+                display_name = group.get("displayName", "")
+                group_types = group.get("groupTypes", [])
+                
+                # Skip dynamic groups and system groups
+                if "DynamicMembership" in group_types:
+                    continue
+                if not display_name:
+                    continue
+                if any(skip in display_name.lower() for skip in ["all users", "all employees", "everyone", "system"]):
+                    continue
+                
+                groups.append({
+                    "id": group.get("id", ""),
+                    "displayName": display_name,
+                    "description": group.get("description", ""),
+                    "isM365Group": "Unified" in group_types
+                })
+    except Exception as e:
+        print_warning(f"Could not discover Azure AD groups: {e}")
+    
+    return groups
+
+
+def generate_user_file_name(template: Dict[str, str], user: Dict[str, Any]) -> str:
+    """Generate a file name using a user-based template."""
+    name = template["name"]
+    now = datetime.now()
+    
+    # Replace user placeholder
+    user_name = user.get("displayName", "User")
+    # Clean user name for file system (remove special chars)
+    user_name = "".join(c for c in user_name if c.isalnum() or c in " -_").strip()
+    name = name.replace("{user_name}", user_name)
+    
+    # Replace date/time placeholders
+    name = name.replace("{date}", now.strftime("%Y-%m-%d"))
+    name = name.replace("{month}", now.strftime("%B"))
+    name = name.replace("{year}", str(now.year))
+    name = name.replace("{quarter}", str((now.month - 1) // 3 + 1))
+    
+    # Replace topic placeholder
+    name = name.replace("{topic}", random.choice(SHARED_TOPICS))
+    
+    return name
+
+
+def create_user_folder(
+    site_id: str,
+    user: Dict[str, Any],
+    access_token: str
+) -> bool:
+    """Create a personal folder for a user in the site."""
+    user_name = user.get("displayName", "User")
+    # Clean folder name
+    folder_name = "".join(c for c in user_name if c.isalnum() or c in " -_").strip()
+    
+    return create_folder_in_sharepoint(site_id, folder_name, access_token)
+
+
+def create_group_folder(
+    site_id: str,
+    group: Dict[str, Any],
+    access_token: str
+) -> bool:
+    """Create a folder for a group in the site."""
+    group_name = group.get("displayName", "Team")
+    # Clean folder name
+    folder_name = "".join(c for c in group_name if c.isalnum() or c in " -_").strip()
+    
+    return create_folder_in_sharepoint(site_id, folder_name, access_token)
+
+
+# ============================================================================
 # CONSOLE OUTPUT HELPERS
 # ============================================================================
 
@@ -966,6 +1150,227 @@ def generate_files_for_site(
     print()  # New line after progress bar
     return success_count, fail_count
 
+
+def generate_files_for_site_with_users(
+    site: Dict[str, Any],
+    num_files: int,
+    access_token: str,
+    users: List[Dict[str, Any]],
+    groups: List[Dict[str, Any]]
+) -> Tuple[int, int]:
+    """Generate and upload files with Azure AD user attribution.
+    
+    Creates:
+    - User-named folders (e.g., "John Smith")
+    - Group-named folders (e.g., "Marketing Team")
+    - Files with user names in the filename
+    """
+    site_id = site.get("id", "")
+    site_name = site.get("name", "Unknown")
+    site_type = get_site_type(site_name)
+    
+    success_count = 0
+    fail_count = 0
+    
+    # Get department-specific templates as fallback
+    templates = FILE_TEMPLATES.get(site_type, FILE_TEMPLATES["default"])
+    dept_folders = templates["folders"]
+    
+    # Create department folders
+    for folder in dept_folders:
+        create_folder_in_sharepoint(site_id, folder, access_token)
+    
+    # Create user folders (select random subset of users)
+    user_folders = []
+    if users:
+        selected_users = random.sample(users, min(5, len(users)))
+        for user in selected_users:
+            user_name = user.get("displayName", "User")
+            folder_name = "".join(c for c in user_name if c.isalnum() or c in " -_").strip()
+            if create_folder_in_sharepoint(site_id, folder_name, access_token):
+                user_folders.append({"folder": folder_name, "user": user})
+    
+    # Create group folders (select random subset of groups)
+    group_folders = []
+    if groups:
+        selected_groups = random.sample(groups, min(3, len(groups)))
+        for group in selected_groups:
+            group_name = group.get("displayName", "Team")
+            folder_name = "".join(c for c in group_name if c.isalnum() or c in " -_").strip()
+            if create_folder_in_sharepoint(site_id, folder_name, access_token):
+                group_folders.append({"folder": folder_name, "group": group})
+    
+    # Combine all available folders
+    all_folders = dept_folders.copy()
+    all_folders.extend([uf["folder"] for uf in user_folders])
+    all_folders.extend([gf["folder"] for gf in group_folders])
+    
+    # Generate and upload files
+    for i in range(num_files):
+        # Decide file type: 60% user-named, 20% shared, 20% department
+        file_type_choice = random.random()
+        
+        if file_type_choice < 0.6 and users:
+            # User-named file
+            user = random.choice(users)
+            template = random.choice(USER_FILE_TEMPLATES)
+            file_name = generate_user_file_name(template, user)
+            file_type = template["type"]
+            
+            # Put in user's folder if available, otherwise random folder
+            if user_folders:
+                matching_folders = [uf["folder"] for uf in user_folders
+                                   if user.get("displayName", "") in uf["folder"]]
+                folder = matching_folders[0] if matching_folders else random.choice(all_folders)
+            else:
+                folder = random.choice(all_folders)
+                
+        elif file_type_choice < 0.8 and users:
+            # Shared file (attributed to a user)
+            user = random.choice(users)
+            template = random.choice(SHARED_FILE_TEMPLATES)
+            file_name = generate_user_file_name(template, user)
+            file_type = template["type"]
+            
+            # Put in group folder if available, otherwise department folder
+            if group_folders:
+                folder = random.choice([gf["folder"] for gf in group_folders])
+            else:
+                folder = random.choice(dept_folders)
+        else:
+            # Department file (original behavior)
+            dept_templates = templates["files"]
+            template = random.choice(dept_templates)
+            file_name = generate_file_name(template, site_type)
+            file_type = template["type"]
+            folder = random.choice(dept_folders)
+        
+        # Create file content
+        file_content = create_file_content(file_type, file_name, site_type)
+        
+        # Upload file
+        if upload_file_to_sharepoint(site_id, folder, file_name, file_content, access_token):
+            success_count += 1
+        else:
+            fail_count += 1
+        
+        # Update progress
+        print_progress(i + 1, num_files, f"{site_name}: {file_name[:30]}...")
+    
+    print()  # New line after progress bar
+    return success_count, fail_count
+
+
+def distribute_files_with_users(
+    sites: List[Dict[str, Any]],
+    total_files: int,
+    access_token: str,
+    users: List[Dict[str, Any]],
+    groups: List[Dict[str, Any]]
+) -> Tuple[int, int]:
+    """Distribute files with Azure AD user attribution across multiple sites."""
+    if not sites:
+        print_error("No sites available")
+        return 0, 0
+    
+    total_success = 0
+    total_fail = 0
+    
+    # Calculate files per site (with some randomness)
+    files_per_site = []
+    remaining = total_files
+    
+    for i, site in enumerate(sites):
+        if i == len(sites) - 1:
+            files_per_site.append(remaining)
+        else:
+            avg = remaining // (len(sites) - i)
+            variance = max(1, avg // 3)
+            count = max(1, random.randint(avg - variance, avg + variance))
+            count = min(count, remaining - (len(sites) - i - 1))
+            files_per_site.append(count)
+            remaining -= count
+    
+    # Upload files to each site
+    for site, num_files in zip(sites, files_per_site):
+        site_name = site.get("displayName", site.get("name", "Unknown"))
+        print_info(f"Uploading {num_files} files to: {site_name}")
+        
+        success, fail = generate_files_for_site_with_users(
+            site, num_files, access_token, users, groups
+        )
+        total_success += success
+        total_fail += fail
+    
+    return total_success, total_fail
+
+
+def select_population_mode(users: List[Dict[str, Any]], groups: List[Dict[str, Any]]) -> str:
+    """Let user select the file population mode."""
+    print()
+    print(f"  {Colors.WHITE}Select file population mode:{Colors.NC}")
+    print()
+    
+    if users or groups:
+        # Option 1: Azure AD Realistic Mix (Recommended)
+        print(f"  {Colors.CYAN}[1]{Colors.NC} Azure AD Realistic Mix {Colors.GREEN}(Recommended){Colors.NC}")
+        print(f"      {Colors.BLUE}Source:{Colors.NC} 100% Azure AD users/groups")
+        if users:
+            print(f"      {Colors.GREEN}✓{Colors.NC} {len(users)} Azure AD users discovered")
+        if groups:
+            print(f"      {Colors.GREEN}✓{Colors.NC} {len(groups)} Azure AD groups discovered")
+        print(f"      {Colors.WHITE}60% personal + 20% shared + 20% collaborative files{Colors.NC}")
+        print(f"      {Colors.WHITE}Consistent with Azure AD site ownership{Colors.NC}")
+        print()
+        
+        # Option 2: Department Files Only
+        print(f"  {Colors.CYAN}[2]{Colors.NC} Department Files Only")
+        print(f"      {Colors.BLUE}Source:{Colors.NC} Config templates (FILE_TEMPLATES)")
+        print(f"      {Colors.WHITE}Official documents (Budget_Report.xlsx, Policy_v2.pdf){Colors.NC}")
+        print()
+        
+        # Option 3: Combined Sources Mix
+        print(f"  {Colors.CYAN}[3]{Colors.NC} Combined Sources Mix")
+        print(f"      {Colors.BLUE}Source:{Colors.NC} 70% Azure AD + 30% Config templates")
+        print(f"      {Colors.WHITE}Maximum variety - combines both sources{Colors.NC}")
+        print()
+        
+        # Option 4: User-Named Files Only
+        print(f"  {Colors.CYAN}[4]{Colors.NC} User-Named Files Only")
+        print(f"      {Colors.BLUE}Source:{Colors.NC} 100% Azure AD users/groups")
+        print(f"      {Colors.WHITE}Example: \"John Smith - Meeting Notes.docx\"{Colors.NC}")
+        print()
+    else:
+        # No Azure AD users/groups found - show limited options
+        print(f"  {Colors.CYAN}[1]{Colors.NC} Department Files Only")
+        print(f"      {Colors.BLUE}Source:{Colors.NC} Config templates (FILE_TEMPLATES)")
+        print(f"      {Colors.WHITE}Official documents (Budget_Report.xlsx, Policy_v2.pdf){Colors.NC}")
+        print()
+        print(f"  {Colors.YELLOW}[2-4]{Colors.NC} Azure AD Modes {Colors.YELLOW}(No users/groups found){Colors.NC}")
+        print(f"      {Colors.WHITE}Requires User.Read.All and Group.Read.All permissions{Colors.NC}")
+        print()
+    
+    while True:
+        choice = input(f"  {Colors.YELLOW}Enter choice (1-4, Q to quit):{Colors.NC} ").strip().lower()
+        
+        if choice == 'q':
+            return "quit"
+        elif choice == '1' and (users or groups):
+            return "azure_ad_mixed"
+        elif choice == '1':
+            return "generic"
+        elif choice == '2' and (users or groups):
+            return "generic"
+        elif choice == '3' and (users or groups):
+            return "combined"
+        elif choice == '4' and (users or groups):
+            return "azure_ad"
+        elif choice in ['2', '3', '4']:
+            print_warning("Azure AD mode requires discovered users/groups. Using Department Files mode.")
+            return "generic"
+        else:
+            print_warning("Invalid choice. Please enter 1, 2, 3, 4, or Q.")
+
 def distribute_files_across_sites(
     sites: List[Dict[str, Any]],
     total_files: int,
@@ -1126,8 +1531,35 @@ Examples:
         print()
         sys.exit(0)
     
-    # Step 5: Get file count
-    print_step(5, "Configure File Generation")
+    # Step 5: Discover Azure AD Users & Groups
+    print_step(5, "Discover Azure AD Users & Groups")
+    
+    print_info("Discovering Azure AD users and groups for realistic file naming...")
+    users = discover_azure_ad_users(access_token)
+    groups = discover_azure_ad_groups(access_token)
+    
+    if users:
+        print_success(f"Found {len(users)} Azure AD users")
+    else:
+        print_warning("No Azure AD users found (User.Read.All permission may be missing)")
+    
+    if groups:
+        print_success(f"Found {len(groups)} Azure AD groups")
+    else:
+        print_warning("No Azure AD groups found (Group.Read.All permission may be missing)")
+    
+    # Step 6: Select Population Mode
+    print_step(6, "Select File Population Mode")
+    
+    population_mode = select_population_mode(users, groups)
+    if population_mode == "quit":
+        print_warning("Operation cancelled.")
+        sys.exit(0)
+    
+    print_success(f"Selected mode: {population_mode.replace('_', ' ').title()}")
+    
+    # Step 7: Get file count
+    print_step(7, "Configure File Generation")
     
     num_files = args.files
     if num_files <= 0:
@@ -1156,14 +1588,28 @@ Examples:
     
     print_success(f"Will create {num_files} files across {len(sites)} sites")
     
-    # Step 6: Confirm
-    print_step(6, "Confirm File Generation")
+    # Step 8: Confirm
+    print_step(8, "Confirm File Generation")
+    
+    # Map mode to friendly display name
+    mode_names = {
+        "generic": "Department Files Only",
+        "azure_ad": "User-Named Files Only (100% Azure AD)",
+        "azure_ad_mixed": "Azure AD Realistic Mix (100% Azure AD)",
+        "combined": "Combined Sources Mix (Recommended)"
+    }
+    mode_display = mode_names.get(population_mode, population_mode)
     
     print()
     print(f"  {Colors.WHITE}Summary:{Colors.NC}")
+    print(f"    - Population mode: {mode_display}")
     print(f"    - Total files to create: {num_files}")
     print(f"    - Target sites: {len(sites)}")
     print(f"    - Average files per site: ~{num_files // len(sites)}")
+    if population_mode in ["azure_ad", "azure_ad_mixed", "combined"] and users:
+        print(f"    - Azure AD users: {len(users)}")
+    if population_mode in ["azure_ad", "azure_ad_mixed", "combined"] and groups:
+        print(f"    - Azure AD groups: {len(groups)}")
     print()
     print(f"  {Colors.WHITE}Sites to populate:{Colors.NC}")
     for site in sites[:10]:  # Show first 10
@@ -1178,19 +1624,44 @@ Examples:
         print_warning("Operation cancelled")
         sys.exit(0)
     
-    # Step 6: Generate files
-    print_step(6, "Generate and Upload Files")
+    # Step 9: Generate files
+    print_step(9, "Generate and Upload Files")
     
     print()
     start_time = datetime.now()
     
-    success, fail = distribute_files_across_sites(sites, num_files, access_token)
+    # Use appropriate distribution function based on mode
+    if population_mode == "generic":
+        # Option 1: Department files only (from config templates)
+        success, fail = distribute_files_across_sites(sites, num_files, access_token)
+    elif population_mode == "azure_ad":
+        # Option 2: User-named files only (100% Azure AD - personal documents)
+        success, fail = distribute_files_with_users(sites, num_files, access_token, users, groups)
+    elif population_mode == "azure_ad_mixed":
+        # Option 3: Azure AD Realistic Mix (100% Azure AD - varied file types)
+        # Uses the same function but the generate_files_for_site_with_users already
+        # creates a mix of personal (60%), shared (20%), and collaborative (20%) files
+        print_info("Azure AD Realistic Mix: 60% personal + 20% shared + 20% collaborative files")
+        success, fail = distribute_files_with_users(sites, num_files, access_token, users, groups)
+    else:  # combined mode - Option 4 (Recommended)
+        # Split files: 30% department/generic, 70% Azure AD user-named
+        # This reflects real organizations where most files are created by individuals
+        # but also have official department documents
+        generic_count = int(num_files * 0.30)
+        azure_count = num_files - generic_count
+        
+        print_info(f"Combined Sources Mix: {azure_count} Azure AD files + {generic_count} department files")
+        
+        success1, fail1 = distribute_files_across_sites(sites, generic_count, access_token)
+        success2, fail2 = distribute_files_with_users(sites, azure_count, access_token, users, groups)
+        success = success1 + success2
+        fail = fail1 + fail2
     
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()
     
-    # Step 7: Summary
-    print_step(7, "Summary")
+    # Step 10: Summary
+    print_step(10, "Summary")
     
     print()
     print(f"  {Colors.WHITE}File Generation Complete!{Colors.NC}")

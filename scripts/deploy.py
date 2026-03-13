@@ -208,6 +208,7 @@ class Colors:
     RED = '\033[0;31m'
     GREEN = '\033[0;32m'
     YELLOW = '\033[1;33m'
+    BLUE = '\033[0;34m'
     CYAN = '\033[0;36m'
     WHITE = '\033[1;37m'
     BOLD = '\033[1m'
@@ -217,7 +218,7 @@ class Colors:
     @classmethod
     def disable(cls):
         """Disable colors (for non-TTY output)."""
-        cls.RED = cls.GREEN = cls.YELLOW = cls.CYAN = cls.WHITE = cls.BOLD = cls.DIM = cls.NC = ''
+        cls.RED = cls.GREEN = cls.YELLOW = cls.BLUE = cls.CYAN = cls.WHITE = cls.BOLD = cls.DIM = cls.NC = ''
 
 
 # Disable colors if not a TTY or on Windows without color support
@@ -1486,30 +1487,27 @@ def select_site_mode(args, step_num: int = 1) -> Tuple[str, List[Dict]]:
         print(f"  {Colors.WHITE}CONFIGURATION FILE OPTIONS:{Colors.NC}")
         print()
         print(f"    [1] Use Configuration File Only{config_count_str}")
-        print("        - Uses config/sites.json for your custom site names")
+        print(f"        {Colors.BLUE}Source:{Colors.NC} config/sites.json")
         print("        - Full control over site names, descriptions, and settings")
         print()
         print(f"    [2] Configuration File + Ad-hoc Sites ({config_site_count} config + you choose ad-hoc)")
-        print("        - Uses your custom sites from config/sites.json")
+        print(f"        {Colors.BLUE}Source:{Colors.NC} config/sites.json + Ad-hoc templates")
         print(f"        - PLUS you choose how many ad-hoc sites (0-{len(ADHOC_SITES)} available)")
-        print("        - Best for realistic environments with your specific sites")
         print()
         print(f"  {Colors.CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{Colors.NC}")
         print(f"  {Colors.WHITE}RANDOM GENERATION OPTIONS:{Colors.NC}")
         print()
         print(f"    [3] Generate Department Sites ({len(DEPARTMENT_SITES)} templates)")
+        print(f"        {Colors.BLUE}Source:{Colors.NC} Department templates")
         print("        - Official department sites (HR, Finance, IT, Legal, etc.)")
-        print("        - Realistic organizational structure")
-        print("        - Mix of Private and Public visibility")
         print()
         print(f"    [4] Generate Ad-hoc Sites ({len(ADHOC_SITES)} templates)")
+        print(f"        {Colors.BLUE}Source:{Colors.NC} Ad-hoc templates")
         print("        - User-created sites (projects, teams, events, clubs)")
-        print("        - Simulates organic SharePoint usage by employees")
-        print("        - Includes working groups, social clubs, regional offices")
         print()
-        print(f"    [5] Generate Mixed Sites (Department + Ad-hoc)")
+        print(f"    [5] Generate Mixed Sites (Department + Ad-hoc) {Colors.GREEN}(Recommended){Colors.NC}")
+        print(f"        {Colors.BLUE}Source:{Colors.NC} Department + Ad-hoc templates")
         print("        - Combines both types for maximum realism")
-        print("        - Specify count for each type separately")
         print()
         print(f"  {Colors.CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{Colors.NC}")
         print()
