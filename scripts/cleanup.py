@@ -1963,17 +1963,12 @@ def purge_site_recycle_bin_pnp(site_url: str, first_stage_only: bool = False, cl
     # This variable is kept for backwards compatibility but is now empty
     second_stage_cmd = ""
     
-    # Build connection command - use -Interactive with ClientId
-    if client_id:
-        connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -Interactive -ClientId "{client_id}" -ErrorAction Stop'
-        # Admin URL connection command (for Set-PnPTenantSite)
-        connect_admin_cmd = f'Connect-PnPOnline -Url $adminUrl -Interactive -ClientId "{client_id}" -ErrorAction Stop'
-        auth_method = "Interactive with registered app"
-    else:
-        # Without client_id, use -Interactive without ClientId (uses PnP's default app)
-        connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -Interactive -ErrorAction Stop'
-        connect_admin_cmd = 'Connect-PnPOnline -Url $adminUrl -Interactive -ErrorAction Stop'
-        auth_method = "Interactive (PnP default app)"
+    # Build connection command - use -UseWebLogin to use browser session directly
+    # This gives the same permissions as when viewing the site in the browser
+    # -UseWebLogin is better than -Interactive because it uses your actual browser session
+    connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -UseWebLogin -ErrorAction Stop'
+    connect_admin_cmd = 'Connect-PnPOnline -Url $adminUrl -UseWebLogin -ErrorAction Stop'
+    auth_method = "Web Login (browser session)"
     
     ps_script = f'''
 $ErrorActionPreference = "Stop"
