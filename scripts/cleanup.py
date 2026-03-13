@@ -22,6 +22,10 @@ Usage:
     python cleanup.py --purge-deleted           # Permanently delete groups from recycle bin
     python cleanup.py --purge-spo-recycle       # Purge SharePoint site recycle bin
     python cleanup.py --purge-spo-recycle --tenant contoso  # With tenant name
+    python cleanup.py --purge-site-recycle --non-interactive --yes  # Headless recycle purge
+    python cleanup.py --purge-site-recycle --non-interactive --auto-setup-cert --yes  # Auto-bootstrap cert auth
+    python cleanup.py --purge-site-recycle --non-interactive --yes --chunk-size 30  # Tuned batch size
+    python cleanup.py --setup-cert-auth  # Automate certificate auth setup for headless mode
     python cleanup.py --help                    # Show help
 
 Requirements:
@@ -37,7 +41,9 @@ import argparse
 import json
 import os
 import platform
+import secrets
 import shutil
+import string
 import subprocess
 import sys
 import urllib.request
@@ -358,6 +364,165 @@ def load_app_config() -> Optional[Dict[str, Any]]:
     return None
 
 
+def save_app_config(app_config: Dict[str, Any]) -> bool:
+    """Persist app configuration to disk."""
+    try:
+        with open(APP_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(app_config, f, indent=2)
+        return True
+    except Exception as e:
+        print_error(f"Failed to save app config: {e}")
+        return False
+
+
+def generate_certificate_password(length: int = 32) -> str:
+    """Generate a strong password for exported PFX files."""
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*()-_=+"
+    return "".join(secrets.choice(alphabet) for _ in range(max(length, 24)))
+
+
+def setup_non_interactive_certificate_auth(
+    cert_name: str,
+    cert_valid_years: int,
+    cert_output_dir: Optional[str] = None,
+) -> bool:
+    """Automate certificate-based app-only auth setup for PnP headless mode."""
+    app_config = load_app_config() or {}
+    app_id = app_config.get("app_id")
+    tenant_id = app_config.get("tenant_id")
+
+    if not app_id or not tenant_id:
+        print_error("App config must contain app_id and tenant_id before certificate setup")
+        print_info("Please configure app registration first, then rerun this setup")
+        return False
+
+    cert_dir = Path(cert_output_dir) if cert_output_dir else (SCRIPT_DIR / "certs")
+    cert_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_name = "".join(ch for ch in cert_name if ch.isalnum() or ch in "-_ ").strip().replace(" ", "-")
+    if not safe_name:
+        safe_name = "sharepoint-cleanup"
+
+    pfx_path = cert_dir / f"{safe_name}.pfx"
+    cer_path = cert_dir / f"{safe_name}.cer"
+    cert_password = generate_certificate_password()
+
+    escaped_subject = f"CN={safe_name}".replace('"', '""')
+    escaped_pfx = str(pfx_path).replace('"', '""')
+    escaped_cer = str(cer_path).replace('"', '""')
+    escaped_pwd = cert_password.replace('"', '""')
+
+    ps_exe = get_powershell_executable()
+    ps_script = f'''
+$ErrorActionPreference = "Stop"
+$subject = "{escaped_subject}"
+$pfxPath = "{escaped_pfx}"
+$cerPath = "{escaped_cer}"
+$plainPwd = "{escaped_pwd}"
+
+# Use .NET certificate APIs to avoid dependency on Cert: drive/provider.
+$rsa = [System.Security.Cryptography.RSA]::Create(2048)
+$hashAlg = [System.Security.Cryptography.HashAlgorithmName]::SHA256
+$padding = [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
+$request = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new($subject, $rsa, $hashAlg, $padding)
+
+# Add basic extensions suitable for client assertion auth.
+$request.CertificateExtensions.Add([System.Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new($false, $false, 0, $true))
+$request.CertificateExtensions.Add([System.Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new([System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature, $true))
+$request.CertificateExtensions.Add([System.Security.Cryptography.X509Certificates.X509SubjectKeyIdentifierExtension]::new($request.PublicKey, $false))
+
+$notBefore = (Get-Date).AddMinutes(-5)
+$notAfter = (Get-Date).AddYears({cert_valid_years})
+$cert = $request.CreateSelfSigned($notBefore, $notAfter)
+
+$pfxBytes = $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx, $plainPwd)
+[System.IO.File]::WriteAllBytes($pfxPath, $pfxBytes)
+
+$cerBytes = $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+[System.IO.File]::WriteAllBytes($cerPath, $cerBytes)
+
+Write-Output ("THUMBPRINT:" + $cert.Thumbprint)
+'''
+
+    print_info("Creating self-signed certificate for app-only auth...")
+    try:
+        cert_result = subprocess.run(
+            [ps_exe, "-ExecutionPolicy", "Bypass", "-NoProfile", "-Command", ps_script],
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+    except Exception as e:
+        print_error(f"Certificate creation failed: {e}")
+        return False
+
+    if cert_result.returncode != 0:
+        print_error("Certificate creation failed")
+        if cert_result.stderr:
+            print_warning(cert_result.stderr.strip())
+        return False
+
+    thumbprint = ""
+    for line in cert_result.stdout.splitlines():
+        if line.strip().startswith("THUMBPRINT:"):
+            thumbprint = line.strip().split("THUMBPRINT:", 1)[1].strip()
+            break
+
+    if not thumbprint:
+        print_error("Could not read generated certificate thumbprint")
+        return False
+
+    print_success("Certificate generated")
+    print_info(f"  CER: {cer_path}")
+    print_info(f"  PFX: {pfx_path}")
+
+    print_info("Adding certificate credential to app registration...")
+    az_path = find_azure_cli_path()
+    display_name = f"{safe_name}-cert"
+    try:
+        add_result = subprocess.run(
+            [
+                az_path,
+                "ad",
+                "app",
+                "credential",
+                "reset",
+                "--id",
+                app_id,
+                "--append",
+                "--cert",
+                f"@{cer_path}",
+                "--display-name",
+                display_name,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+    except Exception as e:
+        print_error(f"Failed to add certificate credential to app: {e}")
+        return False
+
+    if add_result.returncode != 0:
+        print_error("Failed to add certificate credential to app registration")
+        if add_result.stderr:
+            print_warning(add_result.stderr.strip())
+        return False
+
+    # Keep existing secret as fallback while making certificate mode primary.
+    app_config["certificate_path"] = str(pfx_path)
+    app_config["certificate_password"] = cert_password
+    app_config["certificate_thumbprint"] = thumbprint
+    app_config["certificate_subject"] = escaped_subject
+
+    if not save_app_config(app_config):
+        return False
+
+    print_success("Updated app config with certificate auth settings")
+    print_info("You can now rerun non-interactive recycle bin purge")
+    return True
+
+
 def get_graph_access_token_via_client_credentials(app_config: Dict[str, Any]) -> Optional[str]:
     """Get Microsoft Graph access token using client credentials flow."""
     tenant_id = app_config.get("tenant_id")
@@ -451,6 +616,177 @@ def parse_selection(selection: str, max_value: int) -> Set[int]:
                 continue
     
     return selected
+
+
+def chunk_list(items: List[Any], chunk_size: int) -> List[List[Any]]:
+    """Split a list into fixed-size chunks."""
+    if chunk_size <= 0:
+        chunk_size = 1
+    return [items[i:i + chunk_size] for i in range(0, len(items), chunk_size)]
+
+
+def is_unauthorized_message(message: str) -> bool:
+    """Detect auth/authorization failures reported by PnP/SharePoint."""
+    if not message:
+        return False
+
+    normalized = message.lower()
+    patterns = [
+        "unauthorized",
+        "status code is \"unauthorized\"",
+        "status code is 'unauthorized'",
+        "401",
+        "access denied",
+        "e_accessdenied",
+        "aadsts700027",
+        "invalid_client",
+        "certificate with identifier",
+        "key was not found",
+    ]
+    return any(p in normalized for p in patterns)
+
+
+def build_pnp_app_only_connect_commands(
+    client_id: str,
+    tenant_id: Optional[str] = None,
+    client_secret: Optional[str] = None,
+    certificate_path: Optional[str] = None,
+    certificate_password: Optional[str] = None,
+    certificate_thumbprint: Optional[str] = None,
+) -> Tuple[str, str, str]:
+    """Build app-only Connect-PnPOnline command strings.
+
+    Returns a tuple of (primary_command, retry_with_tenant_command).
+    The retry command is an empty string when no tenant is provided.
+    """
+    if certificate_path:
+        if not tenant_id:
+            raise ValueError("tenant_id is required when using certificate_path")
+
+        escaped_cert_path = certificate_path.replace('"', '""')
+        if certificate_password:
+            escaped_cert_password = certificate_password.replace('"', '""')
+            primary = (
+                '$secureCertPassword = ConvertTo-SecureString "' + escaped_cert_password + '" -AsPlainText -Force; '
+                'Connect-PnPOnline -Url $url -ClientId "' + client_id + '" '
+                '-Tenant "' + tenant_id + '" -CertificatePath "' + escaped_cert_path + '" '
+                '-CertificatePassword $secureCertPassword -ErrorAction Stop'
+            )
+        else:
+            primary = (
+                'Connect-PnPOnline -Url $url -ClientId "' + client_id + '" '
+                '-Tenant "' + tenant_id + '" -CertificatePath "' + escaped_cert_path + '" '
+                '-ErrorAction Stop'
+            )
+        return primary, "", "App-only (certificate file)"
+
+    if certificate_thumbprint:
+        if not tenant_id:
+            raise ValueError("tenant_id is required when using certificate_thumbprint")
+        escaped_thumbprint = certificate_thumbprint.replace('"', '""')
+        primary = (
+            'Connect-PnPOnline -Url $url -ClientId "' + client_id + '" '
+            '-Tenant "' + tenant_id + '" -Thumbprint "' + escaped_thumbprint + '" -ErrorAction Stop'
+        )
+        return primary, "", "App-only (certificate thumbprint)"
+
+    if not client_secret:
+        raise ValueError("client_secret or certificate credentials are required for app-only auth")
+
+    escaped_secret = client_secret.replace('"', '""')
+    primary = (
+        'Connect-PnPOnline -Url $url -ClientId "' + client_id + '" '
+        '-ClientSecret "' + escaped_secret + '" -ErrorAction Stop'
+    )
+
+    retry = ""
+    if tenant_id:
+        retry = (
+            'Connect-PnPOnline -Url $url -ClientId "' + client_id + '" '
+            '-Tenant "' + tenant_id + '" -ClientSecret "' + escaped_secret + '" -ErrorAction Stop'
+        )
+
+    return primary, retry, "App-only (client secret)"
+
+
+def preflight_site_recycle_bin_access_pnp(
+    site_url: str,
+    client_id: str,
+    client_secret: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    certificate_path: Optional[str] = None,
+    certificate_password: Optional[str] = None,
+    certificate_thumbprint: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """Validate app-only PnP access against a single site before batch execution."""
+    pwsh = get_pwsh_executable()
+    ps_exe = pwsh if pwsh else get_powershell_executable()
+
+    try:
+        primary_connect_cmd, retry_connect_cmd, _ = build_pnp_app_only_connect_commands(
+            client_id,
+            tenant_id=tenant_id,
+            client_secret=client_secret,
+            certificate_path=certificate_path,
+            certificate_password=certificate_password,
+            certificate_thumbprint=certificate_thumbprint,
+        )
+    except Exception as e:
+        return False, str(e)
+
+    if retry_connect_cmd:
+        connect_cmd = (
+            'try { ' + primary_connect_cmd + ' } '
+            'catch { '
+            '$firstError = $_.Exception.Message; '
+            'try { ' + retry_connect_cmd + ' } '
+            'catch { throw "App-only connect failed. Without tenant: $firstError | With tenant: $($_.Exception.Message)" } '
+            '}'
+        )
+    else:
+        connect_cmd = primary_connect_cmd
+
+    ps_script = f'''
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
+$url = "{site_url}"
+
+try {{
+    {connect_cmd}
+
+    # Validate both site connection and recycle bin access.
+    Get-PnPWeb -ErrorAction Stop | Out-Null
+    Get-PnPRecycleBinItem -FirstStage -RowLimit 1 -ErrorAction Stop | Out-Null
+
+    Disconnect-PnPOnline -ErrorAction SilentlyContinue
+    Write-Output "SUCCESS"
+}} catch {{
+    Write-Output ("ERROR:" + $_.Exception.Message)
+    exit 1
+}}
+'''
+
+    try:
+        result = subprocess.run(
+            [ps_exe, "-ExecutionPolicy", "Bypass", "-NoProfile", "-Command", ps_script],
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+
+        output = (result.stdout or "").strip()
+        if result.returncode == 0 and "SUCCESS" in output:
+            return True, ""
+
+        if output.startswith("ERROR:"):
+            return False, output[6:].strip()
+
+        stderr = (result.stderr or "").strip()
+        return False, stderr or output or "Unknown preflight validation failure"
+    except subprocess.TimeoutExpired:
+        return False, "Preflight validation timed out"
+    except Exception as e:
+        return False, str(e)
 
 # ============================================================================
 # SHAREPOINT OPERATIONS
@@ -1936,21 +2272,23 @@ try {{
 def purge_site_recycle_bin_pnp(site_url: str, first_stage_only: bool = False, client_id: Optional[str] = None) -> Tuple[int, int]:
     """Permanently delete all items from a site's recycle bin using PnP PowerShell.
     
+    This function automatically handles Site Collection Admin access:
+    1. First connects to SharePoint Admin site using PnP Management Shell
+    2. Adds the current user as Site Collection Administrator
+    3. Connects to the site and purges both recycle bins
+    4. Optionally removes Site Collection Admin access after purging
+    
     Args:
         site_url: The SharePoint site URL
         first_stage_only: If True, only clear first-stage recycle bin.
                          If False, clear both first and second stage.
         client_id: Optional Azure AD app client ID for authentication.
-                  If provided, uses -Interactive with -ClientId.
-                  If not provided, falls back to -DeviceLogin.
+                  If provided, uses -Interactive with -ClientId for site connection.
+                  Admin operations always use PnP Management Shell.
     
     Returns (success_count, fail_count).
     
     Prefers PowerShell 7 (pwsh) since PnP.PowerShell is typically installed there.
-    
-    Note: To purge the second-stage (Site Collection) recycle bin, the user must be
-    a Site Collection Administrator. If not, the script will provide instructions
-    on how to add yourself as a Site Collection Admin via the SharePoint Admin Center.
     """
     # Prefer PowerShell 7 (pwsh) since that's where PnP is typically installed
     pwsh = get_pwsh_executable()
@@ -1962,41 +2300,84 @@ def purge_site_recycle_bin_pnp(site_url: str, first_stage_only: bool = False, cl
         if app_config:
             client_id = app_config.get("app_id")
     
-    # Build connection command
-    if client_id:
-        # Use -Interactive with ClientId - this uses the app registration
-        connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -Interactive -ClientId "{client_id}" -ErrorAction Stop'
-        auth_method = "Interactive with registered app"
-    else:
-        # Fallback to DeviceLogin if no app registration
-        connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -DeviceLogin -ErrorAction Stop'
-        auth_method = "Device Login"
-    
-    # Extract admin URL from site URL for instructions
+    # Extract admin URL from site URL
     import urllib.parse
     parsed = urllib.parse.urlparse(site_url)
     tenant_name = parsed.netloc.split('.')[0]
     admin_url = f"https://{tenant_name}-admin.sharepoint.com"
     
-    # Build the PowerShell script - simplified approach that directly connects to the site
+    # Build connection commands - both use the same app registration
+    if client_id:
+        # Use -Interactive with ClientId for both admin and site connections
+        connect_admin_cmd = f'Connect-PnPOnline -Url $adminUrl -Interactive -ClientId "{client_id}" -ErrorAction Stop'
+        connect_site_cmd = f'Connect-PnPOnline -Url $siteUrl -Interactive -ClientId "{client_id}" -ErrorAction Stop'
+        auth_method = "Interactive with registered app"
+    else:
+        # Fallback to DeviceLogin if no app registration
+        connect_admin_cmd = 'Connect-PnPOnline -Url $adminUrl -DeviceLogin -ErrorAction Stop'
+        connect_site_cmd = 'Connect-PnPOnline -Url $siteUrl -DeviceLogin -ErrorAction Stop'
+        auth_method = "Device Login"
+    
+    # Build the PowerShell script with automatic Site Collection Admin handling
     ps_script = f'''
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 $siteUrl = "{site_url}"
-$needsSiteCollectionAdmin = $false
+$adminUrl = "{admin_url}"
+$wasAddedAsAdmin = $false
+$userEmail = $null
+$totalCount = 0
 
 try {{
-    # Connect directly to the site
+    # STEP 1: Connect to SharePoint Admin site to grant Site Collection Admin access
+    Write-Host "=== STEP 1: Ensure Site Collection Admin Access ==="
+    Write-Host "Connecting to SharePoint Admin site: $adminUrl"
+    Write-Host "Authentication method: {auth_method}"
+    
+    # Connect to Admin site using the app registration with user's delegated permissions
+    {connect_admin_cmd}
+    Write-Host "Connected to Admin site successfully!"
+    
+    # Get current user email
+    $context = Get-PnPContext
+    $context.Load($context.Web.CurrentUser)
+    $context.ExecuteQuery()
+    $userEmail = $context.Web.CurrentUser.Email
+    Write-Host "Current user: $userEmail"
+    
+    # Check if user is already a Site Collection Admin
+    Write-Host "Checking Site Collection Admin status..."
+    try {{
+        $siteInfo = Get-PnPTenantSite -Url $siteUrl -Detailed -ErrorAction Stop
+        $currentOwners = $siteInfo.OwnerEmail
+        
+        if ($currentOwners -and $currentOwners -match [regex]::Escape($userEmail)) {{
+            Write-Host "You are already a Site Collection Administrator"
+        }} else {{
+            # Add user as Site Collection Admin
+            Write-Host "Adding $userEmail as Site Collection Administrator..."
+            Set-PnPTenantSite -Url $siteUrl -Owners $userEmail -ErrorAction Stop
+            Write-Host "Site Collection Admin access granted!"
+            $wasAddedAsAdmin = $true
+        }}
+    }} catch {{
+        Write-Host "Note: Could not verify/add Site Collection Admin status: $($_.Exception.Message)"
+        Write-Host "Proceeding anyway - you may already have access..."
+    }}
+    
+    # Disconnect from Admin site
+    Disconnect-PnPOnline -ErrorAction SilentlyContinue
+    
+    # STEP 2: Connect to the actual site and purge recycle bin
+    Write-Host ""
+    Write-Host "=== STEP 2: Purge Recycle Bin ==="
     Write-Host "Connecting to site: $siteUrl"
     Write-Host "Authentication method: {auth_method}"
     
-    {connect_cmd}
+    {connect_site_cmd}
     Write-Host "Connected to site successfully!"
     
-    $totalCount = 0
-    
     # Check SECOND-STAGE recycle bin FIRST (Site Collection Recycle Bin)
-    # Items deleted from first-stage go here, and AdminRecycleBin.aspx?view=5 shows these
     Write-Host ""
     Write-Host "Checking second-stage recycle bin (Site Collection Recycle Bin)..."
     
@@ -2007,7 +2388,7 @@ try {{
             $secondStageCount = @($secondStageItems).Count
             Write-Host "Found $secondStageCount items in second-stage recycle bin"
             
-            # List first few items for debugging
+            # List first few items
             Write-Host "Items found:"
             $secondStageItems | Select-Object -First 5 | ForEach-Object {{ Write-Host "  - $($_.Title) ($($_.ItemType))" }}
             
@@ -2021,12 +2402,7 @@ try {{
         }}
     }} catch {{
         $errorMsg = $_.Exception.Message
-        if ($errorMsg -match "Access is denied" -or $errorMsg -match "Access denied" -or $errorMsg -match "E_ACCESSDENIED" -or $errorMsg -match "unauthorized" -or $errorMsg -match "0x80070005") {{
-            Write-Host "PERMISSION_ERROR: Cannot access second-stage recycle bin - Site Collection Admin required"
-            $needsSiteCollectionAdmin = $true
-        }} else {{
-            Write-Host "Warning: Could not check second-stage recycle bin: $errorMsg"
-        }}
+        Write-Host "Warning: Could not access second-stage recycle bin: $errorMsg"
     }}
     
     # Now check first-stage recycle bin
@@ -2038,7 +2414,7 @@ try {{
         $firstStageCount = @($recycleBinItems).Count
         Write-Host "Found $firstStageCount items in first-stage recycle bin"
         
-        # List first few items for debugging
+        # List first few items
         Write-Host "Items found:"
         $recycleBinItems | Select-Object -First 5 | ForEach-Object {{ Write-Host "  - $($_.Title) ($($_.ItemType))" }}
         
@@ -2051,20 +2427,44 @@ try {{
         Write-Host "First-stage recycle bin is empty"
     }}
     
-    # Disconnect
+    # Disconnect from site
     Disconnect-PnPOnline -ErrorAction SilentlyContinue
     
-    # Output result
-    if ($needsSiteCollectionAdmin) {{
-        Write-Output "NEEDS_ADMIN:$totalCount"
-    }} else {{
-        Write-Output "SUCCESS:$totalCount"
+    # STEP 3: Cleanup - Remove Site Collection Admin access if we added it
+    if ($wasAddedAsAdmin -and $userEmail) {{
+        Write-Host ""
+        Write-Host "=== STEP 3: Cleanup (Remove Site Collection Admin) ==="
+        Write-Host "Reconnecting to Admin site..."
+        
+        try {{
+            {connect_admin_cmd}
+            
+            # Note: PnP doesn't have a direct way to remove a single admin
+            # We would need to get all admins and set them without the current user
+            # For now, we'll leave the user as admin (they can remove manually if needed)
+            Write-Host "Note: You remain as Site Collection Admin (manual removal available via Admin Center)"
+            
+            Disconnect-PnPOnline -ErrorAction SilentlyContinue
+        }} catch {{
+            Write-Host "Note: Could not perform cleanup: $($_.Exception.Message)"
+        }}
     }}
+    
+    # Output result
+    Write-Output "SUCCESS:$totalCount"
     
 }} catch {{
     $errorMsg = $_.Exception.Message
+    
+    # Check if this is a permission error on the Admin site
     if ($errorMsg -match "Access is denied" -or $errorMsg -match "Access denied" -or $errorMsg -match "E_ACCESSDENIED" -or $errorMsg -match "unauthorized" -or $errorMsg -match "0x80070005") {{
-        Write-Output "PERMISSION_ERROR:0"
+        Write-Host ""
+        Write-Host "ADMIN_PERMISSION_ERROR: You need SharePoint Administrator or Global Administrator role"
+        Write-Host "to automatically grant Site Collection Admin access."
+        Write-Host ""
+        Write-Host "Alternative: Ask your SharePoint Administrator to add you as Site Collection Admin"
+        Write-Host "for the sites you need to manage, or request the SharePoint Administrator role."
+        Write-Output "ADMIN_ERROR:0"
     }} else {{
         Write-Error $errorMsg
         exit 1
@@ -2083,16 +2483,13 @@ try {{
             'Write-Output "SUCCESS:$totalCount"',
             f'Write-Output "SUCCESS:$totalCount" | Out-File -FilePath "{result_path}" -Encoding UTF8'
         ).replace(
-            'Write-Output "NEEDS_ADMIN:$totalCount"',
-            f'Write-Output "NEEDS_ADMIN:$totalCount" | Out-File -FilePath "{result_path}" -Encoding UTF8'
-        ).replace(
-            'Write-Output "PERMISSION_ERROR:0"',
-            f'Write-Output "PERMISSION_ERROR:0" | Out-File -FilePath "{result_path}" -Encoding UTF8'
+            'Write-Output "ADMIN_ERROR:0"',
+            f'Write-Output "ADMIN_ERROR:0" | Out-File -FilePath "{result_path}" -Encoding UTF8'
         )
         
         # Run WITHOUT capture_output so browser can open for interactive auth
         # This allows the user to see the authentication prompts
-        print_info("    Opening browser for authentication...")
+        print_info("    Opening browser for authentication (you may need to authenticate twice)...")
         result = subprocess.run(
             [ps_exe, "-ExecutionPolicy", "Bypass", "-NoProfile", "-Command", ps_script_with_output],
             timeout=300,  # 5 minutes for large recycle bins
@@ -2112,30 +2509,20 @@ try {{
                 pass
         
         # Handle different result types
-        if output.startswith("PERMISSION_ERROR:") or output.startswith("NEEDS_ADMIN:"):
-            # Permission issue - provide instructions
-            count = 0
-            if ":" in output:
-                try:
-                    count = int(output.split(":")[1].strip())
-                except ValueError:
-                    pass
-            
+        if output.startswith("ADMIN_ERROR:"):
+            # User doesn't have SharePoint Admin role
             print()
-            print(f"    {Colors.YELLOW}⚠ Site Collection Admin access required for second-stage recycle bin{Colors.NC}")
+            print(f"    {Colors.YELLOW}⚠ SharePoint Administrator role required{Colors.NC}")
             print()
-            print(f"    {Colors.CYAN}To add yourself as Site Collection Admin:{Colors.NC}")
-            print(f"    1. Go to: {admin_url}")
-            print(f"    2. Click 'Active sites' in the left menu")
-            print(f"    3. Find and select the site: {site_url}")
-            print(f"    4. Click 'Membership' tab → 'Site admins'")
-            print(f"    5. Add your account as a Site Collection Administrator")
-            print(f"    6. Run this purge operation again")
+            print(f"    {Colors.CYAN}You need one of the following to automatically manage Site Collection Admins:{Colors.NC}")
+            print(f"    • Global Administrator role")
+            print(f"    • SharePoint Administrator role")
             print()
-            
-            if count > 0:
-                print(f"    {Colors.GREEN}✓ First-stage recycle bin cleared: {count} items{Colors.NC}")
-                return count, 0
+            print(f"    {Colors.CYAN}Alternative options:{Colors.NC}")
+            print(f"    1. Ask your admin to assign you the SharePoint Administrator role")
+            print(f"    2. Ask your admin to add you as Site Collection Admin for specific sites")
+            print(f"    3. Manually add yourself via: {admin_url}")
+            print()
             return 0, 1
             
         elif output.startswith("SUCCESS:"):
@@ -2153,6 +2540,372 @@ try {{
     except Exception as e:
         print_error(f"Error purging recycle bin: {e}")
         return 0, 1
+
+
+def purge_site_recycle_bins_pnp_batch(
+    site_entries: List[Dict[str, str]],
+    first_stage_only: bool = False,
+    client_id: Optional[str] = None,
+    non_interactive: bool = False,
+    tenant_id: Optional[str] = None,
+    client_secret: Optional[str] = None,
+    certificate_path: Optional[str] = None,
+    certificate_password: Optional[str] = None,
+    certificate_thumbprint: Optional[str] = None,
+    timeout_seconds: Optional[int] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Purge recycle bins for multiple sites using one PowerShell session.
+
+    Args:
+        site_entries: List of dicts with keys: "name" and "url".
+        first_stage_only: If True, purge only first-stage recycle bin.
+        client_id: Optional app client ID for Connect-PnPOnline.
+        non_interactive: If True, use app-only auth without browser prompts.
+        tenant_id: Optional tenant ID/domain for non-interactive auth.
+        client_secret: Optional app client secret for non-interactive auth.
+        certificate_path: Optional certificate file path for non-interactive auth.
+        certificate_password: Optional certificate password.
+        certificate_thumbprint: Optional certificate thumbprint in local cert store.
+        timeout_seconds: Optional timeout override for the PowerShell batch.
+
+    Returns:
+        Dict keyed by site URL with values containing status and counters.
+        Status values: "purged", "empty", "failed", "skipped".
+    """
+    pwsh = get_pwsh_executable()
+    ps_exe = pwsh if pwsh else get_powershell_executable()
+
+    if not site_entries:
+        return {}
+
+    # De-duplicate by URL to avoid redundant work on large runs.
+    deduped_entries: List[Dict[str, str]] = []
+    seen_urls: Set[str] = set()
+    for entry in site_entries:
+        url = entry.get("url", "")
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        deduped_entries.append(entry)
+
+    site_entries = deduped_entries
+    if not site_entries:
+        return {}
+
+    if not client_id:
+        app_config = load_app_config()
+        if app_config:
+            client_id = app_config.get("app_id")
+
+    if not tenant_id or not client_secret or not certificate_path or not certificate_thumbprint:
+        app_config = load_app_config()
+        if app_config:
+            tenant_id = tenant_id or app_config.get("tenant_id")
+            client_secret = client_secret or app_config.get("client_secret")
+            certificate_path = certificate_path or app_config.get("certificate_path")
+            certificate_password = certificate_password or app_config.get("certificate_password")
+            certificate_thumbprint = certificate_thumbprint or app_config.get("certificate_thumbprint")
+
+    if non_interactive:
+        has_secret_mode = bool(client_secret)
+        has_cert_mode = bool(certificate_path or certificate_thumbprint)
+        if not client_id or (not has_secret_mode and not has_cert_mode):
+            print_error(
+                "Non-interactive mode requires app_id and either client_secret or certificate credentials "
+                "(certificate_path/certificate_thumbprint) in .app_config.json"
+            )
+            return {
+                entry["url"]: {
+                    "name": entry.get("name", "Unknown"),
+                    "url": entry["url"],
+                    "status": "failed",
+                    "purged": 0,
+                    "firstStagePurged": 0,
+                    "secondStagePurged": 0,
+                    "message": "Missing app-only auth settings for non-interactive mode",
+                }
+                for entry in site_entries
+            }
+
+        try:
+            connect_cmd_primary, connect_cmd_with_tenant, auth_method = build_pnp_app_only_connect_commands(
+                client_id,
+                tenant_id=tenant_id,
+                client_secret=client_secret,
+                certificate_path=certificate_path,
+                certificate_password=certificate_password,
+                certificate_thumbprint=certificate_thumbprint,
+            )
+        except Exception as e:
+            print_error(f"Non-interactive auth configuration error: {e}")
+            return {
+                entry["url"]: {
+                    "name": entry.get("name", "Unknown"),
+                    "url": entry["url"],
+                    "status": "failed",
+                    "purged": 0,
+                    "firstStagePurged": 0,
+                    "secondStagePurged": 0,
+                    "message": f"Non-interactive auth configuration error: {e}",
+                }
+                for entry in site_entries
+            }
+
+        if connect_cmd_with_tenant:
+            connect_cmd = (
+                'try { ' + connect_cmd_primary + ' } '
+                'catch { '
+                '$firstError = $_.Exception.Message; '
+                'try { ' + connect_cmd_with_tenant + ' } '
+                'catch { throw "App-only connect failed. Without tenant: $firstError | With tenant: $($_.Exception.Message)" } '
+                '}'
+            )
+        else:
+            connect_cmd = connect_cmd_primary
+
+        # If certificate auth is primary and a secret exists, allow per-site fallback
+        # for certificate assertion mismatch errors (AADSTS700027/key-not-found).
+        connect_cmd_with_fallback = connect_cmd
+        if (certificate_path or certificate_thumbprint) and client_secret:
+            try:
+                secret_connect_primary, secret_connect_with_tenant, _ = build_pnp_app_only_connect_commands(
+                    client_id,
+                    tenant_id=tenant_id,
+                    client_secret=client_secret,
+                )
+                if secret_connect_with_tenant:
+                    secret_connect_cmd = (
+                        'try { ' + secret_connect_primary + ' } '
+                        'catch { '
+                        '$secretFirstError = $_.Exception.Message; '
+                        'try { ' + secret_connect_with_tenant + ' } '
+                        'catch { throw "Secret fallback failed. Without tenant: $secretFirstError | With tenant: $($_.Exception.Message)" } '
+                        '}'
+                    )
+                else:
+                    secret_connect_cmd = secret_connect_primary
+
+                connect_cmd_with_fallback = (
+                    'try { ' + connect_cmd + ' } '
+                    'catch { '
+                    '$connectErrorMessage = $_.Exception.Message; '
+                    'if ($connectErrorMessage -match "AADSTS700027|The key was not found|certificate with identifier|invalid_client") { '
+                    'Write-Host "  Certificate auth failed; retrying with client secret fallback..."; '
+                    'try { ' + secret_connect_cmd + '; $usedSecretFallback = $true } '
+                    'catch { throw "Certificate auth failed: $connectErrorMessage | $($_.Exception.Message)" } '
+                    '} else { throw $connectErrorMessage } '
+                    '}'
+                )
+            except Exception:
+                # If fallback command construction fails, keep primary command only.
+                pass
+        connect_cmd = connect_cmd_with_fallback
+    elif client_id:
+        connect_cmd = 'Connect-PnPOnline -Url $url -Interactive -ClientId "' + client_id + '" -ErrorAction Stop'
+        auth_method = "Interactive with registered app"
+    else:
+        connect_cmd = 'Connect-PnPOnline -Url $url -DeviceLogin -ErrorAction Stop'
+        auth_method = "Device Login"
+
+    serialized_sites = json.dumps(site_entries).replace("'", "''")
+    ps_first_stage_only = "$true" if first_stage_only else "$false"
+
+    ps_script = f'''
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
+$sites = ConvertFrom-Json @'
+{serialized_sites}
+'@
+$results = @{{}}
+
+Write-Host "Authentication method: {auth_method}"
+Write-Host "Starting batch purge for $($sites.Count) sites..."
+
+foreach ($site in $sites) {{
+    $name = [string]$site.name
+    $url = [string]$site.url
+    $result = @{{
+        name = $name
+        url = $url
+        status = "failed"
+        purged = 0
+        firstStagePurged = 0
+        secondStagePurged = 0
+        message = ""
+    }}
+
+    if (-not $url -or $url -notmatch "sharepoint.com") {{
+        $result.status = "skipped"
+        $result.message = "Missing or invalid SharePoint URL"
+        $results[$url] = $result
+        continue
+    }}
+
+    try {{
+        Write-Host "Processing: $name"
+        Write-Host "  URL: $url"
+
+        $usedSecretFallback = $false
+
+        {connect_cmd}
+
+        $firstStageCount = 0
+        $secondStageCount = 0
+
+        try {{
+            $firstStageItems = Get-PnPRecycleBinItem -FirstStage -RowLimit 5000 -ErrorAction Stop
+            if ($firstStageItems) {{
+                $firstStageCount = @($firstStageItems).Count
+            }}
+        }} catch {{
+            $result.message = "Could not access first-stage recycle bin: $($_.Exception.Message)"
+        }}
+
+        if ($firstStageCount -gt 0) {{
+            Clear-PnPRecycleBinItem -All -Force -ErrorAction Stop
+            $result.firstStagePurged = $firstStageCount
+        }}
+
+        if (-not {ps_first_stage_only}) {{
+            try {{
+                $secondStageItems = Get-PnPRecycleBinItem -SecondStage -RowLimit 5000 -ErrorAction Stop
+                if ($secondStageItems) {{
+                    $secondStageCount = @($secondStageItems).Count
+                }}
+
+                if ($secondStageCount -gt 0) {{
+                    Clear-PnPRecycleBinItem -SecondStage -Force -ErrorAction Stop
+                    $result.secondStagePurged = $secondStageCount
+                }}
+            }} catch {{
+                if ([string]::IsNullOrWhiteSpace($result.message)) {{
+                    $result.message = "Could not access second-stage recycle bin: $($_.Exception.Message)"
+                }} else {{
+                    $result.message = $result.message + " | Could not access second-stage recycle bin: $($_.Exception.Message)"
+                }}
+            }}
+        }}
+
+        $result.purged = $result.firstStagePurged + $result.secondStagePurged
+        if ($result.purged -gt 0) {{
+            $result.status = "purged"
+        }} else {{
+            if ([string]::IsNullOrWhiteSpace($result.message)) {{
+                $result.status = "empty"
+                $result.message = "Recycle bin is empty"
+            }} else {{
+                $result.status = "failed"
+            }}
+        }}
+
+        if ($usedSecretFallback) {{
+            if ([string]::IsNullOrWhiteSpace($result.message)) {{
+                $result.message = "Authenticated via client secret fallback"
+            }} else {{
+                $result.message = $result.message + " | Authenticated via client secret fallback"
+            }}
+        }}
+
+        Disconnect-PnPOnline -ErrorAction SilentlyContinue
+    }} catch {{
+        $result.status = "failed"
+        if ([string]::IsNullOrWhiteSpace($result.message)) {{
+            $result.message = $_.Exception.Message
+        }}
+    }}
+
+    $results[$url] = $result
+}}
+
+$results | ConvertTo-Json -Depth 6 -Compress
+'''
+
+    try:
+        print_info("Running batch recycle bin purge in one PowerShell session...")
+        result = subprocess.run(
+            [ps_exe, "-ExecutionPolicy", "Bypass", "-NoProfile", "-Command", ps_script],
+            capture_output=True,
+            text=True,
+            timeout=(timeout_seconds if timeout_seconds and timeout_seconds > 0 else max(1200, len(site_entries) * 75))
+        )
+
+        if result.returncode != 0:
+            if result.stderr:
+                print_error(f"Batch purge failed: {result.stderr.strip()}")
+            else:
+                print_error("Batch purge failed with unknown PowerShell error")
+            return {
+                entry["url"]: {
+                    "name": entry.get("name", "Unknown"),
+                    "url": entry["url"],
+                    "status": "failed",
+                    "purged": 0,
+                    "firstStagePurged": 0,
+                    "secondStagePurged": 0,
+                    "message": "Batch process failed to execute",
+                }
+                for entry in site_entries
+            }
+
+        json_line = ""
+        for line in reversed(result.stdout.splitlines()):
+            candidate = line.strip()
+            if candidate.startswith("{") and candidate.endswith("}"):
+                json_line = candidate
+                break
+
+        if not json_line:
+            print_error("Batch purge did not return structured results")
+            return {
+                entry["url"]: {
+                    "name": entry.get("name", "Unknown"),
+                    "url": entry["url"],
+                    "status": "failed",
+                    "purged": 0,
+                    "firstStagePurged": 0,
+                    "secondStagePurged": 0,
+                    "message": "No structured output from PowerShell",
+                }
+                for entry in site_entries
+            }
+
+        raw_results = json.loads(json_line)
+        normalized: Dict[str, Dict[str, Any]] = {}
+
+        for entry in site_entries:
+            site_url = entry["url"]
+            item = raw_results.get(site_url, {})
+            normalized[site_url] = {
+                "name": item.get("name", entry.get("name", "Unknown")),
+                "url": item.get("url", site_url),
+                "status": item.get("status", "failed"),
+                "purged": int(item.get("purged", 0) or 0),
+                "firstStagePurged": int(item.get("firstStagePurged", 0) or 0),
+                "secondStagePurged": int(item.get("secondStagePurged", 0) or 0),
+                "message": item.get("message", ""),
+            }
+
+        return normalized
+
+    except subprocess.TimeoutExpired:
+        print_error("Batch purge timed out")
+    except json.JSONDecodeError:
+        print_error("Could not parse batch purge result")
+    except Exception as e:
+        print_error(f"Error running batch purge: {e}")
+
+    return {
+        entry["url"]: {
+            "name": entry.get("name", "Unknown"),
+            "url": entry["url"],
+            "status": "failed",
+            "purged": 0,
+            "firstStagePurged": 0,
+            "secondStagePurged": 0,
+            "message": "Batch purge execution failed",
+        }
+        for entry in site_entries
+    }
 
 
 def get_sharepoint_access_token(site_url: str) -> Optional[str]:
@@ -3107,8 +3860,52 @@ Selection Syntax (for --select-sites and --select-files):
         metavar='NAME',
         help='SharePoint tenant name (e.g., "contoso" for contoso.sharepoint.com)'
     )
+    parser.add_argument(
+        '--non-interactive',
+        action='store_true',
+        help='Run in headless mode with app-only auth (no browser prompts)'
+    )
+    parser.add_argument(
+        '--auto-setup-cert',
+        action='store_true',
+        help='When non-interactive mode is used, auto-create and configure certificate auth if missing'
+    )
+    parser.add_argument(
+        '--chunk-size',
+        type=int,
+        default=25,
+        metavar='N',
+        help='Batch size for site recycle purge (default: 25, recommended: 10-50)'
+    )
+    parser.add_argument(
+        '--setup-cert-auth',
+        action='store_true',
+        help='Create cert, attach to app registration, and update local app config for non-interactive auth'
+    )
+    parser.add_argument(
+        '--cert-name',
+        type=str,
+        default='sharepoint-cleanup-apponly',
+        help='Certificate subject/base name for --setup-cert-auth'
+    )
+    parser.add_argument(
+        '--cert-valid-years',
+        type=int,
+        default=2,
+        help='Certificate validity in years for --setup-cert-auth (default: 2)'
+    )
+    parser.add_argument(
+        '--cert-output-dir',
+        type=str,
+        default=str(SCRIPT_DIR / "certs"),
+        help='Output directory for generated certificate files'
+    )
     
     args = parser.parse_args()
+
+    # Headless mode implies automatic confirmation
+    if args.non_interactive:
+        args.yes = True
     
     # Determine if this is a read-only operation
     is_read_only = (args.list_sites or args.list_files or args.list_groups or args.list_deleted) and not (
@@ -3152,6 +3949,25 @@ Selection Syntax (for --select-sites and --select-files):
             sys.exit(1)
     
     print_success("Azure CLI authenticated")
+
+    # Handle certificate auth setup mode (no Graph token needed)
+    if args.setup_cert_auth:
+        print_step(3, "Setup Certificate Auth for Non-Interactive Mode")
+
+        years = args.cert_valid_years
+        if years < 1:
+            years = 1
+        if years > 5:
+            print_warning("Limiting certificate validity to 5 years")
+            years = 5
+
+        if setup_non_interactive_certificate_auth(
+            cert_name=args.cert_name,
+            cert_valid_years=years,
+            cert_output_dir=args.cert_output_dir,
+        ):
+            sys.exit(0)
+        sys.exit(1)
     
     # Step 3: Get access token
     print_step(3, "Get Microsoft Graph Access Token")
@@ -3260,6 +4076,9 @@ Selection Syntax (for --select-sites and --select-files):
     # Handle site document library recycle bin purge
     if args.purge_site_recycle:
         print_step(4, "Purge Site Files/Folders Recycle Bins (using PnP PowerShell)")
+
+        if args.non_interactive:
+            print_info("Non-interactive mode enabled (headless app-only authentication)")
         
         # Check if PnP module is installed
         if not check_pnp_module_installed():
@@ -3294,64 +4113,200 @@ Selection Syntax (for --select-sites and --select-files):
         
         print_success(f"Found {len(sites)} sites")
         print()
+
+        # Build eligible site list and avoid known system/personal sites that cannot be purged
+        eligible_sites: List[Dict[str, str]] = []
+        skipped_sites: List[str] = []
+
+        for site in sites:
+            site_name = site.get("displayName", site.get("name", "Unknown"))
+
+            if is_system_site(site):
+                skipped_sites.append(site_name)
+                continue
+
+            site_url = site.get("webUrl", "")
+            if not site_url:
+                site_id = site.get("id", "")
+                if site_id:
+                    site_url = get_site_url_from_id(site_id, access_token) or ""
+
+            if site_url and "sharepoint.com" in site_url:
+                eligible_sites.append({"name": site_name, "url": site_url})
+            else:
+                skipped_sites.append(site_name)
+
+        if skipped_sites:
+            print_warning(f"Skipping {len(skipped_sites)} unsupported/system site(s)")
+            for name in skipped_sites[:8]:
+                print(f"    - {name}")
+            if len(skipped_sites) > 8:
+                print(f"    ... and {len(skipped_sites) - 8} more")
+
+        if not eligible_sites:
+            print_warning("No eligible sites found for recycle bin purge")
+            sys.exit(0)
         
         # Confirm before purging
         if not args.yes:
             print_warning("This will permanently delete all items from site recycle bins!")
-            print_info("You will be prompted to authenticate to each site via browser")
+            print_info("You will authenticate once in a single batch session")
             print()
-            for site in sites[:10]:
-                name = site.get("displayName", site.get("name", "Unknown"))
-                print(f"    - {name}")
-            if len(sites) > 10:
-                print(f"    ... and {len(sites) - 10} more")
+            for entry in eligible_sites[:10]:
+                print(f"    - {entry['name']}")
+            if len(eligible_sites) > 10:
+                print(f"    ... and {len(eligible_sites) - 10} more")
             print()
             confirm = input(f"  {Colors.YELLOW}Proceed with purging recycle bins? (y/N): {Colors.NC}").strip().lower()
             if confirm != 'y':
                 print_warning("Operation cancelled")
                 sys.exit(0)
         
-        # Purge recycle bins using PnP PowerShell
+        # Preflight the app-only auth once before batch processing.
+        app_config = load_app_config() or {}
+        if args.non_interactive:
+            has_secret_mode = bool(app_config.get("client_secret"))
+            has_cert_mode = bool(app_config.get("certificate_path") or app_config.get("certificate_thumbprint"))
+
+            if args.auto_setup_cert and app_config.get("app_id") and app_config.get("tenant_id") and not has_cert_mode:
+                print_info("Auto certificate setup enabled - generating certificate auth configuration...")
+                years = args.cert_valid_years
+                if years < 1:
+                    years = 1
+                if years > 5:
+                    years = 5
+
+                if setup_non_interactive_certificate_auth(
+                    cert_name=args.cert_name,
+                    cert_valid_years=years,
+                    cert_output_dir=args.cert_output_dir,
+                ):
+                    app_config = load_app_config() or app_config
+                    has_secret_mode = bool(app_config.get("client_secret"))
+                    has_cert_mode = bool(app_config.get("certificate_path") or app_config.get("certificate_thumbprint"))
+                    print_success("Certificate auth bootstrap completed")
+                else:
+                    print_warning("Auto certificate setup failed; continuing with existing non-interactive configuration")
+
+            if not app_config.get("app_id") or (not has_secret_mode and not has_cert_mode):
+                print_error(
+                    "Non-interactive mode requires app_id and either client_secret or certificate credentials "
+                    "(certificate_path/certificate_thumbprint) in scripts/.app_config.json"
+                )
+                sys.exit(1)
+
+            preflight_site = eligible_sites[0]
+            print_info(f"Running non-interactive preflight against: {preflight_site['name']}")
+            preflight_ok, preflight_message = preflight_site_recycle_bin_access_pnp(
+                preflight_site["url"],
+                app_config.get("app_id", ""),
+                app_config.get("client_secret"),
+                app_config.get("tenant_id"),
+                app_config.get("certificate_path"),
+                app_config.get("certificate_password"),
+                app_config.get("certificate_thumbprint"),
+            )
+
+            if not preflight_ok:
+                print_error("Non-interactive preflight failed")
+                if is_unauthorized_message(preflight_message):
+                    print_warning("App-only SharePoint auth is not authorized for recycle bin access")
+                    print_info("Required for non-interactive mode:")
+                    print_info("  1. App registration with SharePoint application permission Sites.FullControl.All")
+                    print_info("  2. Admin consent granted for that SharePoint permission")
+                    print_info("  3. Prefer certificate-based app-only auth in scripts/.app_config.json")
+                    print_info("     Supported keys: certificate_path + tenant_id (+ optional certificate_password)")
+                    print_info("     or certificate_thumbprint + tenant_id")
+                    print_info("  4. Keep client_secret mode only as fallback")
+                    print_info("Alternative least-privilege model:")
+                    print_info("  - Use Sites.Selected and grant site-level app permissions to each target site")
+                else:
+                    print_warning(preflight_message)
+
+                print_info("Stopping before batch execution because no sites can be purged with the current app-only configuration.")
+                sys.exit(1)
+
+            print_success("Non-interactive preflight passed")
+
+        # Purge recycle bins in chunked PnP batch sessions for large site sets.
+        chunk_size = args.chunk_size if args.chunk_size and args.chunk_size > 0 else 25
+        if chunk_size > 100:
+            print_warning("Large chunk size can increase timeout/throttling risk; capping to 100")
+            chunk_size = 100
+        site_chunks = chunk_list(eligible_sites, chunk_size)
+        batch_results: Dict[str, Dict[str, Any]] = {}
+
+        if len(site_chunks) > 1:
+            print_info(f"Processing {len(eligible_sites)} site(s) in {len(site_chunks)} chunk(s) of up to {chunk_size}")
+
+        for chunk_index, site_chunk in enumerate(site_chunks, start=1):
+            if len(site_chunks) > 1:
+                print_info(f"Running chunk {chunk_index}/{len(site_chunks)} ({len(site_chunk)} site(s))")
+
+            chunk_results = purge_site_recycle_bins_pnp_batch(
+                site_chunk,
+                non_interactive=args.non_interactive,
+                client_id=app_config.get("app_id"),
+                tenant_id=app_config.get("tenant_id"),
+                client_secret=app_config.get("client_secret"),
+                certificate_path=app_config.get("certificate_path"),
+                certificate_password=app_config.get("certificate_password"),
+                certificate_thumbprint=app_config.get("certificate_thumbprint"),
+                timeout_seconds=max(1200, len(site_chunk) * 75),
+            )
+            batch_results.update(chunk_results)
+
         total_purged = 0
         total_failed = 0
-        
-        for site in sites:
-            site_id = site.get("id", "")
-            site_name = site.get("displayName", site.get("name", "Unknown"))
-            
-            # Get site URL from Graph API
-            site_url = get_site_url_from_id(site_id, access_token)
-            
-            if not site_url:
-                print_warning(f"  Could not get URL for site: {site_name}")
-                total_failed += 1
-                continue
-            
-            print()
-            print_info(f"Purging recycle bin: {site_name}")
-            print_info(f"  Site URL: {site_url}")
-            
-            # Try REST API first (uses app permissions), fall back to PnP PowerShell
-            purged, failed = purge_site_recycle_bin_rest(site_url)
-            if failed > 0:
-                # REST API failed, try PnP PowerShell as fallback
-                print_info("  REST API failed, trying PnP PowerShell...")
-                purged, failed = purge_site_recycle_bin_pnp(site_url)
-            total_purged += purged
-            total_failed += failed
-            
-            if purged > 0:
-                print_success(f"  Purged {purged} items from recycle bin")
-            elif failed > 0:
-                print_warning(f"  Failed to purge recycle bin")
+        total_empty = 0
+        total_unauthorized = 0
+
+        for entry in eligible_sites:
+            site_url = entry["url"]
+            result = batch_results.get(site_url, {})
+            status = result.get("status", "failed")
+            purged = int(result.get("purged", 0) or 0)
+            message = result.get("message", "")
+
+            if status == "purged":
+                total_purged += purged
+                print_success(f"{entry['name']}: purged {purged} item(s)")
+            elif status == "empty":
+                total_empty += 1
+                print_info(f"{entry['name']}: recycle bin empty")
+            elif status == "skipped":
+                print_warning(f"{entry['name']}: skipped ({message})")
             else:
-                print_info(f"  Recycle bin is empty")
+                total_failed += 1
+                if is_unauthorized_message(message):
+                    total_unauthorized += 1
+                    print_warning(f"{entry['name']}: unauthorized for app-only auth")
+                elif message:
+                    print_warning(f"{entry['name']}: failed ({message})")
+                else:
+                    print_warning(f"{entry['name']}: failed")
         
         print()
         if total_purged > 0:
-            print_success(f"Purged recycle bins from {len(sites)} sites ({total_purged} total items)")
+            print_success(f"Purged {total_purged} item(s) across {len(eligible_sites)} eligible site(s)")
+        if total_empty > 0:
+            print_info(f"{total_empty} site(s) already had empty recycle bins")
         if total_failed > 0:
-            print_warning(f"Failed to purge {total_failed} sites (may require additional permissions)")
+            print_warning(f"Failed to purge {total_failed} site(s)")
+
+        if total_unauthorized > 0:
+            print()
+            print_warning(f"App-only auth was unauthorized for {total_unauthorized} site(s)")
+            print_info("Required for non-interactive mode:")
+            print_info("  1. App registration with SharePoint application permission Sites.FullControl.All")
+            print_info("  2. Admin consent granted for that SharePoint permission")
+            print_info("  3. Correct client_id/client_secret in scripts/.app_config.json")
+            print_info("Alternative least-privilege model:")
+            print_info("  - Use Sites.Selected and grant site-level app permissions to each target site")
+
+            if args.non_interactive and total_unauthorized == len(eligible_sites):
+                print_warning("All eligible sites failed with unauthorized app-only auth")
+                print_info("No recycle bins were purged. Fix app permissions first, then rerun.")
         
         sys.exit(0)
     

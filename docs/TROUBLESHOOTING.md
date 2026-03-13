@@ -831,27 +831,47 @@ The module may be installed in a different PowerShell version's module path.
 ### Issue 22: Site Recycle Bin Shows Empty (PnP PowerShell Required)
 
 **Symptom:**
-When using menu option `[8] Purge site files/folders recycle bin`, the script reports "Recycle bin is empty" even though you can see items in the SharePoint site's recycle bin in the browser.
+When using menu option `[8] Purge site files/folders recycle bin`, one of these happens:
+- The script reports all sites as empty unexpectedly
+- One or more sites fail with app-only auth errors (for example `AADSTS700027`)
+- You see inconsistent behavior across sites in the same run
 
 **Cause:**
-The Microsoft Graph API does not provide direct access to SharePoint site recycle bins. The Graph API token cannot be used with SharePoint REST API endpoints (`/_api/web/RecycleBin`) because they require SharePoint-specific authentication.
+- SharePoint file/folder recycle bins are accessed through PnP PowerShell, not Graph API recycle endpoints.
+- Non-interactive mode depends on app-only auth configuration in `scripts/.app_config.json`.
+- Certificate assertion drift (missing/old app key) can break cert auth for specific sites unless fallback auth is available.
 
 **Solution:**
-The cleanup script now uses **PnP PowerShell** to access site recycle bins. PnP PowerShell properly authenticates to SharePoint and can access the recycle bin.
+Use the current non-interactive batch flow with preflight validation and certificate bootstrap:
 
-1. **The script will automatically prompt to install PnP.PowerShell** if not already installed:
-   ```
-   ⚠ PnP.PowerShell module is not installed
-   Install PnP.PowerShell module? (Y/n):
-   ```
+```bash
+cd sharepoint-sites-terraform/scripts
 
-2. **Manual installation** (if needed):
-   ```powershell
-   # Install PnP.PowerShell module
-   Install-Module -Name "PnP.PowerShell" -Scope CurrentUser -Force -AllowClobber
-   ```
+# Recommended first run (headless + auto certificate bootstrap)
+python cleanup.py --purge-site-recycle --non-interactive --auto-setup-cert --yes
 
-3. **Authentication**: When purging recycle bins, you'll be prompted to authenticate via browser for each site. This is required because PnP PowerShell uses interactive authentication.
+# Optional: tune chunk size for larger tenants
+python cleanup.py --purge-site-recycle --non-interactive --yes --chunk-size 30
+```
+
+1. **If PnP.PowerShell is missing, install it**:
+  ```powershell
+  Install-Module -Name "PnP.PowerShell" -Scope CurrentUser -Force -AllowClobber
+  ```
+
+2. **If cert auth is not configured, run one-time setup**:
+  ```bash
+  python cleanup.py --setup-cert-auth
+  ```
+
+3. **Verify app permissions for headless mode**:
+  - SharePoint application permission: `Sites.FullControl.All`
+  - Admin consent granted in Entra app registration
+
+4. **Expected runtime behavior**:
+  - One non-interactive preflight against the first eligible site
+  - Chunked batch purge in shared PowerShell sessions
+  - Automatic fallback to client secret when certificate assertion fails (`AADSTS700027`) and secret is present
 
 **Understanding the Three Recycle Bins:**
 
@@ -871,7 +891,7 @@ python scripts/menu.py
 # Select [8] Purge site files/folders recycle bin
 
 # Via command line
-python scripts/cleanup.py --purge-site-recycle --site "Company Announcements"
+python scripts/cleanup.py --purge-site-recycle --non-interactive --yes
 ```
 
 ---

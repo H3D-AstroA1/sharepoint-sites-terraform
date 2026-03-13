@@ -94,6 +94,7 @@ This opens an interactive menu that guides you through all operations:
   [6] 📧 Populate Mailboxes with Emails
   [7] 🗑️  Delete Emails from Mailboxes
   [8] 📬 List Mailboxes
+  [9] 🔍 Azure AD User Discovery
 
   [A] 🔐 Manage App Registration         ← For SharePoint/Mail permissions
   [C] ⚙️  Edit Configuration
@@ -509,16 +510,22 @@ python cleanup.py --purge-deleted
 python cleanup.py --purge-spo-recycle --tenant contoso
 
 # Purge files/folders from site document library recycle bins
-python cleanup.py --purge-site-recycle
+python cleanup.py --purge-site-recycle --non-interactive --yes
 
-# Purge recycle bin for specific sites only
-python cleanup.py --purge-site-recycle --site hr
+# Non-interactive purge with automatic cert bootstrap (recommended first run)
+python cleanup.py --purge-site-recycle --non-interactive --auto-setup-cert --yes
+
+# Tune batch size for large environments
+python cleanup.py --purge-site-recycle --non-interactive --yes --chunk-size 30
+
+# One-time certificate auth setup command
+python cleanup.py --setup-cert-auth
 ```
 
 Or use the main menu:
 - Option **[6]**: Purge M365 Groups recycle bin (Azure AD)
 - Option **[7]**: Purge SharePoint site recycle bin
-- Option **[8]**: Purge site files/folders recycle bin
+- Option **[8]**: Purge site files/folders recycle bin (non-interactive, auto cert setup)
 
 > ⚠️ **Note**: The SharePoint site recycle bin purge requires the **SharePoint Online PowerShell module** (`Microsoft.Online.SharePoint.PowerShell`). The script will automatically install it if not present (Windows only).
 
@@ -540,6 +547,13 @@ Options:
   --purge-spo-recycle  Permanently delete sites from SharePoint recycle bin
   --purge-site-recycle Purge files/folders from site document library recycle bins
   --tenant NAME        SharePoint tenant name (required with --purge-spo-recycle)
+  --non-interactive    Run headless app-only auth (no browser prompts)
+  --auto-setup-cert    Auto-create and configure certificate auth if missing
+  --chunk-size N       Batch size for site recycle purge (default: 25)
+  --setup-cert-auth    One-time certificate auth setup for non-interactive mode
+  --cert-name NAME     Certificate name for --setup-cert-auth
+  --cert-valid-years N Certificate validity (years) for --setup-cert-auth
+  --cert-output-dir D  Output directory for generated certificate files
   -y, --yes            Skip confirmation prompts (use with caution!)
 ```
 

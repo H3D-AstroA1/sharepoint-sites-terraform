@@ -4535,7 +4535,7 @@ def main() -> None:
             elif sub_choice == '8':
                 # Purge site files/folders recycle bin
                 site_filter = get_site_filter()
-                args = ["--purge-site-recycle"]
+                args = ["--purge-site-recycle", "--non-interactive", "--auto-setup-cert", "--yes"]
                 if site_filter:
                     args.extend(["--site", site_filter])
                 run_script("cleanup.py", args)
