@@ -1858,6 +1858,81 @@ def get_site_recycle_bin_count(site_id: str, access_token: str) -> int:
     return 0
 
 
+def add_current_user_as_site_admin_pnp(site_url: str, client_id: Optional[str] = None) -> bool:
+    """Add the current user as Site Collection Administrator using PnP PowerShell.
+    
+    This is required to access the recycle bin via PnP PowerShell.
+    
+    Args:
+        site_url: The SharePoint site URL
+        client_id: Optional Azure AD app client ID for authentication.
+    
+    Returns True if successful, False otherwise.
+    """
+    pwsh = get_pwsh_executable()
+    ps_exe = pwsh if pwsh else get_powershell_executable()
+    
+    if not client_id:
+        app_config = load_app_config()
+        if app_config:
+            client_id = app_config.get("app_id")
+    
+    # Build connection command
+    if client_id:
+        connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -Interactive -ClientId "{client_id}" -ErrorAction Stop'
+    else:
+        connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -Interactive -ErrorAction Stop'
+    
+    ps_script = f'''
+$ErrorActionPreference = "Stop"
+try {{
+    {connect_cmd}
+    
+    # Get current user
+    $currentUser = Get-PnPProperty -ClientObject (Get-PnPWeb) -Property CurrentUser
+    $userEmail = $currentUser.Email
+    
+    if ($userEmail) {{
+        Write-Host "Adding $userEmail as Site Collection Administrator..."
+        Set-PnPSiteCollectionAdmin -Owners $userEmail -ErrorAction Stop
+        Write-Host "SUCCESS"
+    }} else {{
+        Write-Host "Could not determine current user email"
+        Write-Host "FAILED"
+    }}
+    
+    Disconnect-PnPOnline -ErrorAction SilentlyContinue
+}} catch {{
+    Write-Host "Error: $_"
+    Write-Host "FAILED"
+}}
+'''
+    
+    try:
+        print_info("  Adding current user as Site Collection Administrator...")
+        result = subprocess.run(
+            [ps_exe, "-ExecutionPolicy", "Bypass", "-NoProfile", "-Command", ps_script],
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        
+        output = result.stdout + result.stderr
+        if "SUCCESS" in output:
+            print(f"    {Colors.GREEN}✓{Colors.NC} Added as Site Collection Administrator")
+            return True
+        else:
+            print_error(f"  Failed to add as Site Collection Admin: {output[:100]}")
+            return False
+            
+    except subprocess.TimeoutExpired:
+        print_error("  Operation timed out")
+        return False
+    except Exception as e:
+        print_error(f"  Error: {e}")
+        return False
+
+
 def purge_site_recycle_bin_pnp(site_url: str, first_stage_only: bool = False, client_id: Optional[str] = None) -> Tuple[int, int]:
     """Permanently delete all items from a site's recycle bin using PnP PowerShell.
     
@@ -1917,20 +1992,52 @@ try {{
     {connect_cmd}
     Write-Host "Connected successfully!"
     
+    # First, ensure current user is Site Collection Admin (required to access recycle bin)
+    Write-Host "Ensuring Site Collection Admin access..."
+    try {{
+        $web = Get-PnPWeb
+        $currentUser = Get-PnPProperty -ClientObject $web -Property CurrentUser
+        $userEmail = $currentUser.Email
+        if ($userEmail) {{
+            Write-Host "Adding $userEmail as Site Collection Administrator..."
+            Set-PnPSiteCollectionAdmin -Owners $userEmail -ErrorAction SilentlyContinue
+            Write-Host "Site Collection Admin access granted"
+        }}
+    }} catch {{
+        Write-Host "Note: Could not add as Site Collection Admin (may already be admin): $_"
+    }}
+    
     # Get count of items in recycle bin first
-    $recycleBinItems = Get-PnPRecycleBinItem -ErrorAction SilentlyContinue
+    # Use -RowLimit to ensure we get all items
+    Write-Host "Checking recycle bin..."
+    $recycleBinItems = Get-PnPRecycleBinItem -RowLimit 5000 -ErrorAction SilentlyContinue
     $totalCount = 0
     
-    if ($recycleBinItems) {{
+    if ($recycleBinItems -and @($recycleBinItems).Count -gt 0) {{
         $totalCount = @($recycleBinItems).Count
         Write-Host "Found $totalCount items in first-stage recycle bin"
+        
+        # List first few items for debugging
+        Write-Host "Items found:"
+        $recycleBinItems | Select-Object -First 5 | ForEach-Object {{ Write-Host "  - $($_.Title) ($($_.ItemType))" }}
         
         # Clear the recycle bin
         Write-Host "Clearing first-stage recycle bin..."
         Clear-PnPRecycleBinItem -All -Force -ErrorAction Stop
         Write-Host "First-stage recycle bin cleared!"
     }} else {{
-        Write-Host "First-stage recycle bin is empty"
+        # Try to get more info about why it's empty
+        Write-Host "First-stage recycle bin appears empty"
+        Write-Host "Checking with different method..."
+        $allItems = Get-PnPRecycleBinItem -FirstStage -RowLimit 5000 -ErrorAction SilentlyContinue
+        if ($allItems) {{
+            $totalCount = @($allItems).Count
+            Write-Host "Found $totalCount items using -FirstStage parameter"
+            Clear-PnPRecycleBinItem -All -Force -ErrorAction Stop
+            Write-Host "First-stage recycle bin cleared!"
+        }} else {{
+            Write-Host "First-stage recycle bin is empty"
+        }}
     }}
     {second_stage_cmd}
     # Output result
@@ -1992,6 +2099,254 @@ try {{
         return 0, 1
     except Exception as e:
         print_error(f"Error purging recycle bin: {e}")
+        return 0, 1
+
+
+def get_sharepoint_access_token(site_url: str) -> Optional[str]:
+    """Get a SharePoint-specific access token for REST API calls.
+    
+    Uses the app registration's client credentials to get a token
+    scoped to SharePoint Online.
+    """
+    app_config = load_app_config()
+    if not app_config:
+        print_error("No app configuration found. Please set up app registration first.")
+        return None
+    
+    client_id = app_config.get("app_id")
+    client_secret = app_config.get("client_secret")
+    tenant_id = app_config.get("tenant_id")
+    
+    if not client_id:
+        print_error("App ID not found in configuration.")
+        return None
+    
+    if not client_secret:
+        print_error("Client secret not found in app configuration.")
+        print_info("Please use 'Manage App Registration' > 'Regenerate Client Secret' to create one.")
+        return None
+    
+    if not tenant_id:
+        print_error("Tenant ID not found in configuration.")
+        return None
+    
+    # Extract the SharePoint host from the site URL
+    # e.g., https://contoso.sharepoint.com/sites/mysite -> contoso.sharepoint.com
+    import re
+    match = re.match(r'https://([^/]+)', site_url)
+    if not match:
+        print_error(f"Could not extract SharePoint host from URL: {site_url}")
+        return None
+    
+    sharepoint_host = match.group(1)
+    resource = f"https://{sharepoint_host}"
+    
+    # Try v2.0 endpoint first with .default scope
+    token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    
+    data = urllib.parse.urlencode({
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "scope": f"{resource}/.default"
+    }).encode()
+    
+    try:
+        req = urllib.request.Request(token_url, data=data)
+        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode())
+            token = result.get("access_token")
+            if token:
+                return token
+    except urllib.error.HTTPError as e:
+        # If v2.0 fails, try v1.0 endpoint (legacy but sometimes required for SharePoint)
+        print_info(f"    v2.0 token request failed ({e.code}), trying v1.0 endpoint...")
+    except Exception as e:
+        print_info(f"    v2.0 token request failed: {e}, trying v1.0 endpoint...")
+    
+    # Try v1.0 endpoint (legacy Azure AD endpoint - sometimes required for SharePoint app-only)
+    token_url_v1 = f"https://login.microsoftonline.com/{tenant_id}/oauth2/token"
+    
+    data_v1 = urllib.parse.urlencode({
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "resource": resource
+    }).encode()
+    
+    try:
+        req = urllib.request.Request(token_url_v1, data=data_v1)
+        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode())
+            return result.get("access_token")
+    except Exception as e:
+        print_error(f"Failed to get SharePoint token: {e}")
+        return None
+
+
+def get_recycle_bin_items_rest(site_url: str, access_token: str) -> Optional[List[Dict[str, Any]]]:
+    """Get recycle bin items using SharePoint REST API.
+    
+    Args:
+        site_url: The SharePoint site URL
+        access_token: SharePoint access token
+    
+    Returns list of recycle bin items, or None if authentication/access failed.
+    Empty list means recycle bin is empty. None means we couldn't access it.
+    """
+    # SharePoint REST API endpoint for recycle bin
+    api_url = f"{site_url.rstrip('/')}/_api/web/RecycleBin?$top=5000"
+    
+    try:
+        req = urllib.request.Request(api_url)
+        req.add_header("Authorization", f"Bearer {access_token}")
+        req.add_header("Accept", "application/json;odata=verbose")
+        
+        with urllib.request.urlopen(req, timeout=60) as response:
+            data = json.loads(response.read().decode())
+            items = data.get("d", {}).get("results", [])
+            return items
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            print_error(f"  Authentication failed (401). SharePoint REST API requires certificate-based auth.")
+            return None  # Return None to indicate auth failure, not empty recycle bin
+        elif e.code == 403:
+            print_error(f"  Access denied to recycle bin (403). Check app permissions.")
+            return None  # Return None to indicate access failure
+        elif e.code == 404:
+            print_error(f"  Site not found (404)")
+            return None
+        else:
+            print_error(f"  HTTP error {e.code}: {e.reason}")
+            return None  # Return None for any HTTP error
+    except Exception as e:
+        print_error(f"  Error getting recycle bin: {e}")
+        return None
+
+
+def delete_recycle_bin_item_rest(site_url: str, item_id: str, access_token: str) -> bool:
+    """Delete a single item from the recycle bin using SharePoint REST API.
+    
+    Args:
+        site_url: The SharePoint site URL
+        item_id: The recycle bin item ID (GUID)
+        access_token: SharePoint access token
+    
+    Returns True if successful.
+    """
+    # SharePoint REST API endpoint to delete recycle bin item
+    api_url = f"{site_url.rstrip('/')}/_api/web/RecycleBin('{item_id}')"
+    
+    try:
+        req = urllib.request.Request(api_url, method="DELETE")
+        req.add_header("Authorization", f"Bearer {access_token}")
+        req.add_header("Accept", "application/json;odata=verbose")
+        req.add_header("IF-MATCH", "*")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            return True
+    except urllib.error.HTTPError as e:
+        if e.code == 204:  # No content = success
+            return True
+        return False
+    except Exception:
+        return False
+
+
+def clear_recycle_bin_rest(site_url: str, access_token: str) -> bool:
+    """Clear all items from the recycle bin using SharePoint REST API.
+    
+    Args:
+        site_url: The SharePoint site URL
+        access_token: SharePoint access token
+    
+    Returns True if successful.
+    """
+    # SharePoint REST API endpoint to delete all recycle bin items
+    api_url = f"{site_url.rstrip('/')}/_api/web/RecycleBin/DeleteAll()"
+    
+    try:
+        req = urllib.request.Request(api_url, method="POST")
+        req.add_header("Authorization", f"Bearer {access_token}")
+        req.add_header("Accept", "application/json;odata=verbose")
+        req.add_header("Content-Length", "0")
+        
+        with urllib.request.urlopen(req, timeout=60) as response:
+            return True
+    except urllib.error.HTTPError as e:
+        if e.code == 204 or e.code == 200:  # Success
+            return True
+        print_error(f"  HTTP error {e.code}: {e.reason}")
+        return False
+    except Exception as e:
+        print_error(f"  Error clearing recycle bin: {e}")
+        return False
+
+
+def purge_site_recycle_bin_rest(site_url: str) -> Tuple[int, int]:
+    """Purge site recycle bin using SharePoint REST API.
+    
+    This uses the app registration's client credentials (application permissions)
+    which should have Sites.FullControl.All permission.
+    
+    Note: SharePoint REST API with client credentials typically requires
+    certificate-based authentication, not client secret. This method may fail
+    with 401 errors even with correct permissions.
+    
+    Args:
+        site_url: The SharePoint site URL
+    
+    Returns (success_count, fail_count).
+        - (0, 1) means access failed (should fall back to PnP PowerShell)
+        - (0, 0) means recycle bin is empty (no fallback needed)
+        - (n, 0) means n items were purged successfully
+    """
+    # Get SharePoint access token
+    print_info("  Getting SharePoint access token...")
+    sp_token = get_sharepoint_access_token(site_url)
+    
+    if not sp_token:
+        print_error("  Could not get SharePoint access token")
+        return 0, 1  # Return failure to trigger PnP fallback
+    
+    # Get recycle bin items
+    print_info("  Checking recycle bin via REST API...")
+    items = get_recycle_bin_items_rest(site_url, sp_token)
+    
+    # None means access failed (auth error, permission error, etc.)
+    # Empty list [] means recycle bin is actually empty
+    if items is None:
+        print_warning("  REST API access failed - will try PnP PowerShell")
+        return 0, 1  # Return failure to trigger PnP fallback
+    
+    if len(items) == 0:
+        print_info("  Recycle bin is empty (confirmed via REST API)")
+        return 0, 0  # Actually empty, no fallback needed
+    
+    item_count = len(items)
+    print_info(f"  Found {item_count} items in recycle bin")
+    
+    # Show first few items
+    for item in items[:5]:
+        title = item.get("Title", "Unknown")
+        item_type = item.get("ItemType", 0)
+        type_name = "Folder" if item_type == 1 else "File"
+        print(f"      - {title} ({type_name})")
+    
+    if item_count > 5:
+        print(f"      ... and {item_count - 5} more items")
+    
+    # Clear all items
+    print_info("  Clearing recycle bin...")
+    if clear_recycle_bin_rest(site_url, sp_token):
+        print(f"    {Colors.GREEN}✓{Colors.NC} Cleared {item_count} items from recycle bin")
+        return item_count, 0
+    else:
+        print_error("  Failed to clear recycle bin")
         return 0, 1
 
 
@@ -2324,7 +2679,12 @@ def delete_files_mode(sites: List[Dict[str, Any]], access_token: str, purge_recy
                 print_info(f"Purging recycle bin: {site_name}")
                 print_info(f"  Site URL: {site_url}")
                 
-                purged, purge_fail = purge_site_recycle_bin_pnp(site_url)
+                # Try REST API first (uses app permissions), fall back to PnP PowerShell
+                purged, purge_fail = purge_site_recycle_bin_rest(site_url)
+                if purge_fail > 0:
+                    # REST API failed, try PnP PowerShell as fallback
+                    print_info("  REST API failed, trying PnP PowerShell...")
+                    purged, purge_fail = purge_site_recycle_bin_pnp(site_url)
                 total_purged += purged
                 total_purge_fail += purge_fail
                 
@@ -2918,7 +3278,12 @@ Selection Syntax (for --select-sites and --select-files):
             print_info(f"Purging recycle bin: {site_name}")
             print_info(f"  Site URL: {site_url}")
             
-            purged, failed = purge_site_recycle_bin_pnp(site_url)
+            # Try REST API first (uses app permissions), fall back to PnP PowerShell
+            purged, failed = purge_site_recycle_bin_rest(site_url)
+            if failed > 0:
+                # REST API failed, try PnP PowerShell as fallback
+                print_info("  REST API failed, trying PnP PowerShell...")
+                purged, failed = purge_site_recycle_bin_pnp(site_url)
             total_purged += purged
             total_failed += failed
             
