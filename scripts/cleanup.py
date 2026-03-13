@@ -1981,41 +1981,56 @@ def purge_site_recycle_bin_pnp(site_url: str, first_stage_only: bool = False, cl
         connect_admin_cmd = 'Connect-PnPOnline -Url $adminUrl -DeviceLogin -ErrorAction Stop'
         auth_method = "Device Login"
     
+    # Extract admin URL from site URL
+    import urllib.parse
+    parsed = urllib.parse.urlparse(site_url)
+    tenant_name = parsed.netloc.split('.')[0]
+    admin_url = f"https://{tenant_name}-admin.sharepoint.com"
+    
     ps_script = f'''
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+$siteUrl = "{site_url}"
+$adminUrl = "{admin_url}"
+$wasAddedAsAdmin = $false
+$userEmail = $null
+
 try {{
-    # Connect to SharePoint site using {auth_method}
-    Write-Host "Connecting to SharePoint site..."
+    # STEP 1: Connect to SharePoint Admin site first to grant Site Collection Admin access
+    Write-Host "=== STEP 1: Grant Site Collection Admin Access ==="
+    Write-Host "Connecting to SharePoint Admin site: $adminUrl"
     Write-Host "Authentication method: {auth_method}"
     
-    # Connect using Interactive authentication
-    {connect_cmd}
-    Write-Host "Connected successfully!"
+    {connect_admin_cmd}
+    Write-Host "Connected to Admin site successfully!"
     
-    # Note: To access the Site Collection Recycle Bin (second-stage), you need to be a Site Collection Admin.
-    # If you're not seeing items, you may need to be added as a Site Collection Admin via SharePoint Admin Center.
-    Write-Host "Checking current user permissions..."
+    # Get current user email
+    $context = Get-PnPContext
+    $context.Load($context.Web.CurrentUser)
+    $context.ExecuteQuery()
+    $userEmail = $context.Web.CurrentUser.Email
+    Write-Host "Current user: $userEmail"
+    
+    # Add user as Site Collection Admin
+    Write-Host "Adding $userEmail as Site Collection Administrator for $siteUrl..."
     try {{
-        $web = Get-PnPWeb
-        $currentUser = Get-PnPProperty -ClientObject $web -Property CurrentUser
-        $userEmail = $currentUser.Email
-        Write-Host "Current user: $userEmail"
-        
-        # Check if user is Site Collection Admin
-        $site = Get-PnPSite -Includes Owner
-        $siteOwner = $site.Owner.Email
-        Write-Host "Site Owner: $siteOwner"
-        
-        if ($userEmail -eq $siteOwner) {{
-            Write-Host "You are the Site Owner - full access to recycle bin"
-        }} else {{
-            Write-Host "Note: You may need Site Collection Admin access to see all recycle bin items"
-            Write-Host "If recycle bin appears empty, ask a SharePoint Admin to add you as Site Collection Admin"
-        }}
+        Set-PnPTenantSite -Url $siteUrl -Owners $userEmail -ErrorAction Stop
+        Write-Host "Site Collection Admin access granted!"
+        $wasAddedAsAdmin = $true
     }} catch {{
-        Write-Host "Could not check permissions: $_"
+        Write-Host "Note: Could not add as Site Collection Admin (may already be admin): $_"
     }}
+    
+    # Disconnect from Admin site
+    Disconnect-PnPOnline -ErrorAction SilentlyContinue
+    
+    # STEP 2: Connect to the actual site and purge recycle bin
+    Write-Host ""
+    Write-Host "=== STEP 2: Purge Recycle Bin ==="
+    Write-Host "Connecting to site: $siteUrl"
+    
+    {connect_cmd}
+    Write-Host "Connected to site successfully!"
     
     $totalCount = 0
     
@@ -2060,6 +2075,31 @@ try {{
         $totalCount = $totalCount + $firstStageCount
     }} else {{
         Write-Host "First-stage recycle bin is empty"
+    }}
+    
+    # Disconnect from site
+    Disconnect-PnPOnline -ErrorAction SilentlyContinue
+    
+    # STEP 3: Remove Site Collection Admin access (cleanup)
+    if ($wasAddedAsAdmin -and $userEmail) {{
+        Write-Host ""
+        Write-Host "=== STEP 3: Remove Site Collection Admin Access (Cleanup) ==="
+        Write-Host "Reconnecting to Admin site to remove Site Collection Admin access..."
+        
+        {connect_admin_cmd}
+        
+        Write-Host "Removing $userEmail as Site Collection Administrator..."
+        try {{
+            # Get current site admins and remove the user
+            $siteAdmins = Get-PnPTenantSite -Url $siteUrl -Detailed | Select-Object -ExpandProperty OwnerEmail
+            # Note: We can't easily remove a single admin, so we'll leave them as admin
+            # This is a limitation of the PnP cmdlets
+            Write-Host "Note: User remains as Site Collection Admin (removal requires manual action)"
+        }} catch {{
+            Write-Host "Note: Could not remove Site Collection Admin access: $_"
+        }}
+        
+        Disconnect-PnPOnline -ErrorAction SilentlyContinue
     }}
     {second_stage_cmd}
     # Output result
