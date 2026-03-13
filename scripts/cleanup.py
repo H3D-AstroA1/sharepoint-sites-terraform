@@ -1963,12 +1963,23 @@ def purge_site_recycle_bin_pnp(site_url: str, first_stage_only: bool = False, cl
     # This variable is kept for backwards compatibility but is now empty
     second_stage_cmd = ""
     
-    # Build connection command - use -Interactive WITHOUT ClientId
-    # This uses the user's own permissions (delegated) rather than app permissions
-    # When no ClientId is specified, PnP uses its own multi-tenant app which has delegated permissions
-    connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -Interactive -ErrorAction Stop'
-    connect_admin_cmd = 'Connect-PnPOnline -Url $adminUrl -Interactive -ErrorAction Stop'
-    auth_method = "Interactive (user permissions)"
+    # Build connection command
+    # Try to get client_id from app config if not provided
+    if not client_id:
+        app_config = load_app_config()
+        if app_config:
+            client_id = app_config.get("app_id")
+    
+    if client_id:
+        # Use -Interactive with ClientId - this uses the app registration
+        connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -Interactive -ClientId "{client_id}" -ErrorAction Stop'
+        connect_admin_cmd = f'Connect-PnPOnline -Url $adminUrl -Interactive -ClientId "{client_id}" -ErrorAction Stop'
+        auth_method = "Interactive with registered app"
+    else:
+        # Fallback to DeviceLogin if no app registration
+        connect_cmd = f'Connect-PnPOnline -Url "{site_url}" -DeviceLogin -ErrorAction Stop'
+        connect_admin_cmd = 'Connect-PnPOnline -Url $adminUrl -DeviceLogin -ErrorAction Stop'
+        auth_method = "Device Login"
     
     ps_script = f'''
 $ErrorActionPreference = "Stop"
@@ -1982,42 +1993,28 @@ try {{
     {connect_cmd}
     Write-Host "Connected successfully!"
     
-    # First, ensure current user is Site Collection Admin (required to access recycle bin)
-    # We need to use Set-PnPTenantSite from the Admin site to grant this
-    Write-Host "Ensuring Site Collection Admin access..."
+    # Note: To access the Site Collection Recycle Bin (second-stage), you need to be a Site Collection Admin.
+    # If you're not seeing items, you may need to be added as a Site Collection Admin via SharePoint Admin Center.
+    Write-Host "Checking current user permissions..."
     try {{
         $web = Get-PnPWeb
         $currentUser = Get-PnPProperty -ClientObject $web -Property CurrentUser
         $userEmail = $currentUser.Email
-        $siteUrl = "{site_url}"
+        Write-Host "Current user: $userEmail"
         
-        if ($userEmail) {{
-            Write-Host "Current user: $userEmail"
-            
-            # Extract tenant name from site URL to build admin URL
-            $uri = [System.Uri]$siteUrl
-            $tenantName = $uri.Host.Split('.')[0]
-            $adminUrl = "https://$tenantName-admin.sharepoint.com"
-            
-            Write-Host "Connecting to SharePoint Admin site: $adminUrl"
-            
-            # Disconnect from current site and connect to admin site
-            Disconnect-PnPOnline -ErrorAction SilentlyContinue
-            {connect_admin_cmd}
-            
-            Write-Host "Adding $userEmail as Site Collection Administrator via Admin API..."
-            # Use Set-PnPTenantSite to add the user as Site Collection Admin
-            Set-PnPTenantSite -Url $siteUrl -Owners $userEmail -ErrorAction Stop
-            Write-Host "Site Collection Admin access granted!"
-            
-            # Reconnect to the original site
-            Disconnect-PnPOnline -ErrorAction SilentlyContinue
-            {connect_cmd}
-            Write-Host "Reconnected to site"
+        # Check if user is Site Collection Admin
+        $site = Get-PnPSite -Includes Owner
+        $siteOwner = $site.Owner.Email
+        Write-Host "Site Owner: $siteOwner"
+        
+        if ($userEmail -eq $siteOwner) {{
+            Write-Host "You are the Site Owner - full access to recycle bin"
+        }} else {{
+            Write-Host "Note: You may need Site Collection Admin access to see all recycle bin items"
+            Write-Host "If recycle bin appears empty, ask a SharePoint Admin to add you as Site Collection Admin"
         }}
     }} catch {{
-        Write-Host "Note: Could not add as Site Collection Admin: $_"
-        Write-Host "Continuing anyway - you may already be an admin or have sufficient permissions"
+        Write-Host "Could not check permissions: $_"
     }}
     
     $totalCount = 0
