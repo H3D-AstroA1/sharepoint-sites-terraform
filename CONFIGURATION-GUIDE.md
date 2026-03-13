@@ -17,6 +17,8 @@ Before deploying, you need to gather the following information:
 |------|------------------|---------|
 | Azure Tenant ID | Azure Portal > Entra ID > Overview | `12345678-1234-1234-1234-123456789abc` |
 | Azure Subscription ID | Azure Portal > Subscriptions | `87654321-4321-4321-4321-cba987654321` |
+| Resource Group Name | Azure Portal > Resource Groups | `rg-sharepoint-sites` |
+| Key Vault Name (optional) | Azure Portal > Key Vaults | `kv-sp-sites` (or leave empty for auto-generated) |
 | M365 Tenant Name | Your domain before .onmicrosoft.com | `contoso` |
 | SharePoint Admin Email | Your admin account | `admin@contoso.onmicrosoft.com` |
 
@@ -43,8 +45,16 @@ The script will:
 6. ✅ Generate the Terraform configuration automatically
 
 **Deployment Modes:**
-- **Configuration File Mode**: Use `config/sites.json` for custom site names (unlimited sites)
-- **Random Generation Mode**: Generate realistic organizational department sites (1-39 unique templates)
+- **Configuration File Only**: Use `config/sites.json` for custom site names
+- **Config + Ad-hoc Sites**: Your custom sites + random ad-hoc sites (projects, teams, events)
+- **Department Sites**: Generate official department sites (HR, Finance, IT, etc.) - 40 templates
+- **Ad-hoc Sites**: Generate user-created sites (projects, teams, events, clubs) - 60 templates
+- **Mixed Sites**: Combine department + ad-hoc sites for maximum realism
+
+**Owner Assignment Options:**
+- **Admin Only**: Use SharePoint admin as sole owner (simplest)
+- **Azure AD Discovery**: Discover real users/groups and assign randomly (most realistic)
+- **Skip**: Leave owners/members empty for default permissions
 
 ### Method 2: Pre-Configured Environments (Recommended for Teams)
 

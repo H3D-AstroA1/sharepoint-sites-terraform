@@ -4,12 +4,23 @@
 
 This project automates the creation of **SharePoint Online sites** using Terraform. It provides flexible options for defining which sites to create:
 
-### Two Deployment Modes
+### Five Deployment Modes
 
 | Mode | Description | Use Case |
 |------|-------------|----------|
-| **Configuration File** | Define custom site names in a JSON file | When you know exactly which sites you need |
-| **Random Generation** | Auto-generate sites with random names | For testing, demos, or bulk site creation |
+| **Configuration File Only** | Define custom site names in a JSON file | When you know exactly which sites you need |
+| **Config + Ad-hoc Sites** | Your custom sites + random ad-hoc sites | Realistic environments with your specific sites |
+| **Department Sites** | Official department sites (HR, Finance, IT, etc.) | Organizational structure simulation |
+| **Ad-hoc Sites** | User-created sites (projects, teams, events) | Organic SharePoint usage simulation |
+| **Mixed Sites** | Combination of department + ad-hoc sites | Maximum realism |
+
+### Key Features
+
+- **Azure AD User/Group Discovery** - Automatically discover real users and groups from your tenant
+- **Random Owner Assignment** - Assign discovered users as site owners/members for realism
+- **Key Vault Configuration** - Optional custom Key Vault name or auto-generated
+- **60+ Ad-hoc Site Templates** - Projects, teams, events, clubs, regional offices
+- **40 Department Site Templates** - HR, Finance, IT, Legal, Marketing, and more
 
 > ⚠️ **Important Note**: SharePoint Online is a Microsoft 365 service, not an Azure resource. This solution uses Azure resources (Resource Group, Key Vault) for supporting infrastructure, while SharePoint sites are created via Microsoft Graph API.
 
@@ -120,6 +131,41 @@ The deployment script **automatically checks and installs** the required tools:
 
 ### Step 2: Choose Your Deployment Mode
 
+When you run `python deploy.py`, you'll see this menu:
+
+```
+How would you like to define your SharePoint sites?
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CONFIGURATION FILE OPTIONS:
+
+  [1] Use Configuration File Only (21 sites)
+      - Uses config/sites.json for your custom site names
+      - Full control over site names, descriptions, and settings
+
+  [2] Configuration File + Ad-hoc Sites (21 config + you choose ad-hoc)
+      - Uses your custom sites from config/sites.json
+      - PLUS you choose how many ad-hoc sites (0-60 available)
+      - Best for realistic environments with your specific sites
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RANDOM GENERATION OPTIONS:
+
+  [3] Generate Department Sites (40 templates)
+      - Official department sites (HR, Finance, IT, Legal, etc.)
+      - Realistic organizational structure
+      - Mix of Private and Public visibility
+
+  [4] Generate Ad-hoc Sites (60 templates)
+      - User-created sites (projects, teams, events, clubs)
+      - Simulates organic SharePoint usage by employees
+      - Includes working groups, social clubs, regional offices
+
+  [5] Generate Mixed Sites (Department + Ad-hoc)
+      - Combines both types for maximum realism
+      - Specify count for each type separately
+```
+
 #### Option A: Use Configuration File (Custom Site Names)
 
 1. **Edit the configuration file** `config/sites.json`:
@@ -136,40 +182,34 @@ The deployment script **automatically checks and installs** the required tools:
       "name": "finance-internal",
       "display_name": "Finance Internal",
       "description": "Finance team documents"
-    },
-    {
-      "name": "my-custom-site",
-      "display_name": "My Custom Site",
-      "description": "Add as many sites as you need!"
     }
   ]
 }
 ```
 
-2. **Run the deployment:**
-```bash
-cd sharepoint-sites-terraform/scripts
-python deploy.py
-```
+2. **Run the deployment and select option [1]**
 
-3. **Select option [1]** when prompted for Configuration File mode.
+#### Option B: Generate Department Sites
 
-#### Option B: Generate Random Sites (Realistic Department Names)
+Sites will be created with realistic organizational department names like:
+- `human-resources` - HR policies, employee handbook, benefits (Private)
+- `finance-department` - Financial reports, budgets, accounting (Private)
+- `it-helpdesk` - IT support documentation, troubleshooting guides (Public)
+- `employee-intranet` - Central hub for all employees (Public, Communication site)
+- `legal-compliance` - Legal documents, contracts, regulatory compliance (Private)
 
-1. **Run the deployment:**
-```bash
-cd sharepoint-sites-terraform/scripts
-python deploy.py --random 10
-```
+> 📊 **Department Sites**: 40 templates including 25 Private sites (64%) and 15 Public sites (36%)
 
-2. Sites will be created with realistic organizational department names like:
-   - `human-resources` - HR policies, employee handbook, benefits (Private)
-   - `finance-department` - Financial reports, budgets, accounting (Private)
-   - `it-helpdesk` - IT support documentation, troubleshooting guides (Public)
-   - `employee-intranet` - Central hub for all employees (Public, Communication site)
-   - `legal-compliance` - Legal documents, contracts, regulatory compliance (Private)
+#### Option C: Generate Ad-hoc Sites
 
-> 📊 **Random Site Distribution**: The 39 available templates include 25 Private sites (64%) and 14 Public sites (36%), with 6 Communication sites for company-wide announcements.
+User-created sites that simulate organic SharePoint usage:
+- `q4-product-launch-2024` - Project team site (Private)
+- `innovation-lab` - Working group for new ideas (Public)
+- `coffee-club` - Social interest group (Public)
+- `london-office` - Regional office site (Private)
+- `hackathon-2024` - Event site (Public)
+
+> 📊 **Ad-hoc Sites**: 60 templates including projects, teams, events, clubs, and regional offices
 
 ### Step 3: Follow the Interactive Prompts
 
@@ -177,14 +217,71 @@ The script will guide you through:
 
 1. ✅ **Prerequisite check & auto-install** (Azure CLI, Terraform)
 2. ✅ Site generation mode selection
-3. ✅ Azure tenant selection
-4. ✅ Subscription selection
-5. ✅ Resource group configuration
-6. ✅ Microsoft 365 settings
-7. ✅ Configuration review
-8. ✅ Terraform deployment
+3. ✅ Azure authentication
+4. ✅ Environment selection (or manual tenant/subscription)
+5. ✅ Resource group configuration (new or existing)
+6. ✅ Key Vault configuration (new or existing)
+7. ✅ Microsoft 365 settings
+8. ✅ **Owner/Member Assignment** (NEW!)
+9. ✅ Configuration review
+10. ✅ Terraform deployment
 
 > 💡 **Tip**: You can press `Q` to quit or `Ctrl+C` to cancel at any interactive prompt.
+
+### Step 4: Configure Site Owners & Members (NEW!)
+
+After selecting your sites, you'll be prompted to assign owners and members:
+
+```
+How would you like to assign site owners and members?
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  [1] Admin Only (Default)
+      - Uses the SharePoint admin email as the sole owner
+      - No additional members
+      - Simplest option, good for testing
+
+  [2] Discover Azure AD Users & Groups
+      - Queries Microsoft Graph API for real users/groups
+      - Randomly assigns users as owners (1-3 per site)
+      - Randomly assigns users/groups as members (0-5 per site)
+      - Most realistic option for production-like environments
+
+  [3] Skip Owner Assignment
+      - Leave owners/members empty
+      - Sites will be created with default permissions
+```
+
+#### Azure AD Discovery Features
+
+When you select option [2], the script will:
+
+1. **Discover Users** - Query Microsoft Graph for member users (filters out guests/service accounts)
+2. **Discover Groups** - Get security groups and M365 groups (filters out dynamic groups)
+3. **Random Assignment** - Assign 1-3 random users as owners and 0-5 as members per site
+4. **Optional Group Members** - Choose whether to include security groups as site members
+
+Example output:
+```
+Discovered Azure AD Identities:
+
+  Users (sample):
+    • John Smith (john.smith@contoso.com) - IT Department
+    • Jane Doe (jane.doe@contoso.com) - Finance
+    • Bob Wilson (bob.wilson@contoso.com) - HR
+    ... and 47 more
+
+  Groups (sample):
+    • IT-Admins (Security)
+    • Finance-Team (M365)
+    • All-Employees (Security)
+    ... and 12 more
+
+Include groups as site members? (y/N): y
+
+Assigned 87 owners and 142 members across 21 sites
+```
 
 ---
 
