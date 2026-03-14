@@ -1019,6 +1019,9 @@ The `populate_files.py` and `menu.py` scripts now automatically filter out these
 If you need to work with a specific site that's being filtered, you can use the `--site` flag to target it directly:
 ```bash
 python populate_files.py --site "specific-site-name" --files 10
+
+# Optional: tune realism variation for this targeted run
+python populate_files.py --site "specific-site-name" --files 10 --variation-level high
 ```
 
 ---
@@ -1139,6 +1142,18 @@ Only user-created sites (typically created via Terraform or M365 Groups) will ha
 1. Create a new site via the deployment script
 2. Use the Microsoft Graph API directly
 3. Upload files manually via the SharePoint web interface
+
+**Variation intensity tip:**
+
+If file/folder output looks too repetitive or too noisy for your test scenario, set variation explicitly:
+
+```bash
+# Lower variation for controlled testing
+python populate_files.py --files 100 --variation-level low
+
+# Higher variation for enterprise-scale realism
+python populate_files.py --files 100 --variation-level high
+```
 
 ---
 

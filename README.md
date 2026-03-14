@@ -353,9 +353,23 @@ python populate_files.py --files 100
 # Create 50 files only in HR-related sites
 python populate_files.py --files 50 --site hr
 
+# Create 200 files with high realism variation
+python populate_files.py --files 200 --variation-level high
+
 # List available sites
 python populate_files.py --list-sites
 ```
+
+### Realism Variation Levels
+
+File and folder realism can be tuned with `--variation-level`:
+
+- `low`: lighter naming/folder variation (good for quick tests)
+- `medium`: balanced realism (default)
+- `high`: maximum variation for large enterprise simulation
+
+When using the main menu (`python menu.py`):
+- Step 2 now prompts for variation level for all options, including interactive mode.
 
 ### File Types Generated
 
@@ -389,6 +403,7 @@ python populate_files.py --help
 Options:
   -f, --files COUNT    Number of files to create (1-1000)
   -s, --site FILTER    Filter sites by name (e.g., "hr", "finance")
+  --variation-level    Realism intensity: low, medium, high (default: medium)
   -l, --list-sites     List available SharePoint sites and exit
 ```
 
