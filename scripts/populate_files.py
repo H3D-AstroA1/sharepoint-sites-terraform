@@ -1713,14 +1713,50 @@ def apply_realistic_timestamps(
     created_date: datetime,
     modified_date: datetime
 ) -> None:
-    """Apply realistic timestamps for an uploaded file via Graph fileSystemInfo PATCH.
+    """Apply realistic timestamps to SharePoint Created/Modified fields.
 
-    Uses the same Graph token as the upload — no separate SharePoint token needed.
-    Graph's fileSystemInfo properties map directly to the Created/Modified columns
-    visible in SharePoint document libraries.
+    Preferred path is SharePoint REST ValidateUpdateListItem (most reliable for
+    document library system fields). Graph fileSystemInfo PATCH is retained as
+    a fallback for environments where REST token acquisition is unavailable.
     """
-    global _metadata_update_success, _metadata_update_failed, _metadata_last_error
+    global _metadata_update_success, _metadata_update_failed, _metadata_update_skipped
+    global _metadata_skip_no_site_url, _metadata_skip_no_sharepoint_token
+    global _metadata_last_error, _metadata_last_token_source, _metadata_last_token_aud
 
+    context = get_site_metadata_context(site_id, graph_access_token)
+    site_url = context.get("site_url")
+    drive_root_relative_path = context.get("drive_root_relative_path")
+    sharepoint_token = context.get("sharepoint_token")
+    token_source = context.get("sharepoint_token_source", "")
+    token_aud = context.get("sharepoint_token_aud", "")
+
+    if token_source or token_aud:
+        with _metadata_lock:
+            _metadata_last_token_source = token_source
+            _metadata_last_token_aud = token_aud
+
+    if site_url and sharepoint_token:
+        rest_success = update_file_metadata_via_sharepoint_rest(
+            site_url=site_url,
+            file_path=file_path,
+            sharepoint_access_token=sharepoint_token,
+            drive_root_relative_path=drive_root_relative_path,
+            created_date=created_date,
+            modified_date=modified_date
+        )
+        if rest_success:
+            with _metadata_lock:
+                _metadata_update_success += 1
+            return
+    else:
+        with _metadata_lock:
+            _metadata_update_skipped += 1
+            if not site_url:
+                _metadata_skip_no_site_url += 1
+            if not sharepoint_token:
+                _metadata_skip_no_sharepoint_token += 1
+
+    # Fallback to Graph fileSystemInfo patch.
     encoded_path = urllib.parse.quote(file_path)
     url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root:/{encoded_path}:"
 
@@ -2452,7 +2488,7 @@ Examples:
     metadata_stats = get_metadata_stats()
     total_metadata_attempts = metadata_stats["success"] + metadata_stats["failed"] + metadata_stats["skipped"]
     if total_metadata_attempts > 0:
-        print(f"  {Colors.WHITE}Custom Timestamps (Graph fileSystemInfo):{Colors.NC}")
+        print(f"  {Colors.WHITE}Custom Timestamps (SharePoint REST + Graph fallback):{Colors.NC}")
         if metadata_stats["success"] > 0:
             print(f"    {Colors.GREEN}✓ Timestamps set:{Colors.NC} {metadata_stats['success']} files")
         if metadata_stats["failed"] > 0:
