@@ -4086,6 +4086,26 @@ def get_site_filter() -> str:
     filter_input = input(f"  {Colors.YELLOW}Site filter:{Colors.NC} ").strip()
     return filter_input
 
+
+def get_variation_level() -> str:
+    """Prompt user for variation intensity for file/folder generation."""
+    print()
+    print(f"  {Colors.WHITE}Variation intensity:{Colors.NC}")
+    print(f"    {Colors.GREEN}[1]{Colors.NC} Low    (lighter variation)")
+    print(f"    {Colors.BLUE}[2]{Colors.NC} Medium (balanced, default)")
+    print(f"    {Colors.MAGENTA}[3]{Colors.NC} High   (maximum variation)")
+    print()
+
+    while True:
+        choice = input(f"  {Colors.YELLOW}Select variation level [1-3, Enter=2]:{Colors.NC} ").strip().lower()
+        if choice in ["", "2", "medium", "m"]:
+            return "medium"
+        if choice in ["1", "low", "l"]:
+            return "low"
+        if choice in ["3", "high", "h"]:
+            return "high"
+        print(f"  {Colors.RED}✗{Colors.NC} Invalid selection. Choose 1, 2, or 3.")
+
 # ============================================================================
 # AZURE AD DISCOVERY MENU
 # ============================================================================
@@ -4436,22 +4456,26 @@ def main() -> None:
             sub_choice = input(f"  {Colors.YELLOW}Enter your choice:{Colors.NC} ").strip().lower()
             
             if sub_choice == '1':
-                run_script("populate_files.py")
+                variation_level = get_variation_level()
+                run_script("populate_files.py", ["--variation-level", variation_level])
             elif sub_choice == '2':
+                variation_level = get_variation_level()
                 site_filter = get_site_filter()
-                args = ["--files", "25"]
+                args = ["--files", "25", "--variation-level", variation_level]
                 if site_filter:
                     args.extend(["--site", site_filter])
                 run_script("populate_files.py", args)
             elif sub_choice == '3':
+                variation_level = get_variation_level()
                 site_filter = get_site_filter()
-                args = ["--files", "50"]
+                args = ["--files", "50", "--variation-level", variation_level]
                 if site_filter:
                     args.extend(["--site", site_filter])
                 run_script("populate_files.py", args)
             elif sub_choice == '4':
+                variation_level = get_variation_level()
                 site_filter = get_site_filter()
-                args = ["--files", "100"]
+                args = ["--files", "100", "--variation-level", variation_level]
                 if site_filter:
                     args.extend(["--site", site_filter])
                 run_script("populate_files.py", args)
@@ -4459,8 +4483,9 @@ def main() -> None:
                 print()
                 count = input(f"  {Colors.YELLOW}Number of files (1-1000):{Colors.NC} ").strip()
                 if count.isdigit() and 1 <= int(count) <= 1000:
+                    variation_level = get_variation_level()
                     site_filter = get_site_filter()
-                    args = ["--files", count]
+                    args = ["--files", count, "--variation-level", variation_level]
                     if site_filter:
                         args.extend(["--site", site_filter])
                     run_script("populate_files.py", args)

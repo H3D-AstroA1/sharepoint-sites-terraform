@@ -49,6 +49,31 @@ ENVIRONMENTS_FILE = CONFIG_DIR / "environments.json"
 # Maximum files that can be created in one run
 MAX_FILES = 1000
 METADATA_UPDATE_WORKERS = 8
+VARIATION_LEVEL = "medium"
+
+VARIATION_PROFILES = {
+    "low": {
+        "dynamic_file_patterns": 2,
+        "extra_folder_min": 2,
+        "extra_folder_max": 4,
+        "rev_suffix_probability": 0.10,
+        "version_suffix_probability": 0.06,
+    },
+    "medium": {
+        "dynamic_file_patterns": 5,
+        "extra_folder_min": 5,
+        "extra_folder_max": 10,
+        "rev_suffix_probability": 0.18,
+        "version_suffix_probability": 0.12,
+    },
+    "high": {
+        "dynamic_file_patterns": 8,
+        "extra_folder_min": 8,
+        "extra_folder_max": 14,
+        "rev_suffix_probability": 0.28,
+        "version_suffix_probability": 0.16,
+    },
+}
 
 # Default Azure CLI installation paths on Windows
 AZURE_CLI_PATHS = [
@@ -270,6 +295,88 @@ FEATURES = ["User_Authentication", "Dashboard", "Reporting", "Integration", "Mob
 PRODUCTS = ["Enterprise_Suite", "Cloud_Platform", "Mobile_App", "Analytics_Tool"]
 SCENARIOS = ["Billing_Inquiry", "Technical_Support", "Account_Setup", "Complaint_Resolution"]
 TOPICS = ["Password_Reset", "VPN_Setup", "Email_Configuration", "Software_Installation"]
+
+# Enterprise-scale naming and taxonomy variables for higher realism
+BUSINESS_UNITS = ["Corporate", "Shared_Services", "Regional_Ops", "Digital", "Risk", "Transformation"]
+CONFIDENTIALITY_LEVELS = ["Public", "Internal", "Confidential", "Restricted"]
+DOC_STATUSES = ["Draft", "In_Review", "Approved", "Final"]
+INITIATIVES = ["Phoenix", "Atlas", "Horizon", "Aurora", "North_Star", "Velocity"]
+ENTITY_TYPES = ["Policy", "Procedure", "Runbook", "Playbook", "Assessment", "Brief"]
+REGION_CODES = ["NA", "EMEA", "APAC", "LATAM"]
+CYCLES = ["Weekly", "Monthly", "Quarterly", "Annual"]
+
+ENTERPRISE_COMMON_FILE_TEMPLATES = [
+    {"name": "{confidentiality}_{status}_{entity}_{year}_{doc_id}.docx", "type": "word"},
+    {"name": "{initiative}_Program_Update_Q{quarter}_{year}_{status}.pptx", "type": "powerpoint"},
+    {"name": "KPI_Scorecard_{business_unit}_{month}_{year}.xlsx", "type": "excel"},
+    {"name": "Governance_Minutes_{date}_{doc_id}.docx", "type": "word"},
+    {"name": "Risk_Register_{region_code}_FY{fiscal_year}.xlsx", "type": "excel"},
+    {"name": "Control_Testing_Evidence_{month}_{year}_{number}.pdf", "type": "pdf"},
+]
+
+SITE_ENTERPRISE_TEMPLATE_AUGMENTS = {
+    "executive-leadership": [
+        {"name": "SteerCo_Pack_Q{quarter}_{year}_{status}.pptx", "type": "powerpoint"},
+        {"name": "Board_Action_Log_FY{fiscal_year}.xlsx", "type": "excel"},
+    ],
+    "finance-department": [
+        {"name": "GL_Reconciliation_{month}_{year}_{doc_id}.xlsx", "type": "excel"},
+        {"name": "Capex_Approval_{business_unit}_FY{fiscal_year}.pdf", "type": "pdf"},
+    ],
+    "it-department": [
+        {"name": "Change_Record_{number}_{month}_{year}.docx", "type": "word"},
+        {"name": "Incident_Postmortem_{initiative}_{date}.docx", "type": "word"},
+    ],
+    "legal-department": [
+        {"name": "Contract_Deviation_Log_{year}.xlsx", "type": "excel"},
+        {"name": "Regulatory_Advisory_{region_code}_{month}_{year}.pdf", "type": "pdf"},
+    ],
+    "operations-department": [
+        {"name": "Site_Readiness_Checklist_{region_code}_{date}.xlsx", "type": "excel"},
+        {"name": "Vendor_QBR_{vendor}_Q{quarter}_{year}.pptx", "type": "powerpoint"},
+    ],
+}
+
+SITE_SUBJECTS = {
+    "executive-leadership": ["Portfolio_Review", "Investment_Thesis", "Operating_Model", "Strategic_Priorities"],
+    "human-resources": ["Workforce_Planning", "Talent_Review", "Learning_Pathway", "Compensation_Framework"],
+    "finance-department": ["Close_Process", "Cost_Optimization", "Working_Capital", "Revenue_Assurance"],
+    "claims-department": ["Case_Assessment", "Fraud_Review", "Claims_Quality", "Settlement_Strategy"],
+    "it-department": ["Platform_Upgrade", "Service_Reliability", "Identity_Access", "Incident_Trend"],
+    "marketing-department": ["Campaign_Attribution", "Audience_Strategy", "Brand_Performance", "Lead_Quality"],
+    "sales-department": ["Pipeline_Health", "Deal_Desk", "Territory_Coverage", "Win_Loss_Analysis"],
+    "legal-department": ["Contract_Risk", "Policy_Exception", "Regulatory_Tracking", "Matter_Prioritization"],
+    "operations-department": ["Throughput_Optimization", "Supplier_Risk", "Process_Control", "Capacity_Model"],
+    "product-management": ["Roadmap_Validation", "Feature_Adoption", "User_Journey", "Release_Readiness"],
+    "customer-service": ["Escalation_Trends", "Knowledge_Quality", "Agent_Coaching", "Resolution_Time"],
+    "default": ["Operational_Review", "Governance_Update", "Delivery_Status", "Program_Health"],
+}
+
+ENTERPRISE_DYNAMIC_FILE_PATTERNS = [
+    {"name": "{cycle}_{subject}_{month}_{year}.docx", "type": "word"},
+    {"name": "{subject}_Decision_Log_Q{quarter}_{year}.docx", "type": "word"},
+    {"name": "{subject}_Dashboard_{region_code}_{month}_{year}.xlsx", "type": "excel"},
+    {"name": "{subject}_Scorecard_FY{fiscal_year}.xlsx", "type": "excel"},
+    {"name": "{initiative}_{subject}_SteerCo_Q{quarter}_{year}.pptx", "type": "powerpoint"},
+    {"name": "{business_unit}_{subject}_Operating_Review_{month}_{year}.pptx", "type": "powerpoint"},
+    {"name": "Control_Evidence_{subject}_{date}_{doc_id}.pdf", "type": "pdf"},
+    {"name": "Audit_Pack_{subject}_FY{fiscal_year}_{status}.pdf", "type": "pdf"},
+]
+
+SITE_FOLDER_AUGMENTS = {
+    "executive-leadership": ["SteerCo", "Portfolio Governance", "Investor Materials"],
+    "human-resources": ["Talent Reviews", "Org Design", "People Analytics"],
+    "finance-department": ["Close Calendar", "Controllership", "Treasury"],
+    "claims-department": ["Severity Triage", "Escalated Claims", "Reserving"],
+    "it-department": ["Service Operations", "Cloud Platform", "Architecture Review Board"],
+    "marketing-department": ["Demand Generation", "Performance Marketing", "Content Operations"],
+    "sales-department": ["Deal Desk", "Account Plans", "Quota Planning"],
+    "legal-department": ["Legal Intake", "Regulatory Affairs", "Outside Counsel"],
+    "operations-department": ["Service Delivery", "Continuous Improvement", "Site Governance"],
+    "product-management": ["Portfolio Council", "Discovery", "Product Operations"],
+    "customer-service": ["Voice of Customer", "Quality Assurance", "Service Operations"],
+    "default": ["Governance", "Operations", "Workstreams"],
+}
 
 # ============================================================================
 # USER-NAMED FILE TEMPLATES (for Azure AD mode)
@@ -638,6 +745,7 @@ def generate_file_name(template: Dict[str, str], site_type: str) -> str:
     name = template["name"]
     now = datetime.now()
     random_date = get_random_date()
+    fiscal_year = now.year + 1 if now.month >= 7 else now.year
     
     # Replace placeholders
     replacements = {
@@ -657,12 +765,109 @@ def generate_file_name(template: Dict[str, str], site_type: str) -> str:
         "{product}": random.choice(PRODUCTS),
         "{scenario}": random.choice(SCENARIOS),
         "{topic}": random.choice(TOPICS),
+        "{business_unit}": random.choice(BUSINESS_UNITS),
+        "{confidentiality}": random.choice(CONFIDENTIALITY_LEVELS),
+        "{status}": random.choice(DOC_STATUSES),
+        "{initiative}": random.choice(INITIATIVES),
+        "{entity}": random.choice(ENTITY_TYPES),
+        "{region_code}": random.choice(REGION_CODES),
+        "{cycle}": random.choice(CYCLES),
+        "{subject}": random.choice(SITE_SUBJECTS.get(site_type, SITE_SUBJECTS["default"])),
+        "{fiscal_year}": str(fiscal_year),
+        "{doc_id}": f"DOC-{now.year}-{random.randint(10000, 99999)}",
     }
     
     for placeholder, value in replacements.items():
         name = name.replace(placeholder, value)
+
+    profile = VARIATION_PROFILES.get(VARIATION_LEVEL, VARIATION_PROFILES["medium"])
+
+    # Add light enterprise variation to avoid repetitive names at scale.
+    if random.random() < profile["rev_suffix_probability"]:
+        name = name.replace(".", f"_REV{random.randint(1, 7)}.", 1)
+    elif random.random() < profile["version_suffix_probability"]:
+        name = name.replace(".", f"_v{random.randint(1, 5)}.{random.randint(0, 9)}.", 1)
     
     return name
+
+
+def build_template_pool(site_type: str) -> Dict[str, Any]:
+    """Build a richer template pool using the enterprise variation pipeline."""
+    base = FILE_TEMPLATES.get(site_type, FILE_TEMPLATES["default"])
+    return {
+        "folders": list(base.get("folders", [])),
+        "files": build_file_pattern_pool(site_type, list(base.get("files", []))),
+    }
+
+
+def build_file_pattern_pool(site_type: str, base_files: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """Compose file patterns in one place for easier maintenance and tuning.
+
+    Order is intentional:
+    1. department baseline templates
+    2. enterprise common templates
+    3. enterprise dynamic templates
+    4. department-specific enterprise augmentations
+    """
+    files = list(base_files)
+    profile = VARIATION_PROFILES.get(VARIATION_LEVEL, VARIATION_PROFILES["medium"])
+
+    files.extend(ENTERPRISE_COMMON_FILE_TEMPLATES)
+
+    dynamic_patterns = list(ENTERPRISE_DYNAMIC_FILE_PATTERNS)
+    random.shuffle(dynamic_patterns)
+    files.extend(dynamic_patterns[: profile["dynamic_file_patterns"]])
+
+    files.extend(SITE_ENTERPRISE_TEMPLATE_AUGMENTS.get(site_type, []))
+    return files
+
+
+def build_folder_candidate_pool(site_type: str) -> List[str]:
+    """Build enterprise folder candidates independent of department defaults."""
+    now = datetime.now()
+    fiscal_year = now.year + 1 if now.month >= 7 else now.year
+    current_quarter = (now.month - 1) // 3 + 1
+
+    candidates = [
+        f"FY{fiscal_year} Planning",
+        f"Q{current_quarter}_{now.year} Priorities",
+        f"Archive_{now.year - 1}",
+        f"Archive_{now.year - 2}",
+        "Working Drafts",
+        "Approvals",
+        "Governance Packs",
+        "Governance",
+        "Vendor Management",
+        "Risk and Controls",
+        f"Regional_{random.choice(REGION_CODES)}",
+        f"Program_{random.choice(INITIATIVES)}",
+        f"{random.choice(CONFIDENTIALITY_LEVELS)} Documents",
+        f"{random.choice(CYCLES)} Reporting",
+        f"{random.choice(BUSINESS_UNITS)} Operations",
+    ]
+    candidates.extend(SITE_FOLDER_AUGMENTS.get(site_type, SITE_FOLDER_AUGMENTS["default"]))
+    return candidates
+
+
+def build_folder_pool(site_type: str, base_folders: List[str]) -> List[str]:
+    """Expand base department folders with enterprise-like organizational structure."""
+    profile = VARIATION_PROFILES.get(VARIATION_LEVEL, VARIATION_PROFILES["medium"])
+    extra_candidates = build_folder_candidate_pool(site_type)
+
+    folder_pool = list(base_folders)
+    random.shuffle(extra_candidates)
+    folder_pool.extend(
+        extra_candidates[: random.randint(profile["extra_folder_min"], profile["extra_folder_max"])]
+    )
+
+    # Preserve order while de-duplicating.
+    deduped: List[str] = []
+    seen = set()
+    for folder in folder_pool:
+        if folder not in seen:
+            seen.add(folder)
+            deduped.append(folder)
+    return deduped
 
 def get_site_type(site_name: str) -> str:
     """Determine the site type based on site name."""
@@ -1667,8 +1872,8 @@ def generate_files_for_site(
     site_name = site.get("name", "Unknown")
     site_type = get_site_type(site_name)
     
-    templates = FILE_TEMPLATES.get(site_type, FILE_TEMPLATES["default"])
-    folders = templates["folders"]
+    templates = build_template_pool(site_type)
+    folders = build_folder_pool(site_type, templates["folders"])
     file_templates = templates["files"]
     
     success_count = 0
@@ -1726,8 +1931,8 @@ def generate_files_for_site_with_users(
     fail_count = 0
     
     # Get department-specific templates as fallback
-    templates = FILE_TEMPLATES.get(site_type, FILE_TEMPLATES["default"])
-    dept_folders = templates["folders"]
+    templates = build_template_pool(site_type)
+    dept_folders = build_folder_pool(site_type, templates["folders"])
     
     # Create department folders
     for folder in dept_folders:
@@ -1971,6 +2176,8 @@ def distribute_files_across_sites(
 
 def main() -> None:
     """Main entry point."""
+    global VARIATION_LEVEL
+
     parser = argparse.ArgumentParser(
         description="Populate SharePoint sites with realistic files",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1979,6 +2186,7 @@ Examples:
     python populate_files.py                      # Interactive mode
     python populate_files.py --files 100          # Create 100 files across all sites
     python populate_files.py --files 50 --site hr # Create 50 files in sites containing 'hr'
+    python populate_files.py --files 300 --variation-level high
     python populate_files.py --list-sites         # List available SharePoint sites
         """
     )
@@ -2001,8 +2209,16 @@ Examples:
         action='store_true',
         help='List available SharePoint sites and exit'
     )
+    parser.add_argument(
+        '--variation-level',
+        type=str,
+        choices=['low', 'medium', 'high'],
+        default='medium',
+        help='Controls template/folder variation density (default: medium)'
+    )
     
     args = parser.parse_args()
+    VARIATION_LEVEL = args.variation_level
     
     # Clear screen and show banner
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -2010,6 +2226,7 @@ Examples:
     
     print(f"  {Colors.WHITE}This script populates SharePoint sites with realistic files{Colors.NC}")
     print(f"  {Colors.WHITE}to simulate an actual organization's document structure.{Colors.NC}")
+    print(f"  {Colors.BLUE}Variation level:{Colors.NC} {VARIATION_LEVEL}")
     print()
     
     # Step 1: Select Environment (auto-detect from environments.json)
