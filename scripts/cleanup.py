@@ -41,6 +41,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import secrets
 import shutil
 import string
@@ -60,6 +61,8 @@ from typing import Dict, List, Optional, Any, Tuple, Set
 SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_DIR = SCRIPT_DIR.parent
 CONFIG_DIR = PROJECT_DIR / "config"
+TERRAFORM_DIR = PROJECT_DIR / "terraform"
+TERRAFORM_TFVARS_FILE = TERRAFORM_DIR / "terraform.tfvars"
 ENVIRONMENTS_FILE = CONFIG_DIR / "environments.json"
 # App config file path (same as menu.py - in scripts folder as hidden file)
 APP_CONFIG_FILE = SCRIPT_DIR / ".app_config.json"
@@ -103,7 +106,7 @@ SYSTEM_SITE_PATTERNS = [
     "contentstorage",  # Content storage sites (My workspace, Designer, etc.)
     "contenttypehub",  # Content Type Hub
     "appcatalog",      # App Catalog
-    "search",          # Search Center
+    "search center",   # Search Center
 ]
 
 def is_system_site(site: Dict[str, Any]) -> bool:
@@ -375,6 +378,231 @@ def save_app_config(app_config: Dict[str, Any]) -> bool:
         return False
 
 
+def load_terraform_tfvars() -> Optional[str]:
+    """Load the generated terraform.tfvars file if present."""
+    if not TERRAFORM_TFVARS_FILE.exists():
+        return None
+
+    try:
+        return TERRAFORM_TFVARS_FILE.read_text(encoding="utf-8")
+    except Exception:
+        return None
+
+
+def get_tfvars_bool(tfvars_text: str, variable_name: str) -> Optional[bool]:
+    """Extract a boolean variable value from terraform.tfvars."""
+    match = re.search(rf'^\s*{re.escape(variable_name)}\s*=\s*(true|false)\s*$', tfvars_text, re.MULTILINE)
+    if not match:
+        return None
+    return match.group(1).lower() == "true"
+
+
+def get_tfvars_string(tfvars_text: str, variable_name: str) -> Optional[str]:
+    """Extract a quoted string variable value from terraform.tfvars."""
+    match = re.search(rf'^\s*{re.escape(variable_name)}\s*=\s*"([^"]*)"\s*$', tfvars_text, re.MULTILINE)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def get_site_url_name(site_name: str, template: str) -> str:
+    """Match deploy.py URL derivation for SharePoint site names."""
+    url_name = ''.join(char for char in site_name if char.isalnum())
+    if template == "SITEPAGEPUBLISHING#0":
+        url_name = url_name + "site"
+    return url_name
+
+
+def get_deployment_site_urls_from_tfvars() -> Set[str]:
+    """Return the set of deployment-managed SharePoint site URLs from terraform.tfvars."""
+    tfvars_text = load_terraform_tfvars()
+    if not tfvars_text:
+        return set()
+
+    tenant_name = get_tfvars_string(tfvars_text, "m365_tenant_name")
+    if not tenant_name:
+        return set()
+
+    deployment_urls: Set[str] = set()
+    in_sites_block = False
+    current_site_name: Optional[str] = None
+    current_template = "STS#3"
+
+    for raw_line in tfvars_text.splitlines():
+        stripped = raw_line.strip()
+
+        if not in_sites_block:
+            if stripped == "sharepoint_sites = {":
+                in_sites_block = True
+            continue
+
+        if current_site_name is None:
+            if stripped == "}":
+                break
+
+            site_match = re.match(r'^"([^"]+)"\s*=\s*\{$', stripped)
+            if site_match:
+                current_site_name = site_match.group(1)
+                current_template = "STS#3"
+            continue
+
+        template_match = re.match(r'^template\s*=\s*"([^"]+)"$', stripped)
+        if template_match:
+            current_template = template_match.group(1)
+            continue
+
+        if stripped == "}":
+            url_name = get_site_url_name(current_site_name, current_template)
+            deployment_urls.add(f"https://{tenant_name}.sharepoint.com/sites/{url_name}".rstrip("/").lower())
+            current_site_name = None
+            current_template = "STS#3"
+
+    return deployment_urls
+
+
+def get_terraform_output_value(output_name: str) -> Optional[str]:
+    """Read a Terraform output value from the local terraform working directory."""
+    terraform_exe = shutil.which("terraform")
+    if not terraform_exe or not TERRAFORM_DIR.exists():
+        return None
+
+    try:
+        result = subprocess.run(
+            [terraform_exe, "output", "-raw", output_name],
+            cwd=str(TERRAFORM_DIR),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+    except Exception:
+        return None
+
+    value = result.stdout.strip()
+    if not value or value == "Key Vault not created":
+        return None
+    return value
+
+
+def resolve_deployment_key_vault_info() -> Dict[str, Any]:
+    """Resolve whether the deployment used a project-created or existing Key Vault."""
+    tfvars_text = load_terraform_tfvars()
+    create_key_vault: Optional[bool] = None
+    configured_name = ""
+
+    if tfvars_text:
+        create_key_vault = get_tfvars_bool(tfvars_text, "create_key_vault")
+        configured_name = get_tfvars_string(tfvars_text, "key_vault_name") or ""
+
+    output_name = get_terraform_output_value("key_vault_name") or ""
+    resolved_name = output_name or configured_name
+
+    if create_key_vault is True:
+        return {"mode": "project-created", "name": resolved_name}
+
+    if create_key_vault is False:
+        if configured_name:
+            return {"mode": "existing", "name": configured_name}
+        return {"mode": "none", "name": ""}
+
+    if output_name:
+        return {"mode": "project-created", "name": output_name}
+
+    return {"mode": "unknown", "name": configured_name}
+
+
+def delete_key_vault(vault_name: str) -> Tuple[bool, str]:
+    """Delete an Azure Key Vault using Azure CLI."""
+    if not vault_name:
+        return False, "Missing Key Vault name"
+
+    if not check_azure_login() and not azure_login():
+        return False, "Azure CLI login required"
+
+    az_path = find_azure_cli_path()
+
+    try:
+        subprocess.run(
+            [az_path, "keyvault", "delete", "--name", vault_name, "--output", "json"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=True,
+        )
+        return True, (
+            f"Delete request submitted for Key Vault '{vault_name}'. "
+            "Azure Key Vault soft-delete retention still applies, so the vault may remain recoverable."
+        )
+    except subprocess.CalledProcessError as e:
+        stderr = (e.stderr or "").strip()
+        stdout = (e.stdout or "").strip()
+        detail = stderr or stdout or str(e)
+        return False, detail
+    except Exception as e:
+        return False, str(e)
+
+
+def maybe_cleanup_deployment_key_vault(
+    deleted_site_urls: Set[str],
+    auto_confirm: bool = False,
+) -> None:
+    """Delete or optionally prompt for the deployment Key Vault after a full site teardown."""
+    normalized_deleted_urls = {url.rstrip("/").lower() for url in deleted_site_urls if url}
+    if not normalized_deleted_urls:
+        return
+
+    deployment_site_urls = get_deployment_site_urls_from_tfvars()
+    if not deployment_site_urls:
+        print_info("Skipping Key Vault cleanup because deployment-managed site inventory could not be determined safely")
+        return
+
+    remaining_urls = sorted(deployment_site_urls - normalized_deleted_urls)
+    if remaining_urls:
+        print_info("Skipping Key Vault cleanup because this was not a full deployment teardown")
+        print_info(f"{len(remaining_urls)} deployment-managed site(s) still remain")
+        return
+
+    key_vault_info = resolve_deployment_key_vault_info()
+    vault_mode = key_vault_info.get("mode", "unknown")
+    vault_name = str(key_vault_info.get("name", "") or "").strip()
+
+    if vault_mode == "none":
+        print_info("No deployment Key Vault requires cleanup")
+        return
+
+    if not vault_name:
+        print_warning("Skipping Key Vault cleanup because the Key Vault name could not be resolved")
+        return
+
+    print()
+    print_banner("KEY VAULT CLEANUP")
+    print()
+
+    if vault_mode == "existing":
+        print_warning(f"This deployment reused an existing Key Vault: {vault_name}")
+        print_info("It may contain data outside this SharePoint deployment")
+
+        if auto_confirm:
+            print_info("Skipping deletion of reused Key Vault in non-interactive mode")
+            return
+
+        delete_choice = input(f"  {Colors.YELLOW}Delete this existing Key Vault as well? (y/N): {Colors.NC}").strip().lower()
+        if delete_choice != 'y':
+            print_info("Keeping existing Key Vault")
+            return
+    elif vault_mode == "project-created":
+        print_info(f"This deployment created Key Vault '{vault_name}', so it will be deleted automatically")
+    else:
+        print_warning(f"Skipping Key Vault cleanup because ownership for '{vault_name}' could not be determined")
+        return
+
+    deleted, message = delete_key_vault(vault_name)
+    if deleted:
+        print_success(message)
+    else:
+        print_warning(f"Key Vault deletion failed: {message}")
+
+
 def generate_certificate_password(length: int = 32) -> str:
     """Generate a strong password for exported PFX files."""
     alphabet = string.ascii_letters + string.digits + "!@#$%^&*()-_=+"
@@ -582,6 +810,23 @@ def get_access_token() -> Optional[str]:
             return result.stdout.strip()
     except Exception as e:
         print_error(f"Failed to get access token: {e}")
+    return None
+
+
+def get_access_token_via_azure_cli() -> Optional[str]:
+    """Get Microsoft Graph access token using Azure CLI delegated auth."""
+    try:
+        result = run_command([
+            "az", "account", "get-access-token",
+            "--resource", "https://graph.microsoft.com",
+            "--query", "accessToken",
+            "-o", "tsv"
+        ])
+        if result:
+            token = result.stdout.strip()
+            return token if token else None
+    except Exception:
+        pass
     return None
 
 def parse_selection(selection: str, max_value: int) -> Set[int]:
@@ -880,6 +1125,35 @@ def get_m365_groups(access_token: str) -> List[Dict[str, Any]]:
         print_error(f"Error getting groups: {e}")
     
     return groups
+
+
+def get_m365_group_id_by_display_name(display_name: str, access_token: str) -> Optional[str]:
+    """Resolve a Unified group ID by exact displayName match."""
+    if not display_name:
+        return None
+
+    try:
+        escaped_name = display_name.replace("'", "''")
+        filter_expr = f"groupTypes/any(c:c eq 'Unified') and displayName eq '{escaped_name}'"
+        filter_param = urllib.parse.quote(filter_expr)
+        url = (
+            "https://graph.microsoft.com/v1.0/groups"
+            f"?$filter={filter_param}&$select=id,displayName&$top=5"
+        )
+
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {access_token}")
+        req.add_header("Content-Type", "application/json")
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode())
+            value = data.get("value", [])
+            if value:
+                return value[0].get("id")
+    except Exception:
+        pass
+
+    return None
 
 
 def delete_m365_group(group_id: str, access_token: str) -> bool:
@@ -1382,6 +1656,79 @@ try {{
         return {url: False for url in site_urls}
 
 
+def delete_spo_sites_batch(admin_url: str, site_urls: List[str]) -> Dict[str, Tuple[bool, str]]:
+    """Delete active SharePoint sites using SharePoint Admin PowerShell.
+
+    Uses one authenticated Connect-SPOService session and executes Remove-SPOSite
+    for each URL, returning per-site success/error messages.
+    """
+    ps_exe = get_powershell_executable()
+    escaped_urls = [url.replace('"', '\\"') for url in site_urls]
+    sites_array = ", ".join([f'"{url}"' for url in escaped_urls])
+
+    ps_script = f'''
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
+$results = @()
+$sites = @({sites_array})
+
+try {{
+    Connect-SPOService -Url "{admin_url}" -ErrorAction Stop
+
+    foreach ($site in $sites) {{
+        try {{
+            Remove-SPOSite -Identity $site -Confirm:$false -ErrorAction Stop
+            $results += [PSCustomObject]@{{ Url = $site; Success = $true; Message = "" }}
+        }} catch {{
+            $results += [PSCustomObject]@{{ Url = $site; Success = $false; Message = $_.Exception.Message }}
+        }}
+    }}
+
+    $results | ConvertTo-Json -Compress
+}} catch {{
+    Write-Output ("CONNECTION_ERROR:" + $_.Exception.Message)
+    exit 1
+}}
+'''
+
+    try:
+        result = subprocess.run(
+            [ps_exe, "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+            capture_output=True,
+            text=True,
+            timeout=900
+        )
+
+        output = (result.stdout or "").strip()
+        if result.returncode != 0:
+            error_msg = output or (result.stderr or "").strip() or "Batch site deletion failed"
+            return {url: (False, error_msg) for url in site_urls}
+
+        if output.startswith("CONNECTION_ERROR:"):
+            msg = output.replace("CONNECTION_ERROR:", "", 1).strip() or "Failed to connect to SharePoint Admin"
+            return {url: (False, msg) for url in site_urls}
+
+        if not output:
+            return {url: (False, "No response from SharePoint Admin command") for url in site_urls}
+
+        parsed = json.loads(output)
+        entries = parsed if isinstance(parsed, list) else [parsed]
+
+        results: Dict[str, Tuple[bool, str]] = {url: (False, "No result returned") for url in site_urls}
+        for entry in entries:
+            url = str(entry.get("Url", ""))
+            success = bool(entry.get("Success", False))
+            message = str(entry.get("Message", "") or "")
+            if url:
+                results[url] = (success, message)
+
+        return results
+    except subprocess.TimeoutExpired:
+        return {url: (False, "Timed out while deleting sites via SharePoint Admin") for url in site_urls}
+    except Exception as e:
+        return {url: (False, str(e)) for url in site_urls}
+
+
 def display_spo_deleted_sites_for_selection(sites: List[Dict[str, Any]]) -> None:
     """Display deleted SharePoint sites in a numbered list for selection."""
     print()
@@ -1588,6 +1935,7 @@ def delete_groups_mode(groups: List[Dict[str, Any]], access_token: str, auto_con
     print()
     deleted = 0
     failed = 0
+    deleted_site_entries: List[Dict[str, str]] = []
     
     for group in groups:
         name = group.get("displayName", "Unknown")
@@ -1603,6 +1951,12 @@ def delete_groups_mode(groups: List[Dict[str, Any]], access_token: str, auto_con
         if delete_m365_group(group_id, access_token):
             print_success(f"Deleted: {name}")
             deleted += 1
+
+            site_url = str(group.get("siteUrl", "")).strip()
+            if not site_url and group.get("siteId"):
+                site_url = get_site_url_from_id(group.get("siteId", ""), access_token) or ""
+            if site_url:
+                deleted_site_entries.append({"name": name, "url": site_url})
         else:
             print_error(f"Failed to delete: {name}")
             failed += 1
@@ -1615,30 +1969,17 @@ def delete_groups_mode(groups: List[Dict[str, Any]], access_token: str, auto_con
         print()
         print_banner("RECYCLE BIN CLEANUP")
         print()
-        print_info("Sites have been soft-deleted. They now exist in two recycle bins:")
+        print_info("Completing cleanup for deleted groups and their SharePoint sites:")
         print(f"    {Colors.CYAN}1.{Colors.NC} Microsoft 365 Groups recycle bin (Azure AD)")
-        print(f"    {Colors.CYAN}2.{Colors.NC} SharePoint site recycle bin (SharePoint Admin Center)")
+        print(f"    {Colors.CYAN}2.{Colors.NC} Direct SharePoint site recycle bins (option [8] flow)")
         print()
-        
-        # Try to auto-detect tenant name from site URLs if not provided
-        if not tenant:
-            for group in groups:
-                site_url = group.get("siteUrl", "")
-                if site_url and ".sharepoint.com" in site_url:
-                    # Extract tenant from URL like https://contoso.sharepoint.com/sites/...
-                    import re
-                    match = re.search(r'https://([^.]+)\.sharepoint\.com', site_url)
-                    if match:
-                        tenant = match.group(1)
-                        print_info(f"Auto-detected tenant name: {tenant}")
-                        break
         
         # Ask if user wants to skip recycle bin purge
         if not auto_confirm:
             skip_choice = input(f"  {Colors.YELLOW}Purge recycle bins now? (Y/n): {Colors.NC}").strip().lower()
             if skip_choice == 'n':
                 print_warning("Skipping recycle bin purge. Sites remain in recycle bins.")
-                print_info("You can purge them later using menu options [6] and [7]")
+                print_info("You can purge them later using menu options [6] and [8]")
                 return
         
         # Step 1: Purge M365 Groups recycle bin
@@ -1657,24 +1998,20 @@ def delete_groups_mode(groups: List[Dict[str, Any]], access_token: str, auto_con
         else:
             print_info("No deleted groups found in Azure AD recycle bin")
         
-        # Step 2: Purge SharePoint site recycle bin
+        # Step 2: Purge SharePoint site recycle bins directly
         print()
-        print_step(2, "Purging SharePoint site recycle bin")
-        
-        # Get tenant name if not provided
-        if not tenant:
-            print()
-            print(f"  {Colors.WHITE}Enter your SharePoint tenant name{Colors.NC}")
-            print(f"  {Colors.DIM}(e.g., 'contoso' for contoso.sharepoint.com){Colors.NC}")
-            print()
-            tenant = input(f"  {Colors.YELLOW}Tenant name (or press Enter to skip): {Colors.NC}").strip()
-        
-        if tenant:
-            admin_url = f"https://{tenant}-admin.sharepoint.com"
-            purge_spo_deleted_sites_mode(admin_url, auto_confirm=True)
+        print_step(2, "Purging SharePoint site recycle bins directly")
+
+        if deleted_site_entries:
+            purge_direct_site_recycle_bins(deleted_site_entries, auto_confirm=auto_confirm)
         else:
-            print_warning("Skipping SharePoint recycle bin purge (no tenant provided)")
-            print_info("You can purge it later using menu option [7]")
+            print_warning("Skipping direct SharePoint recycle bin purge (no site URLs available)")
+            print_info("You can purge it later using menu option [8]")
+
+        maybe_cleanup_deployment_key_vault(
+            {entry.get("url", "") for entry in deleted_site_entries},
+            auto_confirm=auto_confirm,
+        )
 
 def get_site_files(site_id: str, access_token: str) -> List[Dict[str, Any]]:
     """Get all files from a SharePoint site's document library."""
@@ -3169,43 +3506,227 @@ def purge_site_recycle_bin(site_id: str, access_token: str) -> Tuple[int, int]:
     return 0, 0
 
 
-def delete_site(site_id: str, access_token: str) -> bool:
+def purge_direct_site_recycle_bins(
+    site_entries: List[Dict[str, str]],
+    auto_confirm: bool = False,
+) -> Dict[str, Dict[str, Any]]:
+    """Purge recycle bins directly on active sites using the option [8] PnP flow."""
+    deduped_entries: List[Dict[str, str]] = []
+    seen_urls: Set[str] = set()
+
+    for entry in site_entries:
+        raw_url = str(entry.get("url", "")).strip()
+        if not raw_url:
+            continue
+
+        normalized_url = raw_url.rstrip("/")
+        if normalized_url in seen_urls:
+            continue
+
+        seen_urls.add(normalized_url)
+        deduped_entries.append(
+            {
+                "name": str(entry.get("name", normalized_url)).strip() or normalized_url,
+                "url": normalized_url,
+            }
+        )
+
+    if not deduped_entries:
+        print_warning("No valid site URLs found for direct recycle bin purge")
+        return {}
+
+    print_info("Using direct per-site recycle bin purge (same method as menu option [8])")
+
+    if not check_pnp_module_installed():
+        print_warning("PnP.PowerShell module is not installed")
+        if auto_confirm:
+            print_info("Attempting to install PnP.PowerShell module automatically...")
+            if not install_pnp_module():
+                print_error("Could not install PnP.PowerShell. Skipping direct recycle bin purge.")
+                return {}
+        else:
+            install_choice = input(f"  {Colors.YELLOW}Install PnP.PowerShell module? (Y/n): {Colors.NC}").strip().lower()
+            if install_choice == 'n':
+                print_info("Skipping direct recycle bin purge")
+                return {}
+            if not install_pnp_module():
+                print_error("Could not install PnP.PowerShell. Skipping direct recycle bin purge.")
+                return {}
+
+    app_config = load_app_config() or {}
+    has_secret_mode = bool(app_config.get("client_secret"))
+    has_cert_mode = bool(app_config.get("certificate_path") or app_config.get("certificate_thumbprint"))
+    non_interactive = has_secret_mode or has_cert_mode
+
+    print_info(f"Processing {len(deduped_entries)} site(s) for direct recycle bin purge...")
+
+    batch_results = purge_site_recycle_bins_pnp_batch(
+        deduped_entries,
+        non_interactive=non_interactive,
+        client_id=app_config.get("app_id"),
+        tenant_id=app_config.get("tenant_id"),
+        client_secret=app_config.get("client_secret"),
+        certificate_path=app_config.get("certificate_path"),
+        certificate_password=app_config.get("certificate_password"),
+        certificate_thumbprint=app_config.get("certificate_thumbprint"),
+        timeout_seconds=max(1200, len(deduped_entries) * 75),
+    )
+
+    total_purged = 0
+    total_empty = 0
+    total_failed = 0
+
+    for entry in deduped_entries:
+        site_url = entry["url"]
+        site_name = entry["name"]
+        result = batch_results.get(site_url, {})
+        status = result.get("status", "failed")
+        purged = int(result.get("purged", 0) or 0)
+        message = str(result.get("message", "") or "")
+
+        if status == "purged":
+            total_purged += purged
+            print_success(f"  {site_name}: purged {purged} item(s)")
+        elif status == "empty":
+            total_empty += 1
+            print_info(f"  {site_name}: recycle bin empty")
+        elif status == "skipped":
+            print_warning(f"  {site_name}: skipped ({message})")
+        else:
+            total_failed += 1
+            if is_unauthorized_message(message):
+                print_warning(f"  {site_name}: unauthorized for app-only auth")
+            elif message:
+                print_warning(f"  {site_name}: failed ({message})")
+            else:
+                print_warning(f"  {site_name}: failed")
+
+    print()
+    if total_purged > 0:
+        print_success(f"Permanently deleted {total_purged} item(s) from site recycle bins")
+    if total_empty > 0:
+        print_info(f"{total_empty} site(s) already had empty recycle bins")
+    if total_failed > 0:
+        print_warning(f"Failed to purge {total_failed} site(s) directly")
+
+    return batch_results
+
+
+def delete_site(site_id: str, access_token: str) -> Tuple[bool, str]:
     """Delete a SharePoint site.
     
     Note: This requires admin permissions and the site goes to recycle bin first.
     """
-    # SharePoint sites are deleted via the SharePoint Admin API, not Graph API directly
-    # We need to use the site URL to delete it
-    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}"
-    
-    try:
-        # First, get the site details to get the web URL
-        req = urllib.request.Request(url)
-        req.add_header("Authorization", f"Bearer {access_token}")
-        
-        with urllib.request.urlopen(req, timeout=30) as response:
-            site_data = json.loads(response.read().decode())
-            web_url = site_data.get("webUrl", "")
-            
-        # Delete the site using the admin API
-        # Note: This requires Sites.FullControl.All permission
+    def extract_http_error(e: urllib.error.HTTPError) -> str:
+        try:
+            body = e.read().decode("utf-8", errors="ignore")
+            if not body:
+                return ""
+            try:
+                payload = json.loads(body)
+                msg = payload.get("error", {}).get("message")
+                return msg or body[:300]
+            except Exception:
+                return body[:300]
+        except Exception:
+            return ""
+
+    def attempt_delete(token: str) -> Tuple[bool, str, int]:
         delete_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}"
-        
-        req = urllib.request.Request(delete_url, method="DELETE")
+        try:
+            req = urllib.request.Request(delete_url, method="DELETE")
+            req.add_header("Authorization", f"Bearer {token}")
+            with urllib.request.urlopen(req, timeout=60) as response:
+                if response.status in [200, 204]:
+                    return True, "", response.status
+                return False, f"Unexpected status: {response.status}", response.status
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return True, "Already deleted", e.code
+            detail = extract_http_error(e)
+            if detail:
+                return False, f"HTTP {e.code}: {detail}", e.code
+            return False, f"HTTP {e.code}: {e.reason}", e.code
+        except Exception as ex:
+            return False, str(ex), 0
+
+    # First attempt with currently selected token source.
+    success, message, status = attempt_delete(access_token)
+    if success:
+        return True, message
+
+    # If app credentials are being used and lack full-control permissions,
+    # retry with Azure CLI delegated token (often has SharePoint admin context).
+    if status == 403:
+        cli_token = get_access_token_via_azure_cli()
+        if cli_token and cli_token != access_token:
+            retry_success, retry_message, _ = attempt_delete(cli_token)
+            if retry_success:
+                return True, "Deleted via Azure CLI delegated token fallback"
+            return False, retry_message
+
+    return False, message
+
+
+def get_site_group_id_via_sharepoint_rest(site_url: str) -> Optional[str]:
+    """Get the GroupId for a SharePoint site via SharePoint REST.
+
+    Returns a GUID string when the site is Microsoft 365 group-connected.
+    Returns None for standalone sites or when the value is unavailable.
+    """
+    sp_token = get_sharepoint_access_token(site_url)
+    if not sp_token:
+        return None
+
+    api_url = f"{site_url.rstrip('/')}/_api/site?$select=GroupId"
+    try:
+        req = urllib.request.Request(api_url)
+        req.add_header("Authorization", f"Bearer {sp_token}")
+        req.add_header("Accept", "application/json;odata=nometadata")
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode())
+            group_id = str(data.get("GroupId", "")).strip()
+
+            # SharePoint uses all-zero GUID for non-group-connected sites.
+            if not group_id or group_id == "00000000-0000-0000-0000-000000000000":
+                return None
+
+            # Basic GUID guard.
+            if re.match(r"^[0-9a-fA-F-]{36}$", group_id):
+                return group_id
+            return None
+    except Exception:
+        return None
+
+
+def check_site_exists_by_url(access_token: str, site_url: str) -> Tuple[bool, str]:
+    """Check whether a SharePoint site URL still resolves in Microsoft Graph.
+
+    Returns:
+        (exists, detail)
+    """
+    try:
+        parsed = urllib.parse.urlparse(site_url)
+        hostname = parsed.netloc
+        path = parsed.path or "/"
+        if not hostname:
+            return False, "Invalid URL"
+
+        graph_url = f"https://graph.microsoft.com/v1.0/sites/{hostname}:{path}"
+        req = urllib.request.Request(graph_url)
         req.add_header("Authorization", f"Bearer {access_token}")
-        
-        with urllib.request.urlopen(req, timeout=60) as response:
-            return response.status in [200, 204]
-            
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            if response.status == 200:
+                return True, "Site still resolves in Graph"
+            return False, f"Unexpected status {response.status}"
     except urllib.error.HTTPError as e:
-        if e.code == 403:
-            print_error("Insufficient permissions to delete site. Need Sites.FullControl.All")
-        elif e.code == 404:
-            return True  # Already deleted
-        return False
+        if e.code == 404:
+            return False, "Not found"
+        return True, f"HTTP {e.code}: {e.reason}"
     except Exception as e:
-        print_error(f"Error deleting site: {e}")
-        return False
+        return True, str(e)
 
 def delete_all_files_from_site(site: Dict[str, Any], access_token: str) -> Tuple[int, int]:
     """Delete all files and folders from a SharePoint site."""
@@ -3598,7 +4119,12 @@ def delete_selected_files_mode(sites: List[Dict[str, Any]], access_token: str) -
     if total_fail > 0:
         print_warning(f"Failed to delete {total_fail} items")
 
-def delete_sites_mode(sites: List[Dict[str, Any]], access_token: str, tenant: Optional[str] = None) -> None:
+def delete_sites_mode(
+    sites: List[Dict[str, Any]],
+    access_token: str,
+    tenant: Optional[str] = None,
+    auto_confirm: bool = False,
+) -> None:
     """Delete selected SharePoint sites.
     
     For group-connected sites (created via Terraform/M365 Groups), this deletes the M365 Group
@@ -3642,17 +4168,83 @@ def delete_sites_mode(sites: List[Dict[str, Any]], access_token: str, tenant: Op
     # Categorize deletable sites by deletion method
     group_sites = []  # Sites with M365 Group (delete via group)
     standalone_sites = []  # Sites without group (delete directly)
+    target_site_urls: List[str] = []
+    successful_target_site_urls: Set[str] = set()
+    site_name_by_url: Dict[str, str] = {}
+
+    # Build lookup of group-connected SharePoint sites so we don't misclassify
+    # sites discovered via /sites?search=* as standalone.
+    candidate_tokens: List[str] = [access_token]
+    cli_token = get_access_token_via_azure_cli()
+    if cli_token and cli_token != access_token:
+        candidate_tokens.append(cli_token)
+
+    group_site_id_to_group_id: Dict[str, str] = {}
+    group_site_url_to_group_id: Dict[str, str] = {}
+    for token in candidate_tokens:
+        try:
+            m365_groups = get_m365_groups(token)
+            for group in m365_groups:
+                group_id = group.get("id", "")
+                site_id = group.get("siteId", "")
+                site_url = group.get("siteUrl", "")
+                if group_id and site_id and site_id not in group_site_id_to_group_id:
+                    group_site_id_to_group_id[site_id] = group_id
+                if group_id and site_url:
+                    normalized = site_url.rstrip("/").lower()
+                    if normalized not in group_site_url_to_group_id:
+                        group_site_url_to_group_id[normalized] = group_id
+        except Exception:
+            continue
+
+    if group_site_id_to_group_id or group_site_url_to_group_id:
+        resolved_count = len(set(group_site_id_to_group_id.values()) | set(group_site_url_to_group_id.values()))
+        print_info(f"Resolved {resolved_count} Microsoft 365 groups for site ownership mapping")
+    else:
+        print_warning("Could not resolve group ownership from group listing; using per-site fallback lookup")
     
     for site in deletable_sites:
         site_name = site.get("displayName", site.get("name", "Unknown"))
         web_url = site.get("webUrl", site.get("siteUrl", ""))
-        
-        # Check if this is a group-connected site
-        # Sites from get_m365_groups have 'id' as group ID and 'siteId' as SharePoint site ID
-        # Sites from get_sharepoint_sites have 'id' as SharePoint site ID
-        has_group = "siteId" in site  # If siteId exists, 'id' is the group ID
-        
-        if has_group:
+
+        if web_url:
+            normalized_url = web_url.rstrip("/")
+            target_site_urls.append(normalized_url)
+            site_name_by_url[normalized_url] = site_name
+
+        # Determine whether this is a group-connected site and resolve its group ID.
+        resolved_group_id = ""
+
+        # If coming directly from get_m365_groups(), id is the group id.
+        if "siteId" in site and site.get("id"):
+            resolved_group_id = site.get("id", "")
+
+        # If groupId is already present in payload, honor it.
+        if not resolved_group_id and site.get("groupId"):
+            resolved_group_id = site.get("groupId", "")
+
+        # Lookup by SharePoint site id.
+        if not resolved_group_id:
+            site_id = site.get("id", "")
+            resolved_group_id = group_site_id_to_group_id.get(site_id, "")
+
+        # Lookup by normalized web URL.
+        if not resolved_group_id and web_url:
+            resolved_group_id = group_site_url_to_group_id.get(web_url.rstrip("/").lower(), "")
+
+        # Fallback: exact group display-name lookup.
+        if not resolved_group_id:
+            for token in candidate_tokens:
+                resolved_group_id = get_m365_group_id_by_display_name(site_name, token) or ""
+                if resolved_group_id:
+                    break
+
+        # Final fallback: read GroupId from SharePoint site metadata directly.
+        if not resolved_group_id and web_url:
+            resolved_group_id = get_site_group_id_via_sharepoint_rest(web_url) or ""
+
+        if resolved_group_id:
+            site["_resolvedGroupId"] = resolved_group_id
             group_sites.append(site)
             print(f"    - {site_name} {Colors.CYAN}(M365 Group){Colors.NC}")
         else:
@@ -3668,84 +4260,142 @@ def delete_sites_mode(sites: List[Dict[str, Any]], access_token: str, tenant: Op
     print()
     
     # Double confirmation for site deletion
-    confirm1 = input(f"  {Colors.RED}Type 'DELETE' to confirm site deletion:{Colors.NC} ").strip()
-    if confirm1 != "DELETE":
-        print_warning("Site deletion cancelled")
-        return
-    
-    confirm2 = input(f"  {Colors.RED}Are you ABSOLUTELY sure? Type 'YES' to proceed:{Colors.NC} ").strip()
-    if confirm2 != "YES":
-        print_warning("Site deletion cancelled")
-        return
+    if not auto_confirm:
+        confirm1 = input(f"  {Colors.RED}Type 'DELETE' to confirm site deletion:{Colors.NC} ").strip()
+        if confirm1 != "DELETE":
+            print_warning("Site deletion cancelled")
+            return
+
+    if not auto_confirm:
+        confirm2 = input(f"  {Colors.RED}Are you ABSOLUTELY sure? Type 'YES' to proceed:{Colors.NC} ").strip()
+        if confirm2 != "YES":
+            print_warning("Site deletion cancelled")
+            return
     
     print()
     success_count = 0
     fail_count = 0
+    failed_sites: List[Tuple[str, str]] = []
     
     # Delete group-connected sites via M365 Group deletion
     if group_sites:
         print_info("Deleting group-connected sites via M365 Groups...")
+        deleted_group_ids: Set[str] = set()
         for i, site in enumerate(group_sites):
             site_name = site.get("displayName", site.get("name", "Unknown"))
-            group_id = site.get("id", "")  # For group sites, 'id' is the group ID
+            group_id = site.get("_resolvedGroupId", site.get("id", ""))
+            if not group_id:
+                fail_count += 1
+                failed_sites.append((site_name, "Could not resolve Microsoft 365 Group ID"))
+                continue
+
+            if group_id in deleted_group_ids:
+                # Avoid duplicate deletion attempts if multiple site entries map to same group.
+                continue
             
             print_progress(i + 1, len(group_sites), f"Deleting group: {site_name[:30]}...")
             
             if delete_m365_group(group_id, access_token):
                 success_count += 1
+                deleted_group_ids.add(group_id)
+                site_url = site.get("webUrl", site.get("siteUrl", ""))
+                if site_url:
+                    successful_target_site_urls.add(site_url.rstrip("/"))
             else:
                 fail_count += 1
+                failed_sites.append((site_name, "Failed to delete Microsoft 365 Group (requires Group.ReadWrite.All and admin consent)"))
         print()
     
     # Delete standalone sites directly
     if standalone_sites:
-        print_info("Deleting standalone sites directly...")
-        for i, site in enumerate(standalone_sites):
-            site_name = site.get("displayName", site.get("name", "Unknown"))
-            site_id = site.get("id", "")
-            
-            print_progress(i + 1, len(standalone_sites), f"Deleting site: {site_name[:30]}...")
-            
-            if delete_site(site_id, access_token):
-                success_count += 1
+        print_info("Deleting standalone sites via SharePoint Admin API...")
+
+        if not check_spo_module_installed():
+            print_warning("SharePoint Online PowerShell module is required for standalone site deletion")
+            install_choice = input("  Install SharePoint Online PowerShell module now? (y/n): ").strip().lower()
+            if install_choice == 'y':
+                if not install_spo_module():
+                    print_error("Could not install SharePoint Online PowerShell module")
+                    print_warning("Falling back to Microsoft Graph delete (may fail with HTTP 400)")
             else:
-                fail_count += 1
-        print()
-    
-    print()
-    print()
-    
-    if success_count > 0:
-        print_success(f"Deleted {success_count} sites successfully")
-        print_info("Note: Deleted sites go to the SharePoint recycle bin for 93 days")
-        
-        # Automatically purge recycle bins after deletion
-        print()
-        print_banner("RECYCLE BIN CLEANUP")
-        print()
-        print_info("Sites have been soft-deleted. They now exist in two recycle bins:")
-        print(f"    {Colors.CYAN}1.{Colors.NC} Microsoft 365 Groups recycle bin (Azure AD)")
-        print(f"    {Colors.CYAN}2.{Colors.NC} SharePoint site recycle bin (SharePoint Admin Center)")
-        print()
-        
-        # Try to auto-detect tenant name from site URLs if not provided
+                print_warning("Skipping module installation; Graph fallback will be attempted")
+
+        standalone_site_urls: List[str] = []
+        standalone_site_name_by_url: Dict[str, str] = {}
+        for site in standalone_sites:
+            site_name = site.get("displayName", site.get("name", "Unknown"))
+            site_url = site.get("webUrl", site.get("siteUrl", ""))
+            if site_url:
+                standalone_site_urls.append(site_url)
+            standalone_site_name_by_url[site_url] = site_name
+
         if not tenant:
-            for site in sites:
-                site_url = site.get("webUrl", site.get("siteUrl", ""))
-                if site_url and ".sharepoint.com" in site_url:
-                    # Extract tenant from URL like https://contoso.sharepoint.com/sites/...
-                    import re
+            for site_url in standalone_site_urls:
+                if ".sharepoint.com" in site_url:
                     match = re.search(r'https://([^.]+)\.sharepoint\.com', site_url)
                     if match:
                         tenant = match.group(1)
                         print_info(f"Auto-detected tenant name: {tenant}")
                         break
+
+        spo_batch_used = False
+        if standalone_site_urls and tenant and check_spo_module_installed():
+            admin_url = f"https://{tenant}-admin.sharepoint.com"
+            spo_batch_used = True
+            batch_results = delete_spo_sites_batch(admin_url, standalone_site_urls)
+
+            for i, site_url in enumerate(standalone_site_urls, 1):
+                site_name = standalone_site_name_by_url.get(site_url, site_url)
+                print_progress(i, len(standalone_site_urls), f"Deleting site: {site_name[:30]}...")
+                ok, msg = batch_results.get(site_url, (False, "No result returned"))
+                if ok:
+                    success_count += 1
+                    successful_target_site_urls.add(site_url.rstrip("/"))
+                else:
+                    fail_count += 1
+                    failed_sites.append((site_name, msg or "Unknown error"))
+            print()
+
+        # Fallback path: Graph delete by site ID for environments where SPO path is unavailable.
+        if not spo_batch_used:
+            for i, site in enumerate(standalone_sites):
+                site_name = site.get("displayName", site.get("name", "Unknown"))
+                site_id = site.get("id", "")
+
+                print_progress(i + 1, len(standalone_sites), f"Deleting site: {site_name[:30]}...")
+
+                site_deleted, delete_message = delete_site(site_id, access_token)
+                if site_deleted:
+                    success_count += 1
+                    site_url = site.get("webUrl", site.get("siteUrl", ""))
+                    if site_url:
+                        successful_target_site_urls.add(site_url.rstrip("/"))
+                else:
+                    fail_count += 1
+                    failed_sites.append((site_name, delete_message or "Unknown error"))
+            print()
+    
+    print()
+    print()
+    
+    if success_count > 0:
+        print_success(f"Deletion requests accepted for {success_count} site(s)")
+        print_info("SharePoint deprovisioning may continue asynchronously after this step")
+        
+        # Automatically purge recycle bins after deletion
+        print()
+        print_banner("RECYCLE BIN CLEANUP")
+        print()
+        print_info("Completing cleanup for deleted groups/sites:")
+        print(f"    {Colors.CYAN}1.{Colors.NC} Microsoft 365 Groups recycle bin (Azure AD)")
+        print(f"    {Colors.CYAN}2.{Colors.NC} Direct SharePoint site recycle bins (option [8] flow)")
+        print()
         
         # Ask if user wants to skip recycle bin purge
         skip_choice = input(f"  {Colors.YELLOW}Purge recycle bins now? (Y/n): {Colors.NC}").strip().lower()
         if skip_choice == 'n':
             print_warning("Skipping recycle bin purge. Sites remain in recycle bins.")
-            print_info("You can purge them later using menu options [6] and [7]")
+            print_info("You can purge them later using menu options [6] and [8]")
         else:
             # Step 1: Purge M365 Groups recycle bin
             print()
@@ -3763,28 +4413,55 @@ def delete_sites_mode(sites: List[Dict[str, Any]], access_token: str, tenant: Op
             else:
                 print_info("No deleted groups found in Azure AD recycle bin")
             
-            # Step 2: Purge SharePoint site recycle bin
+            # Step 2: Purge SharePoint site recycle bins directly
             print()
-            print_step(2, "Purging SharePoint site recycle bin")
-            
-            # Get tenant name if not provided (and not auto-detected above)
-            if not tenant:
-                print()
-                print(f"  {Colors.WHITE}Enter your SharePoint tenant name{Colors.NC}")
-                print(f"  {Colors.DIM}(e.g., 'contoso' for contoso.sharepoint.com){Colors.NC}")
-                print()
-                tenant = input(f"  {Colors.YELLOW}Tenant name (or press Enter to skip): {Colors.NC}").strip()
-            
-            if tenant:
-                admin_url = f"https://{tenant}-admin.sharepoint.com"
-                purge_spo_deleted_sites_mode(admin_url, auto_confirm=True)
+            print_step(2, "Purging SharePoint site recycle bins directly")
+
+            recycle_purge_entries = [
+                {"name": site_name_by_url.get(site_url, site_url), "url": site_url}
+                for site_url in sorted(successful_target_site_urls)
+            ]
+
+            if recycle_purge_entries:
+                purge_direct_site_recycle_bins(recycle_purge_entries, auto_confirm=auto_confirm)
             else:
-                print_warning("Skipping SharePoint recycle bin purge (no tenant provided)")
-                print_info("You can purge it later using menu option [7]")
+                print_warning("Skipping direct SharePoint recycle bin purge (no successful site URLs captured)")
+                print_info("You can purge it later using menu option [8]")
+
+        # Verify site URL resolution after delete/purge flow to avoid false positives.
+        verify_site_urls = sorted(successful_target_site_urls) if successful_target_site_urls else sorted(set(target_site_urls))
+        if verify_site_urls:
+            print()
+            print_step(3, "Verify Site Deletion State")
+            still_active: List[Tuple[str, str]] = []
+
+            for i, site_url in enumerate(verify_site_urls, 1):
+                site_name = site_name_by_url.get(site_url, site_url)
+                print_progress(i, len(verify_site_urls), f"Verifying: {site_name[:30]}...")
+                exists, detail = check_site_exists_by_url(access_token, site_url)
+                if exists:
+                    still_active.append((site_name, detail))
+            print()
+
+            if still_active:
+                print_warning(f"{len(still_active)} site(s) still resolve as active")
+                print_info("This usually indicates pending SharePoint deprovisioning or retention/hold constraints")
+                print(f"  {Colors.WHITE}Sites still active (first 10):{Colors.NC}")
+                for name, detail in still_active[:10]:
+                    print(f"    - {name}: {detail}")
+            else:
+                print_success("All targeted site URLs no longer resolve in Graph")
+
+        maybe_cleanup_deployment_key_vault(set(verify_site_urls), auto_confirm=auto_confirm)
         
     if fail_count > 0:
         print_warning(f"Failed to delete {fail_count} sites")
         print_info("You may need SharePoint Admin permissions to delete sites")
+        if failed_sites:
+            print()
+            print(f"  {Colors.WHITE}Failure details (first 10):{Colors.NC}")
+            for site_name, reason in failed_sites[:10]:
+                print(f"    - {site_name}: {reason}")
 
 def main() -> None:
     """Main entry point."""
@@ -4564,12 +5241,12 @@ Selection Syntax (for --select-sites and --select-files):
     if delete_files and not delete_sites:
         delete_files_mode(sites, access_token)
     elif delete_sites and not delete_files:
-        delete_sites_mode(sites, access_token, tenant=args.tenant)
+        delete_sites_mode(sites, access_token, tenant=args.tenant, auto_confirm=args.yes)
     elif delete_files and delete_sites:
         # Delete files first, then sites
         print_info("Deleting files first, then sites...")
         delete_files_mode(sites, access_token)
-        delete_sites_mode(sites, access_token, tenant=args.tenant)
+        delete_sites_mode(sites, access_token, tenant=args.tenant, auto_confirm=args.yes)
     
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()

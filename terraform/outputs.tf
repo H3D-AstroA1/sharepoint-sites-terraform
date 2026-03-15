@@ -69,7 +69,7 @@ output "sharepoint_sites_created" {
   value = {
     for site_name, site_config in var.sharepoint_sites : site_name => {
       display_name = site_config.display_name
-      url          = "${local.sharepoint_url}/sites/${site_name}"
+      url          = "${local.sharepoint_url}/sites/${local.site_url_segments[site_name]}"
       description  = site_config.description
       template     = site_config.template
       visibility   = site_config.visibility
@@ -80,7 +80,7 @@ output "sharepoint_sites_created" {
 output "sharepoint_site_urls" {
   description = "Direct URLs to each SharePoint site"
   value = {
-    for site_name, site_config in var.sharepoint_sites : site_name => "${local.sharepoint_url}/sites/${site_name}"
+    for site_name, site_config in var.sharepoint_sites : site_name => "${local.sharepoint_url}/sites/${local.site_url_segments[site_name]}"
   }
 }
 

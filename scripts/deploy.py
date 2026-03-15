@@ -32,7 +32,7 @@ import urllib.parse
 import zipfile
 import shutil
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Set
 
 # ============================================================================
 # CONFIGURATION
@@ -1180,6 +1180,153 @@ def format_terraform_sites_block(sites: List[Dict]) -> str:
     return '\n'.join(lines)
 
 
+def get_site_url_name(site_name: str, template: str) -> str:
+    """Convert a site name to the URL segment used by the creator script."""
+    url_name = ''.join(c for c in site_name if c.isalnum())
+    if template == "SITEPAGEPUBLISHING#0":
+        url_name = url_name + "site"
+    return url_name
+
+
+def get_sharepoint_site_url_candidates(site: Dict, m365_tenant: str) -> List[str]:
+    """Return likely SharePoint URLs for a site across current/legacy creation paths."""
+    site_name = site['name']
+    template = site.get('template', 'STS#3')
+    sanitized_name = ''.join(c for c in site_name if c.isalnum())
+
+    candidates = [
+        f"https://{m365_tenant}.sharepoint.com/sites/{site_name}",
+        f"https://{m365_tenant}.sharepoint.com/sites/{sanitized_name}",
+    ]
+
+    if template == "SITEPAGEPUBLISHING#0":
+        candidates.append(f"https://{m365_tenant}.sharepoint.com/sites/{sanitized_name}site")
+
+    unique_candidates: List[str] = []
+    seen: Set[str] = set()
+    for candidate in candidates:
+        normalized_candidate = candidate.rstrip('/')
+        if normalized_candidate not in seen:
+            seen.add(normalized_candidate)
+            unique_candidates.append(normalized_candidate)
+    return unique_candidates
+
+
+def test_sharepoint_site_exists(site_url: str, m365_tenant: str, access_token: str) -> Optional[str]:
+    """Return the resolved SharePoint site URL if Graph can find it, else None."""
+    parsed_url = urllib.parse.urlparse(site_url)
+    site_path = parsed_url.path.rstrip('/')
+    if not site_path:
+        return None
+
+    request = urllib.request.Request(
+        f"https://graph.microsoft.com/v1.0/sites/{m365_tenant}.sharepoint.com:{site_path}",
+        headers={
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json'
+        }
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = json.loads(response.read().decode('utf-8'))
+            web_url = payload.get('webUrl')
+            return web_url.rstrip('/') if web_url else site_url.rstrip('/')
+    except Exception:
+        return None
+
+
+def resolve_sharepoint_site_url(site: Dict, m365_tenant: str, access_token: str) -> Optional[str]:
+    """Resolve the actual SharePoint URL for a site by probing likely URL patterns."""
+    for candidate_url in get_sharepoint_site_url_candidates(site, m365_tenant):
+        resolved_url = test_sharepoint_site_exists(candidate_url, m365_tenant, access_token)
+        if resolved_url:
+            return resolved_url
+    return None
+
+
+def get_verified_sharepoint_site_urls(sites: List[Dict], m365_tenant: str) -> Dict[str, str]:
+    """Return a map of site name to verified SharePoint URL for sites that currently exist."""
+    access_token = get_graph_access_token()
+    if not access_token:
+        return {}
+
+    verified_urls: Dict[str, str] = {}
+    for site in sites:
+        resolved_url = resolve_sharepoint_site_url(site, m365_tenant, access_token)
+        if resolved_url:
+            verified_urls[site['name']] = resolved_url
+    return verified_urls
+
+
+def get_terraform_state_resources() -> Set[str]:
+    """Return all Terraform resource addresses currently tracked in state."""
+    result = subprocess.run(
+        ['terraform', 'state', 'list'],
+        cwd=TERRAFORM_DIR,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=get_terraform_env()
+    )
+    if result.returncode != 0:
+        return set()
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
+def remove_terraform_state_resource(resource_address: str) -> bool:
+    """Remove a single resource address from Terraform state."""
+    try:
+        subprocess.run(
+            ['terraform', 'state', 'rm', resource_address],
+            cwd=TERRAFORM_DIR,
+            check=True,
+            env=get_terraform_env()
+        )
+        return True
+    except subprocess.CalledProcessError:
+        print_warning(f"  Failed to remove stale state: {resource_address}")
+        return False
+
+
+def reconcile_stale_sharepoint_site_state(sites: List[Dict], m365_tenant: str) -> List[str]:
+    """Remove stale null_resource state entries for SharePoint sites that no longer exist."""
+    access_token = get_graph_access_token()
+    if not access_token:
+        print_warning("Could not get a Microsoft Graph token to validate existing SharePoint sites.")
+        return []
+
+    state_resources = get_terraform_state_resources()
+    if not state_resources:
+        return []
+
+    stale_resources: List[str] = []
+    for site in sites:
+        resource_address = f'null_resource.sharepoint_sites["{site["name"]}"]'
+        if resource_address not in state_resources:
+            continue
+
+        resolved_url = resolve_sharepoint_site_url(site, m365_tenant, access_token)
+        if resolved_url is None:
+            stale_resources.append(resource_address)
+
+    if not stale_resources:
+        return []
+
+    print_warning(
+        f"Detected {len(stale_resources)} SharePoint site resource(s) in Terraform state that are missing in Microsoft 365."
+    )
+    print_info("Removing stale Terraform state so the missing sites will be recreated...")
+
+    removed_resources: List[str] = []
+    for resource_address in stale_resources:
+        print_info(f"  Removing stale state: {resource_address}")
+        if remove_terraform_state_resource(resource_address):
+            removed_resources.append(resource_address)
+
+    return removed_resources
+
+
 # ============================================================================
 # AZURE CLI FUNCTIONS
 # ============================================================================
@@ -1293,15 +1440,108 @@ def terraform_plan() -> bool:
         return False
 
 
-def terraform_apply(auto_approve: bool = False) -> bool:
-    """Run Terraform apply."""
-    print_info("Running terraform apply...")
+def _terraform_import_resource(resource_address: str, resource_id: str) -> bool:
+    """Import a single existing resource into Terraform state."""
+    print_info(f"  Importing: {resource_address}")
     try:
-        cmd = ['terraform', 'apply']
-        if auto_approve:
-            cmd.append('-auto-approve')
-        cmd.append('tfplan')
-        subprocess.run(cmd, cwd=TERRAFORM_DIR, check=True, env=get_terraform_env())
+        subprocess.run(
+            ['terraform', 'import', resource_address, resource_id],
+            cwd=TERRAFORM_DIR, check=True, env=get_terraform_env()
+        )
+        return True
+    except subprocess.CalledProcessError:
+        print_warning(f"  Failed to import: {resource_address}")
+        return False
+
+
+def terraform_apply(auto_approve: bool = False) -> bool:
+    """Run Terraform apply.
+
+    On failure, automatically detects state drift ('already exists') errors,
+    imports the conflicting resources, re-plans, and retries apply so the user
+    never needs to run terraform import manually.
+    """
+    print_info("Running terraform apply...")
+    env = get_terraform_env()
+
+    cmd = ['terraform', 'apply']
+    if auto_approve:
+        cmd.append('-auto-approve')
+    cmd.append('tfplan')
+
+    # Stream output to the console while buffering for error analysis.
+    # Use utf-8 explicitly so Terraform's box-drawing chars (╷ ╵ │) are
+    # decoded correctly on Windows (which defaults to cp1252).
+    output_lines: List[str] = []
+    try:
+        proc = subprocess.Popen(
+            cmd, cwd=TERRAFORM_DIR, env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            encoding='utf-8', errors='replace', bufsize=1
+        )
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            print(line, end='', flush=True)
+            output_lines.append(line)
+        proc.wait()
+    except Exception:
+        return False
+
+    if proc.returncode == 0:
+        return True
+
+    # ------------------------------------------------------------------ #
+    # State drift detection: scan for "already exists" error blocks and   #
+    # extract ALL (resource_id, resource_address) pairs in one pass.      #
+    # Avoids relying on ╷/╵ block delimiters (encoding-fragile).          #
+    # Each Terraform error emits the ID before the "with ..." address.    #
+    # ------------------------------------------------------------------ #
+    full_output = ''.join(output_lines)
+    import_pairs: List[Tuple[str, str]] = []
+
+    # Non-greedy DOTALL match pairs each ID with the nearest following address.
+    raw_pairs = re.findall(
+        r'A resource with the ID "([^"]+)" already exists.*?'
+        r'with (azurerm_\S+),',
+        full_output, re.DOTALL | re.IGNORECASE
+    )
+    import_pairs = [(addr, resource_id) for resource_id, addr in raw_pairs]
+
+    if not import_pairs:
+        # Not a state drift error — nothing we can auto-fix.
+        return False
+
+    print_warning(f"\nDetected {len(import_pairs)} pre-existing resource(s) not tracked in Terraform state.")
+    print_info("Auto-importing into state — no manual action needed...")
+
+    all_imported = all(
+        _terraform_import_resource(addr, rid)
+        for addr, rid in import_pairs
+    )
+
+    if not all_imported:
+        print_error("One or more imports failed. Please resolve the remaining resources manually.")
+        return False
+
+    print_success(f"Imported {len(import_pairs)} resource(s) successfully.")
+
+    # Re-plan so the plan reflects the updated state, then retry apply.
+    print_info("Re-planning after import...")
+    try:
+        subprocess.run(
+            ['terraform', 'plan', '-out=tfplan'],
+            cwd=TERRAFORM_DIR, check=True, env=env
+        )
+    except subprocess.CalledProcessError:
+        print_error("Re-plan after import failed.")
+        return False
+
+    print_info("Retrying terraform apply...")
+    try:
+        subprocess.run(
+            ['terraform', 'apply', '-auto-approve', 'tfplan'],
+            cwd=TERRAFORM_DIR, check=True, env=env
+        )
         return True
     except subprocess.CalledProcessError:
         return False
@@ -2150,6 +2390,10 @@ Examples:
         sys.exit(1)
     
     print_success("Terraform initialized successfully!")
+
+    removed_stale_state = reconcile_stale_sharepoint_site_state(sites, m365_tenant)
+    if removed_stale_state:
+        print_success(f"Removed stale Terraform state for {len(removed_stale_state)} missing SharePoint site(s).")
     
     current_step += 1
     
@@ -2189,6 +2433,7 @@ Examples:
         sys.exit(1)
     
     print_success("Terraform apply completed successfully!")
+    verified_site_urls = get_verified_sharepoint_site_urls(sites, m365_tenant)
     
     current_step += 1
     
@@ -2203,40 +2448,47 @@ Examples:
     print()
     print(f"  {Colors.GREEN}Your SharePoint sites have been created!{Colors.NC}")
     print()
-    
-    # Helper function to convert site name to URL-safe mailNickname
-    def get_site_url_name(site_name: str, template: str) -> str:
-        """Convert site name to the actual URL name used by SharePoint."""
-        # Remove all non-alphanumeric characters (same as PowerShell script)
-        url_name = ''.join(c for c in site_name if c.isalnum())
-        # Communication sites created as fallback get 'site' suffix
-        if template == "SITEPAGEPUBLISHING#0":
-            url_name = url_name + "site"
-        return url_name
-    
+
     # Separate sites by visibility
     private_sites = [s for s in sites if s.get('visibility', 'Private').lower() == 'private']
     public_sites = [s for s in sites if s.get('visibility', 'Private').lower() == 'public']
+    unresolved_sites: List[str] = []
     
     if private_sites:
         print(f"  {Colors.WHITE}{Colors.BOLD}Private Sites:{Colors.NC}")
         for site in private_sites:
-            url_name = get_site_url_name(site['name'], site.get('template', 'STS#3'))
+            verified_url = verified_site_urls.get(site['name'])
+            fallback_url = f"https://{m365_tenant}.sharepoint.com/sites/{get_site_url_name(site['name'], site.get('template', 'STS#3'))}"
+            display_url = verified_url or fallback_url
             print(f"    {Colors.YELLOW}🔒{Colors.NC} {site.get('display_name', site['name'])}")
-            print(f"       {Colors.CYAN}https://{m365_tenant}.sharepoint.com/sites/{url_name}{Colors.NC}")
+            print(f"       {Colors.CYAN}{display_url}{Colors.NC}")
+            if not verified_url:
+                unresolved_sites.append(site.get('display_name', site['name']))
         print()
     
     if public_sites:
         print(f"  {Colors.WHITE}{Colors.BOLD}Public Sites:{Colors.NC}")
         for site in public_sites:
-            url_name = get_site_url_name(site['name'], site.get('template', 'STS#3'))
+            verified_url = verified_site_urls.get(site['name'])
+            fallback_url = f"https://{m365_tenant}.sharepoint.com/sites/{get_site_url_name(site['name'], site.get('template', 'STS#3'))}"
+            display_url = verified_url or fallback_url
             print(f"    {Colors.GREEN}🌐{Colors.NC} {site.get('display_name', site['name'])}")
-            print(f"       {Colors.CYAN}https://{m365_tenant}.sharepoint.com/sites/{url_name}{Colors.NC}")
+            print(f"       {Colors.CYAN}{display_url}{Colors.NC}")
+            if not verified_url:
+                unresolved_sites.append(site.get('display_name', site['name']))
         print()
     
     print(f"  {Colors.WHITE}{Colors.BOLD}SharePoint Admin Center:{Colors.NC}")
     print(f"    {Colors.CYAN}https://{m365_tenant}-admin.sharepoint.com{Colors.NC}")
     print()
+
+    if unresolved_sites:
+        print_warning(
+            f"Could not verify {len(unresolved_sites)} site(s) in SharePoint yet. They may still be provisioning or need another deploy run if they were previously deleted outside Terraform."
+        )
+        for site_name in unresolved_sites:
+            print(f"    {Colors.YELLOW}- {site_name}{Colors.NC}")
+        print()
     
     print(f"  {Colors.YELLOW}Note: Sites may take a few minutes to be fully accessible after creation.{Colors.NC}")
     print()

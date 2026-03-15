@@ -44,6 +44,18 @@ locals {
 
   # List of site names for iteration
   site_names = keys(var.sharepoint_sites)
+
+  # URL segment used by the site creation script.
+  # Team sites use alphanumeric-only mailNickname, and communication sites
+  # may append "site" when created via fallback group path.
+  site_url_segments = {
+    for site_name, site_config in var.sharepoint_sites :
+    site_name => (
+      site_config.template == "SITEPAGEPUBLISHING#0"
+      ? "${lower(replace(site_name, "/[^0-9A-Za-z]/", ""))}site"
+      : lower(replace(site_name, "/[^0-9A-Za-z]/", ""))
+    )
+  }
 }
 
 # ============================================================================
@@ -214,7 +226,7 @@ resource "azurerm_key_vault_secret" "site_urls" {
   for_each = var.create_key_vault ? var.sharepoint_sites : {}
 
   name         = "sharepoint-site-${each.key}"
-  value        = "${local.sharepoint_url}/sites/${each.key}"
+  value        = "${local.sharepoint_url}/sites/${local.site_url_segments[each.key]}"
   key_vault_id = azurerm_key_vault.main[0].id
 
   tags = {
