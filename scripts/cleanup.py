@@ -1971,7 +1971,7 @@ def delete_groups_mode(groups: List[Dict[str, Any]], access_token: str, auto_con
         print()
         print_info("Completing cleanup for deleted groups and their SharePoint sites:")
         print(f"    {Colors.CYAN}1.{Colors.NC} Microsoft 365 Groups recycle bin (Azure AD)")
-        print(f"    {Colors.CYAN}2.{Colors.NC} Direct SharePoint site recycle bins (option [8] flow)")
+        print(f"    {Colors.CYAN}2.{Colors.NC} SharePoint site recycle bin (option [7] flow)")
         print()
         
         # Ask if user wants to skip recycle bin purge
@@ -1979,7 +1979,7 @@ def delete_groups_mode(groups: List[Dict[str, Any]], access_token: str, auto_con
             skip_choice = input(f"  {Colors.YELLOW}Purge recycle bins now? (Y/n): {Colors.NC}").strip().lower()
             if skip_choice == 'n':
                 print_warning("Skipping recycle bin purge. Sites remain in recycle bins.")
-                print_info("You can purge them later using menu options [6] and [8]")
+                print_info("You can purge them later using menu options [6] and [7]")
                 return
         
         # Step 1: Purge M365 Groups recycle bin
@@ -1998,15 +1998,27 @@ def delete_groups_mode(groups: List[Dict[str, Any]], access_token: str, auto_con
         else:
             print_info("No deleted groups found in Azure AD recycle bin")
         
-        # Step 2: Purge SharePoint site recycle bins directly
+        # Step 2: Purge SharePoint site recycle bin (admin center)
         print()
-        print_step(2, "Purging SharePoint site recycle bins directly")
+        print_step(2, "Purging SharePoint site recycle bin (option [7])")
 
-        if deleted_site_entries:
-            purge_direct_site_recycle_bins(deleted_site_entries, auto_confirm=auto_confirm)
+        tenant_name = tenant
+        if not tenant_name:
+            for entry in deleted_site_entries:
+                site_url = str(entry.get("url", "")).strip()
+                if ".sharepoint.com" in site_url:
+                    match = re.search(r'https://([^.]+)\.sharepoint\.com', site_url)
+                    if match:
+                        tenant_name = match.group(1)
+                        print_info(f"Auto-detected tenant name: {tenant_name}")
+                        break
+
+        if tenant_name:
+            admin_url = f"https://{tenant_name}-admin.sharepoint.com"
+            purge_spo_deleted_sites_mode(admin_url, auto_confirm=auto_confirm)
         else:
-            print_warning("Skipping direct SharePoint recycle bin purge (no site URLs available)")
-            print_info("You can purge it later using menu option [8]")
+            print_warning("Skipping SharePoint site recycle bin purge (tenant name not available)")
+            print_info("You can purge it later using menu option [7]")
 
         maybe_cleanup_deployment_key_vault(
             {entry.get("url", "") for entry in deleted_site_entries},
@@ -4388,14 +4400,14 @@ def delete_sites_mode(
         print()
         print_info("Completing cleanup for deleted groups/sites:")
         print(f"    {Colors.CYAN}1.{Colors.NC} Microsoft 365 Groups recycle bin (Azure AD)")
-        print(f"    {Colors.CYAN}2.{Colors.NC} Direct SharePoint site recycle bins (option [8] flow)")
+        print(f"    {Colors.CYAN}2.{Colors.NC} SharePoint site recycle bin (option [7] flow)")
         print()
         
         # Ask if user wants to skip recycle bin purge
         skip_choice = input(f"  {Colors.YELLOW}Purge recycle bins now? (Y/n): {Colors.NC}").strip().lower()
         if skip_choice == 'n':
             print_warning("Skipping recycle bin purge. Sites remain in recycle bins.")
-            print_info("You can purge them later using menu options [6] and [8]")
+            print_info("You can purge them later using menu options [6] and [7]")
         else:
             # Step 1: Purge M365 Groups recycle bin
             print()
@@ -4413,20 +4425,26 @@ def delete_sites_mode(
             else:
                 print_info("No deleted groups found in Azure AD recycle bin")
             
-            # Step 2: Purge SharePoint site recycle bins directly
+            # Step 2: Purge SharePoint site recycle bin (admin center)
             print()
-            print_step(2, "Purging SharePoint site recycle bins directly")
+            print_step(2, "Purging SharePoint site recycle bin (option [7])")
 
-            recycle_purge_entries = [
-                {"name": site_name_by_url.get(site_url, site_url), "url": site_url}
-                for site_url in sorted(successful_target_site_urls)
-            ]
+            tenant_name = tenant
+            if not tenant_name:
+                for site_url in sorted(successful_target_site_urls):
+                    if ".sharepoint.com" in site_url:
+                        match = re.search(r'https://([^.]+)\.sharepoint\.com', site_url)
+                        if match:
+                            tenant_name = match.group(1)
+                            print_info(f"Auto-detected tenant name: {tenant_name}")
+                            break
 
-            if recycle_purge_entries:
-                purge_direct_site_recycle_bins(recycle_purge_entries, auto_confirm=auto_confirm)
+            if tenant_name:
+                admin_url = f"https://{tenant_name}-admin.sharepoint.com"
+                purge_spo_deleted_sites_mode(admin_url, auto_confirm=auto_confirm)
             else:
-                print_warning("Skipping direct SharePoint recycle bin purge (no successful site URLs captured)")
-                print_info("You can purge it later using menu option [8]")
+                print_warning("Skipping SharePoint site recycle bin purge (tenant name not available)")
+                print_info("You can purge it later using menu option [7]")
 
         # Verify site URL resolution after delete/purge flow to avoid false positives.
         verify_site_urls = sorted(successful_target_site_urls) if successful_target_site_urls else sorted(set(target_site_urls))
