@@ -570,7 +570,11 @@ class EmailPopulator:
     
     def print_final_summary(self) -> None:
         """Print final summary of the operation."""
-        duration = (self.stats["end_time"] - self.stats["start_time"]).total_seconds()
+        # Handle case where start_time or end_time is None (e.g., early exit)
+        if self.stats.get("start_time") and self.stats.get("end_time"):
+            duration = (self.stats["end_time"] - self.stats["start_time"]).total_seconds()
+        else:
+            duration = 0
         
         print()
         print(f"  {Colors.CYAN}{'=' * 60}{Colors.NC}")

@@ -644,7 +644,7 @@ class GraphClient:
         """
         return self.delete_all_emails(mailbox, "deleteditems", permanent=True)
     
-    def purge_recoverable_items(self, mailbox: str, max_retries: int = 2) -> Dict[str, int]:
+    def purge_recoverable_items(self, mailbox: str, max_retries: int = 2, progress_callback: Any = None) -> Dict[str, int]:
         """
         Purge all items from the Recoverable Items folder.
         
@@ -662,11 +662,13 @@ class GraphClient:
         Args:
             mailbox: User's email address (UPN).
             max_retries: Number of retry passes for failed items.
+            progress_callback: Optional callback function(current, total, message) for progress updates.
             
         Returns:
             Dictionary with success, failed, and skipped counts.
         """
         import time as time_module
+        import sys
         
         results = {"success": 0, "failed": 0, "skipped": 0}
         
@@ -687,8 +689,23 @@ class GraphClient:
         ]
         
         failed_items: List[str] = []  # Track failed items for retry
+        seen_items: set = set()  # Track items we've already processed to prevent infinite loops
+        items_processed = 0
         
-        for folder in recoverable_folders:
+        # Helper function to print progress inline
+        def print_progress(folder_name: str, processed: int, purged: int, skipped: int, failed: int):
+            status = f"\r    📦 {folder_name}: {processed} processed | ✓ {purged} purged | ⊘ {skipped} skipped | ✗ {failed} failed"
+            sys.stdout.write(status)
+            sys.stdout.flush()
+        
+        for folder_idx, folder in enumerate(recoverable_folders):
+            folder_short = folder.replace("recoverableitems", "")  # Shorten for display
+            folder_items = 0
+            folder_seen_items: set = set()  # Track seen items per folder
+            folder_purged = 0  # Track successful purges in THIS folder only
+            folder_skipped = 0  # Track skipped items in THIS folder only
+            consecutive_skip_batches = 0  # Track consecutive batches with no successful deletes
+            
             try:
                 # Get items from the recoverable folder
                 url: Optional[str] = f"{self.GRAPH_BASE_URL}/users/{mailbox}/mailFolders/{folder}/messages?$top=100&$select=id"
@@ -697,6 +714,9 @@ class GraphClient:
                 
                 while url and iteration < max_iterations:
                     iteration += 1
+                    batch_purged_before = folder_purged  # Track folder-specific purges before this batch
+                    batch_skipped_before = folder_skipped  # Track folder-specific skips before this batch
+                    
                     try:
                         response = self._make_request("GET", url)
                         messages = response.get("value", [])
@@ -704,25 +724,52 @@ class GraphClient:
                         if not messages:
                             break
                         
+                        # Check if all items in this batch have already been seen
+                        # This indicates we've looped back to items we can't delete (protected)
+                        new_items_in_batch = 0
+                        for msg in messages:
+                            msg_id = msg.get("id")
+                            if msg_id and msg_id not in folder_seen_items:
+                                new_items_in_batch += 1
+                        
+                        if new_items_in_batch == 0:
+                            # All items in this batch were already processed - stop to prevent infinite loop
+                            if not progress_callback:
+                                print(f"\n    ℹ️  Stopping {folder_short}: all remaining items already processed")
+                            break
+                        
                         # Permanently delete each message using permanentDelete action
                         for msg in messages:
                             msg_id = msg.get("id")
                             if msg_id:
+                                # Skip if we've already processed this item
+                                if msg_id in folder_seen_items:
+                                    continue
+                                
+                                folder_seen_items.add(msg_id)
+                                seen_items.add(msg_id)
+                                
                                 deleted = False
+                                items_processed += 1
+                                folder_items += 1
+                                
                                 try:
                                     # Use permanentDelete action for true purge
                                     delete_url = f"{self.GRAPH_BASE_URL}/users/{mailbox}/messages/{msg_id}/permanentDelete"
                                     self._make_request("POST", delete_url)
                                     results["success"] += 1
+                                    folder_purged += 1  # Track folder-specific success
                                     deleted = True
                                 except urllib.error.HTTPError as e:
                                     if e.code == 403:
                                         # Item is protected by retention/hold policy
                                         results["skipped"] += 1
+                                        folder_skipped += 1  # Track folder-specific skips
                                         deleted = True  # Don't retry protected items
                                     elif e.code == 404:
                                         # Item already deleted
                                         results["success"] += 1
+                                        folder_purged += 1  # Track folder-specific success
                                         deleted = True
                                 except Exception:
                                     pass
@@ -733,13 +780,16 @@ class GraphClient:
                                         delete_url = f"{self.GRAPH_BASE_URL}/users/{mailbox}/messages/{msg_id}"
                                         self._make_request("DELETE", delete_url)
                                         results["success"] += 1
+                                        folder_purged += 1  # Track folder-specific success
                                         deleted = True
                                     except urllib.error.HTTPError as e:
                                         if e.code == 403:
                                             results["skipped"] += 1
+                                            folder_skipped += 1  # Track folder-specific skips
                                             deleted = True
                                         elif e.code == 404:
                                             results["success"] += 1
+                                            folder_purged += 1  # Track folder-specific success
                                             deleted = True
                                     except Exception:
                                         pass
@@ -748,9 +798,33 @@ class GraphClient:
                                     failed_items.append(msg_id)
                                     results["failed"] += 1
                                 
+                                # Print progress every 10 items or use callback
+                                if items_processed % 10 == 0 or progress_callback:
+                                    if progress_callback:
+                                        progress_callback(items_processed, -1, f"Purging {folder_short}...")
+                                    else:
+                                        print_progress(folder_short, items_processed, results["success"], results["skipped"], results["failed"])
+                                
                                 # Small delay to avoid rate limiting
                                 if self.request_delay_ms > 0:
                                     time_module.sleep(self.request_delay_ms / 1000.0)
+                        
+                        # Check if we made any progress in this batch (actually deleted items in THIS folder)
+                        batch_purged_count = folder_purged - batch_purged_before
+                        batch_skipped_count = folder_skipped - batch_skipped_before
+                        
+                        # If this batch had items but ALL were skipped (none purged), increment counter
+                        if batch_purged_count == 0 and batch_skipped_count > 0:
+                            consecutive_skip_batches += 1
+                            # If we've had 2 consecutive batches where all items were skipped,
+                            # all remaining items are protected - stop processing
+                            if consecutive_skip_batches >= 2:
+                                if not progress_callback:
+                                    print(f"\n    ℹ️  Stopping {folder_short}: remaining items are protected by retention policy")
+                                break
+                        elif batch_purged_count > 0:
+                            consecutive_skip_batches = 0  # Reset counter on success
+                        # If batch had no items processed at all, don't change counter
                         
                         # Check for next page
                         next_link = response.get("@odata.nextLink")
@@ -774,11 +848,19 @@ class GraphClient:
             except Exception:
                 # Folder may not exist or we don't have permission
                 continue
+            
+            # Print final status for this folder if items were processed
+            if folder_items > 0 and not progress_callback:
+                print_progress(folder_short, items_processed, results["success"], results["skipped"], results["failed"])
+                print()  # New line after folder completes
         
         # Retry failed items (they may have been in transit between folders)
         if failed_items and max_retries > 0:
+            if not progress_callback:
+                print(f"    🔄 Retrying {len(failed_items)} failed items...")
             time_module.sleep(1.0)  # Wait a bit before retry
             
+            retry_success = 0
             for msg_id in failed_items[:]:  # Copy list to allow modification
                 try:
                     delete_url = f"{self.GRAPH_BASE_URL}/users/{mailbox}/messages/{msg_id}/permanentDelete"
@@ -786,6 +868,7 @@ class GraphClient:
                     results["success"] += 1
                     results["failed"] -= 1
                     failed_items.remove(msg_id)
+                    retry_success += 1
                 except urllib.error.HTTPError as e:
                     if e.code in [403, 404]:
                         # Protected or already deleted
@@ -794,12 +877,22 @@ class GraphClient:
                             results["skipped"] += 1
                         else:
                             results["success"] += 1
+                            retry_success += 1
                         failed_items.remove(msg_id)
                 except Exception:
                     pass
                 
                 if self.request_delay_ms > 0:
                     time_module.sleep(self.request_delay_ms / 1000.0)
+            
+            if retry_success > 0 and not progress_callback:
+                print(f"    ✓ Retry recovered {retry_success} items")
+        
+        # Final newline if we printed progress
+        if items_processed > 0 and not progress_callback:
+            pass  # Already printed newlines after each folder
+        elif items_processed == 0 and not progress_callback:
+            print(f"    ℹ️  No items found in recoverable folders")
         
         return results
     

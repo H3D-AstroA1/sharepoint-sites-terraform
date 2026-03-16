@@ -488,10 +488,12 @@ Examples:
   python cleanup_emails.py --all --all-folders       # Delete from ALL folders (full cleanup)
   python cleanup_emails.py --all --permanent         # Permanently delete
   python cleanup_emails.py --all --empty-trash       # Also empty Deleted Items
+  python cleanup_emails.py --all --purge-recoverable # Purge Recoverable Items folders
   python cleanup_emails.py --all --dry-run           # Preview only
   
 Full Cleanup Example:
   python cleanup_emails.py --all --all-folders --permanent  # Complete mailbox wipe
+  python cleanup_emails.py --all --purge-recoverable        # Purge recoverable items only
         """
     )
     
@@ -537,6 +539,11 @@ Full Cleanup Example:
         help="Preview without deleting"
     )
     parser.add_argument(
+        "--purge-recoverable",
+        action="store_true",
+        help="Purge Recoverable Items folders (deletions, versions, purges)"
+    )
+    parser.add_argument(
         "--config",
         type=str,
         help="Path to mailboxes.yaml config file"
@@ -564,6 +571,49 @@ Full Cleanup Example:
     specific = None
     if args.mailboxes:
         specific = [m.strip() for m in args.mailboxes.split(",")]
+    
+    # Handle purge recoverable items mode
+    if args.purge_recoverable:
+        # Get mailboxes
+        mailboxes = cleaner.get_mailboxes(all_mailboxes=args.all, specific=specific)
+        if not mailboxes:
+            print_error("No valid mailboxes found")
+            sys.exit(1)
+        
+        print_step(1, "Purging Recoverable Items")
+        print()
+        print(f"  {Colors.YELLOW}🔥 This will purge items from Recoverable Items folders{Colors.NC}")
+        print(f"  {Colors.DIM}   Items protected by retention policies cannot be purged{Colors.NC}")
+        print()
+        
+        total_success = 0
+        total_skipped = 0
+        total_failed = 0
+        
+        for i, user in enumerate(mailboxes):
+            upn = user.get("upn", "Unknown")
+            print(f"  {Colors.CYAN}[{i+1}/{len(mailboxes)}]{Colors.NC} {upn}")
+            
+            results = cleaner.purge_recoverable_items(upn)
+            total_success += results.get("success", 0)
+            total_skipped += results.get("skipped", 0)
+            total_failed += results.get("failed", 0)
+            
+            print(f"       {Colors.GREEN}✓{Colors.NC} Purged: {results.get('success', 0)} | Skipped: {results.get('skipped', 0)} | Failed: {results.get('failed', 0)}")
+            print()
+        
+        print_summary_box("Purge Complete", [
+            ("Mailboxes Processed:", len(mailboxes)),
+            ("Items Purged:", total_success),
+            ("Items Skipped:", total_skipped),
+            ("Items Failed:", total_failed),
+        ])
+        
+        if total_skipped > 0:
+            print()
+            print(f"  {Colors.YELLOW}ℹ️  Skipped items are protected by Microsoft 365 retention policies{Colors.NC}")
+        
+        sys.exit(0)
     
     # Run cleanup
     success = cleaner.run(

@@ -4641,6 +4641,7 @@ def main() -> None:
             print(f"    {Colors.BLUE}[2]{Colors.NC} Delete from all mailboxes (inbox)")
             print(f"    {Colors.YELLOW}[3]{Colors.NC} Delete from specific mailboxes")
             print(f"    {Colors.MAGENTA}[4]{Colors.NC} Empty Deleted Items (all mailboxes)")
+            print(f"    {Colors.CYAN}[5]{Colors.NC} 🔥 Purge Recoverable Items (all mailboxes)")
             print(f"    {Colors.RED}[B]{Colors.NC} Back to main menu")
             print()
             
@@ -4674,6 +4675,24 @@ def main() -> None:
                 confirm = input(f"  {Colors.YELLOW}Type 'EMPTY' to confirm:{Colors.NC} ").strip()
                 if confirm == 'EMPTY':
                     run_script("cleanup_emails.py", ["--all", "--folder", "deleteditems", "--permanent"])
+                else:
+                    print(f"  {Colors.YELLOW}Operation cancelled{Colors.NC}")
+                    input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            elif sub_choice == '5':
+                print()
+                print(f"  {Colors.RED}🔥 PURGE RECOVERABLE ITEMS{Colors.NC}")
+                print()
+                print(f"  {Colors.YELLOW}This will permanently purge items from Recoverable Items folders:{Colors.NC}")
+                print(f"    • Deletions (soft-deleted items)")
+                print(f"    • Versions (item versions)")
+                print(f"    • Purges (items pending final deletion)")
+                print()
+                print(f"  {Colors.RED}⚠ WARNING: Items protected by retention policies cannot be purged{Colors.NC}")
+                print(f"  {Colors.RED}⚠ WARNING: This action is IRREVERSIBLE!{Colors.NC}")
+                print()
+                confirm = input(f"  {Colors.YELLOW}Type 'PURGE' to confirm:{Colors.NC} ").strip()
+                if confirm == 'PURGE':
+                    run_script("cleanup_emails.py", ["--all", "--purge-recoverable"])
                 else:
                     print(f"  {Colors.YELLOW}Operation cancelled{Colors.NC}")
                     input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
