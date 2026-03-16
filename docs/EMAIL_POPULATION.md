@@ -697,9 +697,23 @@ python scripts/cleanup_emails.py --all --dry-run
 | `--all` | Clean all mailboxes in config |
 | `--mailboxes LIST` | Comma-separated list of UPNs |
 | `--folder NAME` | Folder to clean (inbox, sentitems, deleteditems, drafts) |
+| `--all-folders` | Clean ALL folders (inbox, sentitems, drafts, deleteditems) |
 | `--permanent` | Permanently delete (skip Deleted Items) |
 | `--empty-trash` | Also empty Deleted Items folder |
+| `--purge-recoverable` | Purge Recoverable Items folders only |
 | `--dry-run` | Preview without deleting |
+
+### Delete Emails Menu Options
+
+The Delete Emails menu (`[7]` in main menu) provides these options:
+
+| Option | Description |
+|--------|-------------|
+| `[1] Interactive mode` | Guided setup with all options |
+| `[2] Delete from all mailboxes (inbox)` | Quick delete from inbox only |
+| `[3] Delete from specific mailboxes` | Select which mailboxes to clean |
+| `[4] Empty Deleted Items` | Permanently delete items in Deleted Items folder |
+| `[5] 🔥 Purge Recoverable Items` | Purge items from Recoverable Items folders |
 
 ### Cleanup Modes (Interactive)
 
@@ -723,13 +737,34 @@ The **Full Purge** option (mode 3) performs a complete cleanup:
 
 ⚠️ **Warning**: Items purged from Recoverable Items cannot be recovered by any means.
 
+### Standalone Purge Recoverable Items
+
+Use menu option `[5]` or the `--purge-recoverable` flag to purge only the Recoverable Items folders without deleting emails from regular folders:
+
+```bash
+# Purge recoverable items from all mailboxes
+python scripts/cleanup_emails.py --all --purge-recoverable
+```
+
+This is useful when:
+- You've already deleted emails but want to ensure they're truly unrecoverable
+- You need to clear space in Recoverable Items
+- You want to reset mailboxes to a clean state
+
+**Note**: Some items may be protected by Microsoft 365 retention policies and cannot be purged. The tool automatically detects these protected items and stops processing when only protected items remain, displaying:
+```
+ℹ️  Stopping purges: remaining items are protected by retention policy
+```
+
 ### Cleanup Behavior
 
 - **Default**: Moves emails to Deleted Items (recoverable)
 - **Permanent**: Permanently deletes emails (may still be in Recoverable Items)
 - **Full Purge**: Truly unrecoverable deletion including Recoverable Items
+- **Purge Recoverable Only**: Purges Recoverable Items without touching regular folders
 - **Validation**: Validates mailboxes before deletion
 - **Confirmation**: Requires confirmation for destructive operations
+- **Retention Policy Detection**: Automatically stops when only protected items remain
 
 ## List Mailboxes
 

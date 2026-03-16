@@ -1157,6 +1157,47 @@ python populate_files.py --files 100 --variation-level high
 
 ---
 
+### Issue 28: Email Purge Shows Items Skipped Due to Retention Policy
+
+**Symptom:**
+When purging Recoverable Items, some items are skipped with a message like:
+```
+📦 purges: 250 processed | ✓ 51 purged | ⊘ 199 skipped | ✗ 0 failed
+ℹ️  Stopping purges: remaining items are protected by retention policy
+```
+
+**Cause:**
+Microsoft 365 has a **default 14-day retention policy** for deleted items. Items in the Recoverable Items folder are protected and cannot be purged until the retention period expires.
+
+Common reasons items are protected:
+- **Default retention policy**: Microsoft 365 keeps deleted items for 14 days by default
+- **Litigation hold**: Legal holds prevent deletion
+- **Compliance policies**: Organization-wide retention policies
+- **eDiscovery holds**: Items under investigation
+
+**This is expected behavior** - the tool automatically detects protected items and stops processing when only protected items remain.
+
+**Solution:**
+
+1. **Wait for retention period to expire**: Items will become purgeable after 14 days (or your organization's configured retention period)
+
+2. **Check retention policies** in Microsoft 365 Admin Center:
+   - Go to **Compliance** > **Data lifecycle management** > **Retention policies**
+   - Review policies applied to mailboxes
+
+3. **Check litigation holds**:
+   - Go to **Exchange Admin Center** > **Recipients** > **Mailboxes**
+   - Select the mailbox and check **Litigation hold** status
+
+4. **For testing environments**: Contact your Microsoft 365 administrator to:
+   - Reduce the retention period for test mailboxes
+   - Remove litigation holds from test accounts
+   - Create a separate retention policy for test mailboxes
+
+**Note**: The purge tool will automatically stop when it detects only protected items remain, preventing infinite loops.
+
+---
+
 ## ✅ Prevention Tips
 
 1. **Always run `terraform plan` before `terraform apply`**
