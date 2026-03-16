@@ -694,14 +694,68 @@ def read_sites_from_config(config_path: Path) -> List[Dict]:
     return sites
 
 
-def generate_random_sites(count: int) -> List[Dict]:
+def get_department_site_templates(config_path: Optional[Path] = None, warn_on_error: bool = False) -> List[Dict]:
+    """Get department site templates using config baseline plus hardcoded extras.
+
+    Baseline source is config/sites.json (or provided config path). Any additional
+    hardcoded department templates not present in the config baseline are appended.
+    Matching is done by site name (case-insensitive), and config entries win.
+    """
+    template_path = config_path or DEFAULT_CONFIG_FILE
+    baseline_sites: List[Dict] = []
+
+    if template_path.exists():
+        try:
+            baseline_sites = read_sites_from_config(template_path)
+        except Exception as e:
+            if warn_on_error:
+                print_warning(f"Could not read department baseline from {template_path}: {e}")
+                print_info("Falling back to built-in department templates only")
+
+    merged_sites: List[Dict] = []
+    seen_names: Set[str] = set()
+
+    def add_site_template(template: Dict) -> None:
+        name = str(template.get("name", "")).strip()
+        display_name = str(template.get("display_name", "")).strip()
+        description = str(template.get("description", "")).strip()
+
+        if not name or not display_name or not description:
+            return
+
+        key = name.lower()
+        if key in seen_names:
+            return
+
+        merged_sites.append({
+            "name": name,
+            "display_name": display_name,
+            "description": description,
+            "template": template.get("template", "STS#3"),
+            "visibility": template.get("visibility", "Private"),
+            "owners": template.get("owners", []),
+            "members": template.get("members", []),
+        })
+        seen_names.add(key)
+
+    for site in baseline_sites:
+        add_site_template(site)
+
+    for site in DEPARTMENT_SITES:
+        add_site_template(site)
+
+    return merged_sites
+
+
+def generate_random_sites(count: int, department_templates: Optional[List[Dict]] = None) -> List[Dict]:
     """Generate a list of realistic organizational department sites.
     
     The maximum number of unique sites is limited to the number of templates
     in DEPARTMENT_SITES (currently 39). Each site includes realistic visibility
     settings (Private or Public) and appropriate templates.
     """
-    max_sites = len(DEPARTMENT_SITES)
+    templates = department_templates if department_templates is not None else get_department_site_templates()
+    max_sites = len(templates)
     
     if count > max_sites:
         print_warning(f"Requested {count} sites, but only {max_sites} unique templates available.")
@@ -709,7 +763,7 @@ def generate_random_sites(count: int) -> List[Dict]:
         count = max_sites
     
     # Shuffle the department sites to get random selection
-    available_sites = DEPARTMENT_SITES.copy()
+    available_sites = templates.copy()
     random.shuffle(available_sites)
     
     # Generate sites from the shuffled list
@@ -775,7 +829,11 @@ def generate_adhoc_sites(count: int) -> List[Dict]:
     return sites
 
 
-def generate_mixed_sites(dept_count: int, adhoc_count: int) -> List[Dict]:
+def generate_mixed_sites(
+    dept_count: int,
+    adhoc_count: int,
+    department_templates: Optional[List[Dict]] = None,
+) -> List[Dict]:
     """Generate a mix of department sites and ad-hoc sites.
     
     This creates a more realistic environment with both official department
@@ -788,7 +846,7 @@ def generate_mixed_sites(dept_count: int, adhoc_count: int) -> List[Dict]:
     Returns:
         Combined list of sites
     """
-    dept_sites = generate_random_sites(dept_count)
+    dept_sites = generate_random_sites(dept_count, department_templates)
     adhoc_sites = generate_adhoc_sites(adhoc_count)
     
     # Combine and shuffle for a more natural mix
@@ -1697,6 +1755,9 @@ def select_site_mode(args, step_num: int = 1) -> Tuple[str, List[Dict]]:
     
     sites = []
     mode = ""
+    config_path = Path(args.config) if args.config else DEFAULT_CONFIG_FILE
+    department_templates = get_department_site_templates(config_path, warn_on_error=True)
+    department_template_count = len(department_templates)
     
     # Check command line arguments
     if args.random and args.random > 0:
@@ -1709,7 +1770,6 @@ def select_site_mode(args, step_num: int = 1) -> Tuple[str, List[Dict]]:
         # Interactive selection
         # Try to get config file site count for display
         config_site_count = 0
-        config_path = Path(args.config) if args.config else DEFAULT_CONFIG_FILE
         if config_path.exists():
             try:
                 with open(config_path, 'r') as f:
@@ -1737,8 +1797,8 @@ def select_site_mode(args, step_num: int = 1) -> Tuple[str, List[Dict]]:
         print(f"  {Colors.CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{Colors.NC}")
         print(f"  {Colors.WHITE}RANDOM GENERATION OPTIONS:{Colors.NC}")
         print()
-        print(f"    [3] Generate Department Sites ({len(DEPARTMENT_SITES)} templates)")
-        print(f"        {Colors.BLUE}Source:{Colors.NC} Department templates")
+        print(f"    [3] Generate Department Sites ({department_template_count} templates)")
+        print(f"        {Colors.BLUE}Source:{Colors.NC} config baseline + department templates")
         print("        - Official department sites (HR, Finance, IT, Legal, etc.)")
         print()
         print(f"    [4] Generate Ad-hoc Sites ({len(ADHOC_SITES)} templates)")
@@ -1847,7 +1907,7 @@ def select_site_mode(args, step_num: int = 1) -> Tuple[str, List[Dict]]:
         print(f"  {Colors.CYAN}ℹ{Colors.NC} These are official department sites (HR, Finance, IT, etc.)")
         print()
         
-        max_sites = len(DEPARTMENT_SITES)
+        max_sites = department_template_count
         count = args.random if args.random and args.random > 0 else 0
         if count == 0:
             while True:
@@ -1860,7 +1920,7 @@ def select_site_mode(args, step_num: int = 1) -> Tuple[str, List[Dict]]:
                     print_warning("Please enter a valid number")
         
         print_info(f"Generating {count} department sites...")
-        sites = generate_random_sites(count)
+        sites = generate_random_sites(count, department_templates)
         print_success(f"Generated {len(sites)} department sites")
     
     elif mode == "adhoc":
@@ -1889,7 +1949,7 @@ def select_site_mode(args, step_num: int = 1) -> Tuple[str, List[Dict]]:
         print(f"  {Colors.CYAN}ℹ{Colors.NC} This creates a realistic mix of department and ad-hoc sites")
         print()
         
-        max_dept = len(DEPARTMENT_SITES)
+        max_dept = department_template_count
         max_adhoc = len(ADHOC_SITES)
         
         print(f"  {Colors.WHITE}Step 1: Department Sites{Colors.NC}")
@@ -1919,7 +1979,7 @@ def select_site_mode(args, step_num: int = 1) -> Tuple[str, List[Dict]]:
         
         print()
         print_info(f"Generating {dept_count} department sites + {adhoc_count} ad-hoc sites...")
-        sites = generate_mixed_sites(dept_count, adhoc_count)
+        sites = generate_mixed_sites(dept_count, adhoc_count, department_templates)
         print_success(f"Generated {len(sites)} total sites ({dept_count} department + {adhoc_count} ad-hoc)")
     
     # Display sites
@@ -2177,7 +2237,7 @@ Examples:
         '-r', '--random',
         type=int,
         metavar='COUNT',
-        help=f'Generate COUNT random sites (1-{len(DEPARTMENT_SITES)})'
+        help='Generate COUNT random department sites'
     )
     parser.add_argument(
         '-s', '--skip-prerequisites',
@@ -2198,7 +2258,8 @@ Examples:
     args = parser.parse_args()
     
     # Validate random count
-    max_random_sites = len(DEPARTMENT_SITES)
+    validation_config_path = Path(args.config) if args.config else DEFAULT_CONFIG_FILE
+    max_random_sites = len(get_department_site_templates(validation_config_path))
     if args.random is not None and (args.random < 1 or args.random > max_random_sites):
         print_error(f"Random count must be between 1 and {max_random_sites}")
         sys.exit(1)

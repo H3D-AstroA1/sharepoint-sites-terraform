@@ -44,6 +44,7 @@ from typing import Dict, List, Tuple, Optional, Any
 SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_DIR = SCRIPT_DIR.parent
 CONFIG_DIR = PROJECT_DIR / "config"
+DEFAULT_CONFIG_FILE = CONFIG_DIR / "sites.json"
 ENVIRONMENTS_FILE = CONFIG_DIR / "environments.json"
 
 # Maximum files that can be created in one run
@@ -100,6 +101,87 @@ def find_azure_cli_path() -> str:
                 return path
     
     return "az"  # Return 'az' as fallback
+
+# ============================================================================
+# CONFIGURATION & DEPARTMENT TEMPLATE MANAGEMENT
+# ============================================================================
+
+def read_sites_from_config(config_path: Path) -> List[Dict]:
+    """Read site definitions from a JSON configuration file."""
+    if not config_path.exists():
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+    
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+    
+    sites = config.get('sites', [])
+    if not sites:
+        raise ValueError("No sites defined in configuration file")
+    
+    return sites
+
+
+def get_department_file_templates(config_path: Optional[Path] = None, warn_on_error: bool = False) -> Dict[str, Dict]:
+    """Get file templates for departments using config baseline plus hardcoded extras.
+
+    Baseline source is config/sites.json (or provided config path). For each department
+    found in config, check if FILE_TEMPLATES has a custom template. If not, use a
+    sensible default template. Hardcoded entries in FILE_TEMPLATES are preserved if
+    they're not already covered by config departments.
+    
+    Returns a merged dictionary of department -> file template mappings.
+    """
+    template_path = config_path or DEFAULT_CONFIG_FILE
+    baseline_departments: List[str] = []
+    
+    if template_path.exists():
+        try:
+            sites = read_sites_from_config(template_path)
+            # Extract department names from config
+            baseline_departments = [s.get("name", "") for s in sites if s.get("name", "")]
+        except Exception as e:
+            if warn_on_error:
+                print(f"Warning: Could not read department baseline from {template_path}: {e}")
+                print("Using built-in department templates only")
+    
+    # Create merged templates dictionary
+    merged_templates: Dict[str, Dict] = {}
+    seen_names: set = set()
+    
+    # Default template for unmapped departments
+    default_template = {
+        "folders": ["Documents", "Reports", "Templates", "Archive"],
+        "files": [
+            {"name": "Meeting_Notes_{date}.docx", "type": "word"},
+            {"name": "Project_Status_Report_{month}_{year}.pptx", "type": "powerpoint"},
+            {"name": "Budget_Tracker_{year}.xlsx", "type": "excel"},
+            {"name": "Team_Directory_{year}.xlsx", "type": "excel"},
+            {"name": "Process_Documentation_v{version}.docx", "type": "word"},
+            {"name": "Quarterly_Review_Q{quarter}_{year}.pptx", "type": "powerpoint"},
+            {"name": "Action_Items_Tracker.xlsx", "type": "excel"},
+            {"name": "Policy_Document_v{version}.pdf", "type": "pdf"},
+        ]
+    }
+    
+    # First, add all baseline departments (config wins)
+    for dept_name in baseline_departments:
+        dept_lower = dept_name.lower()
+        if dept_lower not in seen_names:
+            # Use existing FILE_TEMPLATES entry if available, else use default
+            merged_templates[dept_name] = FILE_TEMPLATES.get(dept_name, default_template)
+            seen_names.add(dept_lower)
+    
+    # Then, add any hardcoded FILE_TEMPLATES entries not already in config
+    for dept_name in FILE_TEMPLATES.keys():
+        if dept_name != "default" and dept_name.lower() not in seen_names:
+            merged_templates[dept_name] = FILE_TEMPLATES[dept_name]
+            seen_names.add(dept_name.lower())
+    
+    # Always include default if it exists in FILE_TEMPLATES
+    merged_templates["default"] = FILE_TEMPLATES.get("default", default_template)
+    
+    return merged_templates
+
 
 # ============================================================================
 # REALISTIC FILE TEMPLATES BY DEPARTMENT
@@ -792,8 +874,14 @@ def generate_file_name(template: Dict[str, str], site_type: str) -> str:
 
 
 def build_template_pool(site_type: str) -> Dict[str, Any]:
-    """Build a richer template pool using the enterprise variation pipeline."""
-    base = FILE_TEMPLATES.get(site_type, FILE_TEMPLATES["default"])
+    """Build a richer template pool using the enterprise variation pipeline.
+    
+    Uses merged department templates from config baseline + hardcoded extras
+    to ensure sites.json changes automatically propagate.
+    """
+    # Get merged templates (config baseline + hardcoded, config wins on conflicts)
+    merged = get_department_file_templates(warn_on_error=False)
+    base = merged.get(site_type, merged.get("default", FILE_TEMPLATES["default"]))
     return {
         "folders": list(base.get("folders", [])),
         "files": build_file_pattern_pool(site_type, list(base.get("files", []))),
@@ -1247,13 +1335,96 @@ def get_sharepoint_sites(access_token: str) -> List[Dict[str, Any]]:
     # Filter out system/personal sites
     return filter_writable_sites(sites)
 
+
+_site_drive_endpoint_cache: Dict[str, str] = {}
+_site_drive_endpoint_lock = threading.Lock()
+
+
+def resolve_site_drive_endpoint(
+    site_id: str,
+    access_token: str,
+    force_refresh: bool = False
+) -> str:
+    """Resolve a stable drive endpoint for a site.
+
+    Some sites intermittently return 404 for /sites/{id}/drive even when a
+    document library exists. We resolve and cache a concrete /drives/{id}
+    endpoint when possible, with a fallback to the original site-drive path.
+    """
+    default_endpoint = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive"
+
+    if not force_refresh:
+        with _site_drive_endpoint_lock:
+            cached_endpoint = _site_drive_endpoint_cache.get(site_id)
+        if cached_endpoint:
+            return cached_endpoint
+
+    resolved_endpoint = default_endpoint
+
+    try:
+        drive_req = urllib.request.Request(f"{default_endpoint}?$select=id")
+        drive_req.add_header("Authorization", f"Bearer {access_token}")
+
+        with urllib.request.urlopen(drive_req, timeout=30) as response:
+            drive_data = json.loads(response.read().decode())
+            drive_id = drive_data.get("id")
+            if drive_id:
+                resolved_endpoint = f"https://graph.microsoft.com/v1.0/drives/{drive_id}"
+    except Exception:
+        pass
+
+    if resolved_endpoint == default_endpoint:
+        try:
+            drives_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives?$select=id,driveType,name&$top=50"
+            drives_req = urllib.request.Request(drives_url)
+            drives_req.add_header("Authorization", f"Bearer {access_token}")
+
+            with urllib.request.urlopen(drives_req, timeout=30) as response:
+                drives_data = json.loads(response.read().decode())
+                drives = drives_data.get("value", [])
+
+                preferred_drive = next(
+                    (drive for drive in drives if drive.get("driveType") == "documentLibrary" and drive.get("id")),
+                    None
+                )
+                selected_drive = preferred_drive or next((drive for drive in drives if drive.get("id")), None)
+
+                if selected_drive:
+                    resolved_endpoint = f"https://graph.microsoft.com/v1.0/drives/{selected_drive['id']}"
+        except Exception:
+            pass
+
+    with _site_drive_endpoint_lock:
+        _site_drive_endpoint_cache[site_id] = resolved_endpoint
+
+    return resolved_endpoint
+
 def create_folder_in_sharepoint(
     site_id: str,
     folder_name: str,
     access_token: str
 ) -> bool:
     """Create a folder in SharePoint document library."""
-    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root/children"
+    def _create_folder_at_endpoint(drive_endpoint: str) -> bool:
+        url = f"{drive_endpoint}/root/children"
+
+        req = urllib.request.Request(url, data=folder_data, method="POST")
+        req.add_header("Authorization", f"Bearer {access_token}")
+        req.add_header("Content-Type", "application/json")
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            return response.status in [200, 201]
+
+    def _queue_folder_metadata_update() -> None:
+        created_date = generate_random_past_date(months_back=12)
+        modified_date = generate_random_modified_date(created_date)
+        queue_metadata_update(
+            site_id=site_id,
+            file_path=folder_name,
+            graph_access_token=access_token,
+            created_date=created_date,
+            modified_date=modified_date
+        )
     
     folder_data = json.dumps({
         "name": folder_name,
@@ -1261,27 +1432,34 @@ def create_folder_in_sharepoint(
         "@microsoft.graph.conflictBehavior": "rename"
     }).encode('utf-8')
     
+    primary_endpoint = resolve_site_drive_endpoint(site_id, access_token)
+
     try:
-        req = urllib.request.Request(url, data=folder_data, method="POST")
-        req.add_header("Authorization", f"Bearer {access_token}")
-        req.add_header("Content-Type", "application/json")
-        
-        with urllib.request.urlopen(req, timeout=30) as response:
-            if response.status in [200, 201]:
-                created_date = generate_random_past_date(months_back=12)
-                modified_date = generate_random_modified_date(created_date)
-                queue_metadata_update(
-                    site_id=site_id,
-                    file_path=folder_name,
-                    graph_access_token=access_token,
-                    created_date=created_date,
-                    modified_date=modified_date
-                )
-                return True
-            return False
+        created = _create_folder_at_endpoint(primary_endpoint)
+        if created:
+            _queue_folder_metadata_update()
+            return True
+        return False
     except urllib.error.HTTPError as e:
         if e.code == 409:  # Conflict - folder already exists, skip timestamp
             return True
+        if e.code == 404:
+            retry_endpoint = resolve_site_drive_endpoint(site_id, access_token, force_refresh=True)
+            if retry_endpoint != primary_endpoint:
+                try:
+                    created = _create_folder_at_endpoint(retry_endpoint)
+                    if created:
+                        _queue_folder_metadata_update()
+                        return True
+                    return False
+                except urllib.error.HTTPError as retry_error:
+                    if retry_error.code == 409:
+                        return True
+                    print_error(f"Failed to create folder {folder_name}: {retry_error.code}")
+                    return False
+                except Exception as retry_exception:
+                    print_error(f"Error creating folder {folder_name}: {retry_exception}")
+                    return False
         print_error(f"Failed to create folder {folder_name}: {e.code}")
         return False
     except Exception as e:
@@ -1758,7 +1936,8 @@ def apply_realistic_timestamps(
 
     # Fallback to Graph fileSystemInfo patch.
     encoded_path = urllib.parse.quote(file_path)
-    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root:/{encoded_path}:"
+    drive_endpoint = resolve_site_drive_endpoint(site_id, graph_access_token)
+    url = f"{drive_endpoint}/root:/{encoded_path}:"
 
     payload = json.dumps({
         "fileSystemInfo": {
@@ -1780,6 +1959,22 @@ def apply_realistic_timestamps(
                 with _metadata_lock:
                     _metadata_update_failed += 1
     except urllib.error.HTTPError as e:
+        if e.code == 404:
+            retry_endpoint = resolve_site_drive_endpoint(site_id, graph_access_token, force_refresh=True)
+            if retry_endpoint != drive_endpoint:
+                retry_url = f"{retry_endpoint}/root:/{encoded_path}:"
+                try:
+                    retry_req = urllib.request.Request(retry_url, data=payload, method="PATCH")
+                    retry_req.add_header("Authorization", f"Bearer {graph_access_token}")
+                    retry_req.add_header("Content-Type", "application/json")
+                    with urllib.request.urlopen(retry_req, timeout=30) as response:
+                        if response.status in [200, 201]:
+                            with _metadata_lock:
+                                _metadata_update_success += 1
+                            return
+                except Exception:
+                    pass
+
         response_snippet = ""
         try:
             response_snippet = e.read().decode("utf-8", errors="ignore").strip().replace("\n", " ")[:200]
@@ -1861,13 +2056,14 @@ def upload_file_to_sharepoint(
         file_path = file_name
         encoded_path = urllib.parse.quote(file_name)
     
-    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root:/{encoded_path}:/content"
-    
-    try:
-        req = urllib.request.Request(url, data=file_content, method="PUT")
+    primary_drive_endpoint = resolve_site_drive_endpoint(site_id, access_token)
+    url = f"{primary_drive_endpoint}/root:/{encoded_path}:/content"
+
+    def _upload(upload_url: str) -> bool:
+        req = urllib.request.Request(upload_url, data=file_content, method="PUT")
         req.add_header("Authorization", f"Bearer {access_token}")
         req.add_header("Content-Type", "application/octet-stream")
-        
+
         with urllib.request.urlopen(req, timeout=60) as response:
             upload_success = response.status in [200, 201]
 
@@ -1884,11 +2080,26 @@ def upload_file_to_sharepoint(
             elif upload_success:
                 with _metadata_lock:
                     _metadata_update_skipped += 1
-            
+
             return upload_success
+    
+    try:
+        return _upload(url)
     except urllib.error.HTTPError as e:
         if e.code == 409:  # Conflict - file already exists
             return True
+        if e.code == 404:
+            retry_endpoint = resolve_site_drive_endpoint(site_id, access_token, force_refresh=True)
+            if retry_endpoint != primary_drive_endpoint:
+                retry_url = f"{retry_endpoint}/root:/{encoded_path}:/content"
+                try:
+                    return _upload(retry_url)
+                except urllib.error.HTTPError as retry_error:
+                    if retry_error.code == 409:
+                        return True
+                    return False
+                except Exception:
+                    return False
         # Don't print error for every file to avoid spam
         return False
     except Exception:
