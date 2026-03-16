@@ -430,14 +430,48 @@ def interactive_mode():
         print()
         
         mailboxes = cleaner.get_mailboxes(all_mailboxes, specific)
+        total_purged = 0
+        total_failed = 0
+        total_skipped = 0
+        
         for user in mailboxes:
             upn = user.get("upn", "Unknown")
             print(f"  {Colors.CYAN}Purging recoverable items for:{Colors.NC} {upn}")
             results = cleaner.purge_recoverable_items(upn)
-            print(f"    {Colors.GREEN}✓{Colors.NC} Purged: {results['success']}, Failed: {results['failed']}")
+            total_purged += results.get('success', 0)
+            total_failed += results.get('failed', 0)
+            total_skipped += results.get('skipped', 0)
+            
+            # Show detailed results
+            status_parts = [f"Purged: {results.get('success', 0)}"]
+            if results.get('skipped', 0) > 0:
+                status_parts.append(f"Skipped (protected): {results.get('skipped', 0)}")
+            if results.get('failed', 0) > 0:
+                status_parts.append(f"Failed: {results.get('failed', 0)}")
+            print(f"    {Colors.GREEN}✓{Colors.NC} {', '.join(status_parts)}")
         
         print()
-        print(f"  {Colors.GREEN}✓{Colors.NC} Recoverable items purge complete")
+        
+        # Summary box for recoverable items purge
+        summary_items = [
+            ("Items Purged:", total_purged),
+        ]
+        if total_skipped > 0:
+            summary_items.append(("Items Skipped (protected):", total_skipped))
+        if total_failed > 0:
+            summary_items.append(("Items Failed:", total_failed))
+        
+        print_summary_box("Recoverable Items Purge Complete", summary_items)
+        
+        # Note about items that may remain
+        if total_failed > 0 or total_skipped > 0:
+            print()
+            print(f"  {Colors.YELLOW}ℹ️  Note: Some items may remain due to:{Colors.NC}")
+            if total_skipped > 0:
+                print(f"     • {Colors.CYAN}Protected items:{Colors.NC} Microsoft 365 retention policies or legal holds")
+            if total_failed > 0:
+                print(f"     • {Colors.CYAN}Failed items:{Colors.NC} Items still propagating between folders")
+                print(f"     • {Colors.CYAN}Rate limiting:{Colors.NC} Try again in a few minutes")
 
 
 def main():

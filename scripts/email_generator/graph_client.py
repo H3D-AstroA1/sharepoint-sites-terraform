@@ -644,7 +644,7 @@ class GraphClient:
         """
         return self.delete_all_emails(mailbox, "deleteditems", permanent=True)
     
-    def purge_recoverable_items(self, mailbox: str) -> Dict[str, int]:
+    def purge_recoverable_items(self, mailbox: str, max_retries: int = 2) -> Dict[str, int]:
         """
         Purge all items from the Recoverable Items folder.
         
@@ -654,29 +654,39 @@ class GraphClient:
         Note: Requires Mail.ReadWrite.All permission and may require
         additional admin consent for compliance-related operations.
         
+        Some items may not be deletable due to:
+        - Microsoft 365 retention policies
+        - Litigation or compliance holds
+        - Items still propagating between folders
+        
         Args:
             mailbox: User's email address (UPN).
+            max_retries: Number of retry passes for failed items.
             
         Returns:
-            Dictionary with success and failed counts.
+            Dictionary with success, failed, and skipped counts.
         """
         import time as time_module
         
-        results = {"success": 0, "failed": 0}
+        results = {"success": 0, "failed": 0, "skipped": 0}
         
         if not self.access_token:
             return results
         
         # The Recoverable Items folder has several subfolders:
-        # - recoverableitemsdeletions: Soft-deleted items
+        # - recoverableitemsdeletions: Soft-deleted items (main target)
         # - recoverableitemsversions: Previous versions
         # - recoverableitemspurges: Items pending purge
+        # - Audits: Audit logs (usually protected)
+        # - DiscoveryHolds: Items under eDiscovery hold (protected)
         
         recoverable_folders = [
             "recoverableitemsdeletions",
             "recoverableitemsversions",
             "recoverableitemspurges"
         ]
+        
+        failed_items: List[str] = []  # Track failed items for retry
         
         for folder in recoverable_folders:
             try:
@@ -698,19 +708,45 @@ class GraphClient:
                         for msg in messages:
                             msg_id = msg.get("id")
                             if msg_id:
+                                deleted = False
                                 try:
                                     # Use permanentDelete action for true purge
                                     delete_url = f"{self.GRAPH_BASE_URL}/users/{mailbox}/messages/{msg_id}/permanentDelete"
                                     self._make_request("POST", delete_url)
                                     results["success"] += 1
+                                    deleted = True
+                                except urllib.error.HTTPError as e:
+                                    if e.code == 403:
+                                        # Item is protected by retention/hold policy
+                                        results["skipped"] += 1
+                                        deleted = True  # Don't retry protected items
+                                    elif e.code == 404:
+                                        # Item already deleted
+                                        results["success"] += 1
+                                        deleted = True
                                 except Exception:
+                                    pass
+                                
+                                if not deleted:
                                     # Fall back to regular DELETE
                                     try:
                                         delete_url = f"{self.GRAPH_BASE_URL}/users/{mailbox}/messages/{msg_id}"
                                         self._make_request("DELETE", delete_url)
                                         results["success"] += 1
+                                        deleted = True
+                                    except urllib.error.HTTPError as e:
+                                        if e.code == 403:
+                                            results["skipped"] += 1
+                                            deleted = True
+                                        elif e.code == 404:
+                                            results["success"] += 1
+                                            deleted = True
                                     except Exception:
-                                        results["failed"] += 1
+                                        pass
+                                
+                                if not deleted:
+                                    failed_items.append(msg_id)
+                                    results["failed"] += 1
                                 
                                 # Small delay to avoid rate limiting
                                 if self.request_delay_ms > 0:
@@ -738,6 +774,32 @@ class GraphClient:
             except Exception:
                 # Folder may not exist or we don't have permission
                 continue
+        
+        # Retry failed items (they may have been in transit between folders)
+        if failed_items and max_retries > 0:
+            time_module.sleep(1.0)  # Wait a bit before retry
+            
+            for msg_id in failed_items[:]:  # Copy list to allow modification
+                try:
+                    delete_url = f"{self.GRAPH_BASE_URL}/users/{mailbox}/messages/{msg_id}/permanentDelete"
+                    self._make_request("POST", delete_url)
+                    results["success"] += 1
+                    results["failed"] -= 1
+                    failed_items.remove(msg_id)
+                except urllib.error.HTTPError as e:
+                    if e.code in [403, 404]:
+                        # Protected or already deleted
+                        results["failed"] -= 1
+                        if e.code == 403:
+                            results["skipped"] += 1
+                        else:
+                            results["success"] += 1
+                        failed_items.remove(msg_id)
+                except Exception:
+                    pass
+                
+                if self.request_delay_ms > 0:
+                    time_module.sleep(self.request_delay_ms / 1000.0)
         
         return results
     
