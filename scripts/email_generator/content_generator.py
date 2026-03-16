@@ -299,6 +299,7 @@ class EmailContentGenerator:
             "Legal & Compliance": ("Legal Team", "Legal"),
             "Operations Department": ("Operations Team", "Operations"),
             "Customer Service": ("Support Team", "Customer Service"),
+            "Claims Department": ("Claims Team", "Claims"),
         }
         
         name, dept = dept_names.get(department, ("Notifications", "System"))
@@ -885,6 +886,7 @@ class EmailContentGenerator:
             "Sales Department": ["pptx", "xlsx"],
             "Executive Leadership": ["pptx", "pdf"],
             "Legal & Compliance": ["docx", "pdf"],
+            "Claims Department": ["docx", "pdf", "xlsx"],
         }
         
         types = dept_attachments.get(department, ["docx", "xlsx", "pptx", "pdf"])
@@ -1006,6 +1008,7 @@ class EmailContentGenerator:
             "Sales Department": ["Green Category"],
             "Executive Leadership": ["Red Category"],
             "Legal & Compliance": ["Red Category"],
+            "Claims Department": ["Yellow Category"],
         }
         
         available = category_mapping.get(category, ["Blue Category"])
@@ -1780,6 +1783,15 @@ class EmailContentGenerator:
                 "<li>Zero safety incidents this period</li>",
                 f"<li>Vendor performance score: {random.randint(85, 98)}%</li>",
             ],
+            "Claims Department": [
+                f"<li>Claims processed: {random.randint(150, 500)} this period</li>",
+                f"<li>Average processing time reduced by {random.randint(10, 25)}%</li>",
+                f"<li>Settlement accuracy: {random.choice(['97.5', '98', '98.5', '99', '99.5'])}%</li>",
+                f"<li>Customer satisfaction: {random.choice(['4.2', '4.3', '4.4', '4.5', '4.6'])}/5</li>",
+                f"<li>Fraud detection rate improved by {random.randint(15, 35)}%</li>",
+                f"<li>Reserve accuracy: {random.randint(95, 99)}%</li>",
+                f"<li>Subrogation recovery: ${random.randint(50, 200)}K this quarter</li>",
+            ],
         }
         
         dept_points = points.get(department, [
@@ -1981,6 +1993,12 @@ class EmailContentGenerator:
                 "For legal questions, email legal@company.com. For compliance matters, contact compliance@company.com.",
                 "Submit contract requests through the Legal portal. For urgent matters, call extension 3000.",
                 "Contact the Legal team for contract reviews or compliance guidance.",
+            ],
+            "Claims Department": [
+                "For claims inquiries, email claims@company.com or call the Claims hotline at extension 5000.",
+                "Submit new claims through the Claims portal. For urgent matters, contact your assigned adjuster directly.",
+                "Visit the Claims SharePoint site for forms and guidelines, or email claims-support@company.com.",
+                "For claim status updates, check the Claims portal or contact your claims representative.",
             ],
         }
         

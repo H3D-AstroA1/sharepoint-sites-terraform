@@ -83,6 +83,14 @@ ATTACHMENT_TEMPLATES = {
         {"name": "FAQ_Document_v{version}.docx", "type": "docx"},
         {"name": "SLA_Report_{month}.xlsx", "type": "xlsx"},
     ],
+    "Claims Department": [
+        {"name": "Claim_Assessment_{date}.docx", "type": "docx"},
+        {"name": "Settlement_Report_{date}.pdf", "type": "pdf"},
+        {"name": "Claims_Summary_Q{quarter}_{year}.xlsx", "type": "xlsx"},
+        {"name": "Investigation_Report_{date}.docx", "type": "docx"},
+        {"name": "Liability_Analysis_{date}.pdf", "type": "pdf"},
+        {"name": "Reserve_Report_{month}.xlsx", "type": "xlsx"},
+    ],
     "default": [
         {"name": "Report_{date}.pdf", "type": "pdf"},
         {"name": "Presentation_{date}.pptx", "type": "pptx"},

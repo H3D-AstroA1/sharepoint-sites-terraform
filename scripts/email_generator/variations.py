@@ -177,6 +177,12 @@ DOCUMENT_TOPICS = {
         "Capacity Report", "Efficiency Analysis", "Safety Report",
         "Maintenance Schedule", "Resource Allocation", "KPI Dashboard",
     ],
+    "Claims Department": [
+        "Claim Assessment", "Case Summary", "Settlement Report",
+        "Investigation Findings", "Liability Analysis", "Damage Report",
+        "Claim Status Update", "Adjuster Notes", "Coverage Review",
+        "Subrogation Report", "Reserve Analysis", "Claim Audit",
+    ],
 }
 
 # =============================================================================
@@ -367,6 +373,12 @@ DEPARTMENT_JARGON = {
         "resource utilization", "capacity planning", "KPI tracking",
         "vendor management", "logistics coordination", "inventory control",
     ],
+    "Claims Department": [
+        "claim adjudication", "loss assessment", "coverage determination",
+        "subrogation recovery", "reserve estimation", "claim lifecycle",
+        "first notice of loss", "settlement negotiation", "liability evaluation",
+        "fraud detection", "claim triage", "total loss determination",
+    ],
 }
 
 DEPARTMENT_PRIORITIES = {
@@ -425,6 +437,13 @@ DEPARTMENT_PRIORITIES = {
         "enhancing quality metrics",
         "optimizing resource allocation",
         "streamlining vendor management",
+    ],
+    "Claims Department": [
+        "reducing claim processing time",
+        "improving settlement accuracy",
+        "enhancing fraud detection rates",
+        "increasing customer satisfaction scores",
+        "optimizing reserve management",
     ],
 }
 

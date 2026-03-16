@@ -417,6 +417,13 @@ def get_user_department(user: Dict[str, Any]) -> str:
         "pmo": "Project Management Office",
         "research": "Research & Development",
         "r&d": "Research & Development",
+        "claims": "Claims Department",
+        "adjuster": "Claims Department",
+        "claims adjuster": "Claims Department",
+        "claims analyst": "Claims Department",
+        "claims manager": "Claims Department",
+        "claims examiner": "Claims Department",
+        "loss adjuster": "Claims Department",
     }
     
     for keyword, department in role_department_map.items():
