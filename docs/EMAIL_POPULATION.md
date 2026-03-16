@@ -559,6 +559,7 @@ Generated attachments are valid Office documents:
 Attachments are department-specific:
 - **HR**: Employee handbooks, policies
 - **Finance**: Budget reports, forecasts
+- **Claims**: Claim forms, processing guides, settlement documents
 - **IT**: Technical documentation
 - **Marketing**: Campaign materials
 - **Sales**: Proposals, contracts

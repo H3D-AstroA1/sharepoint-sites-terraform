@@ -242,6 +242,19 @@ departments:
       - job_title: R&D Director
         display_name: "{first_name} {last_name}"
 
+  Claims Department:
+    sharepoint_site: claims-operations
+    system_email: claims@{domain}
+    internal_senders:
+      - job_title: Claims Director
+        display_name: "{first_name} {last_name}"
+      - job_title: Claims Manager
+        display_name: "{first_name} {last_name}"
+      - job_title: Claims Analyst
+        display_name: "{first_name} {last_name}"
+      - job_title: Claims Adjuster
+        display_name: "{first_name} {last_name}"
+
 # =============================================================================
 # External Senders Configuration
 # =============================================================================
