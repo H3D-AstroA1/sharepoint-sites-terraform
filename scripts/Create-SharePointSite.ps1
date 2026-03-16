@@ -176,7 +176,8 @@ function New-TeamSite {
     
     # Add owners if specified
     if (-not [string]::IsNullOrEmpty($Owners)) {
-        $ownerEmails = $Owners -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+        # Deduplicate and normalize owner emails to prevent Graph API errors
+        $ownerEmails = $Owners -split ',' | ForEach-Object { $_.Trim().ToLower() } | Where-Object { $_ -ne "" } | Select-Object -Unique
         if ($ownerEmails.Count -gt 0) {
             $ownerIds = @()
             foreach ($email in $ownerEmails) {
@@ -334,7 +335,8 @@ function New-CommunicationSite {
     
     # Add owners if specified
     if (-not [string]::IsNullOrEmpty($Owners)) {
-        $ownerEmails = $Owners -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+        # Deduplicate and normalize owner emails to prevent Graph API errors
+        $ownerEmails = $Owners -split ',' | ForEach-Object { $_.Trim().ToLower() } | Where-Object { $_ -ne "" } | Select-Object -Unique
         if ($ownerEmails.Count -gt 0) {
             $ownerIds = @()
             foreach ($email in $ownerEmails) {

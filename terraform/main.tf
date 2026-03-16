@@ -203,7 +203,7 @@ resource "null_resource" "sharepoint_sites" {
         -Visibility "${each.value.visibility}" `
         -TenantName "${var.m365_tenant_name}" `
         -AdminEmail "${var.sharepoint_admin_email}" `
-        -Owners "${join(",", concat([var.sharepoint_admin_email], each.value.owners))}"${length(each.value.members) > 0 ? " `\n        -Members \"${join(",", each.value.members)}\"" : ""}
+        -Owners "${join(",", distinct(concat([lower(var.sharepoint_admin_email)], [for owner in each.value.owners : lower(owner)])))}"${length(each.value.members) > 0 ? " `\n        -Members \"${join(",", each.value.members)}\"" : ""}
     EOT
 
     interpreter = ["powershell", "-Command"]
