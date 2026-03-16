@@ -210,8 +210,8 @@ def validate_config(config: Dict[str, Any]) -> None:
         if "upn" not in user:
             raise ValueError(f"User at index {i} is missing required 'upn' field")
         
-        if "role" not in user:
-            raise ValueError(f"User '{user.get('upn', f'index {i}')}' is missing required 'role' field")
+        if "job_title" not in user:
+            raise ValueError(f"User '{user.get('upn', f'index {i}')}' is missing required 'job_title' field")
         
         # Validate UPN format
         upn = user["upn"]
@@ -386,8 +386,8 @@ def get_user_department(user: Dict[str, Any]) -> str:
     if "department" in user:
         return user["department"]
     
-    # Try to infer from role
-    role = user.get("role", "").lower()
+    # Try to infer from job_title
+    job_title = user.get("job_title", "").lower()
     
     role_department_map = {
         "ceo": "Executive Leadership",
@@ -427,7 +427,7 @@ def get_user_department(user: Dict[str, Any]) -> str:
     }
     
     for keyword, department in role_department_map.items():
-        if keyword in role:
+        if keyword in job_title:
             return department
     
     return "General"

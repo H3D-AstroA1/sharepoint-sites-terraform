@@ -652,10 +652,10 @@ def list_mailboxes(config: Dict[str, Any]) -> None:
         print(f"  {Colors.CYAN}{dept}{Colors.NC}")
         for user in dept_users:
             upn = user.get("upn", "Unknown")
-            role = user.get("role", "")
+            job_title = user.get("job_title", "")
             email_count = user.get("email_count", 50)
             print(f"    • {upn}")
-            print(f"      {Colors.DIM}Role: {role} | Emails: {email_count}{Colors.NC}")
+            print(f"      {Colors.DIM}Job Title: {job_title} | Emails: {email_count}{Colors.NC}")
         print()
 
 

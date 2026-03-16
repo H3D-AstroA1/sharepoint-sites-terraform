@@ -4,7 +4,7 @@
 # This file defines the mailboxes to populate with realistic emails.
 # 
 # INSTRUCTIONS:
-# 1. Add your users under the 'users' section with their UPN and role
+# 1. Add your users under the 'users' section with their UPN and job_title
 # 2. The domain should match your tenant in environments.json
 # 3. Adjust settings as needed for your scenario
 # =============================================================================
@@ -89,7 +89,7 @@ settings:
 # =============================================================================
 # Each user requires:
 #   - upn: User Principal Name (email address)
-#   - role: Job title
+#   - job_title: Job title
 # Optional:
 #   - department: Department name (auto-mapped if not specified)
 #   - email_volume: high/medium/low or specific number
@@ -101,7 +101,7 @@ users:
   # The domain should match your M365 tenant
   
   - upn: user@yourtenant.onmicrosoft.com
-    role: CEO
+    job_title: CEO
     department: Executive Leadership
     email_volume: high
     receives_from:
@@ -112,7 +112,7 @@ users:
       - All Departments
     
   - upn: user1@yourtenant.onmicrosoft.com
-    role: Head of IT
+    job_title: Head of IT
     department: IT Department
     email_volume: high
     receives_from:
@@ -123,7 +123,7 @@ users:
 
   # Add more users following the same pattern:
   # - upn: user@yourtenant.onmicrosoft.com
-  #   role: Job Title
+  #   job_title: Job Title
   #   department: Department Name
   #   email_volume: high  # high, medium, low, or specific number
 
@@ -138,108 +138,108 @@ departments:
     sharepoint_site: executive-leadership
     system_email: executive-office@{domain}
     internal_senders:
-      - role: CEO
+      - job_title: CEO
         display_name: "{first_name} {last_name}"
-      - role: CFO
+      - job_title: CFO
         display_name: "{first_name} {last_name}"
-      - role: COO
+      - job_title: COO
         display_name: "{first_name} {last_name}"
     
   IT Department:
     sharepoint_site: it-department
     system_email: it-support@{domain}
     internal_senders:
-      - role: Head of IT
+      - job_title: Head of IT
         display_name: "{first_name} {last_name}"
-      - role: IT Manager
+      - job_title: IT Manager
         display_name: "{first_name} {last_name}"
-      - role: System Administrator
+      - job_title: System Administrator
         display_name: "{first_name} {last_name}"
     
   Human Resources:
     sharepoint_site: human-resources
     system_email: hr@{domain}
     internal_senders:
-      - role: HR Director
+      - job_title: HR Director
         display_name: "{first_name} {last_name}"
-      - role: HR Manager
+      - job_title: HR Manager
         display_name: "{first_name} {last_name}"
-      - role: Recruitment Specialist
+      - job_title: Recruitment Specialist
         display_name: "{first_name} {last_name}"
     
   Finance Department:
     sharepoint_site: finance-department
     system_email: finance@{domain}
     internal_senders:
-      - role: Finance Director
+      - job_title: Finance Director
         display_name: "{first_name} {last_name}"
-      - role: Financial Controller
+      - job_title: Financial Controller
         display_name: "{first_name} {last_name}"
-      - role: Accounts Manager
+      - job_title: Accounts Manager
         display_name: "{first_name} {last_name}"
     
   Marketing Department:
     sharepoint_site: marketing-department
     system_email: marketing@{domain}
     internal_senders:
-      - role: Marketing Director
+      - job_title: Marketing Director
         display_name: "{first_name} {last_name}"
-      - role: Marketing Manager
+      - job_title: Marketing Manager
         display_name: "{first_name} {last_name}"
     
   Sales Department:
     sharepoint_site: sales-department
     system_email: sales@{domain}
     internal_senders:
-      - role: Sales Director
+      - job_title: Sales Director
         display_name: "{first_name} {last_name}"
-      - role: Sales Manager
+      - job_title: Sales Manager
         display_name: "{first_name} {last_name}"
     
   Legal & Compliance:
     sharepoint_site: legal-compliance
     system_email: legal@{domain}
     internal_senders:
-      - role: General Counsel
+      - job_title: General Counsel
         display_name: "{first_name} {last_name}"
-      - role: Compliance Officer
+      - job_title: Compliance Officer
         display_name: "{first_name} {last_name}"
     
   Operations Department:
     sharepoint_site: operations-department
     system_email: operations@{domain}
     internal_senders:
-      - role: Operations Director
+      - job_title: Operations Director
         display_name: "{first_name} {last_name}"
-      - role: Operations Manager
+      - job_title: Operations Manager
         display_name: "{first_name} {last_name}"
     
   Customer Service:
     sharepoint_site: customer-service
     system_email: support@{domain}
     internal_senders:
-      - role: Customer Service Manager
+      - job_title: Customer Service Manager
         display_name: "{first_name} {last_name}"
 
   Training & Development:
     sharepoint_site: training-development
     system_email: training@{domain}
     internal_senders:
-      - role: Training Manager
+      - job_title: Training Manager
         display_name: "{first_name} {last_name}"
 
   Project Management Office:
     sharepoint_site: project-management-office
     system_email: pmo@{domain}
     internal_senders:
-      - role: PMO Director
+      - job_title: PMO Director
         display_name: "{first_name} {last_name}"
 
   Research & Development:
     sharepoint_site: research-development
     system_email: rnd@{domain}
     internal_senders:
-      - role: R&D Director
+      - job_title: R&D Director
         display_name: "{first_name} {last_name}"
 
 # =============================================================================

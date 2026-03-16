@@ -264,7 +264,7 @@ class EmailContentGenerator:
             return {
                 "email": upn,
                 "name": display_name,
-                "title": sender_user.get("role", "Employee"),
+                "title": sender_user.get("job_title", "Employee"),
                 "department": sender_user.get("department", "General"),
                 "first_name": display_name.split()[0] if display_name else "Colleague",
             }

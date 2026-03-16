@@ -3682,7 +3682,7 @@ def list_mailboxes_menu() -> None:
     for idx, user in enumerate(users, 1):
         upn = user.get("upn", "Unknown")
         department = user.get("department", "N/A")
-        role = user.get("role", "N/A")
+        job_title = user.get("job_title", "N/A")
         
         # Truncate long values
         if len(upn) > 33:
@@ -3708,12 +3708,12 @@ def list_mailboxes_menu() -> None:
                 status_display = f"{Colors.RED}✗ {status.get('error', 'Invalid')}{Colors.NC}"
             print(f"  {idx:<4} {upn_display:<35} {dept_display:<15} {status_display}")
         else:
-            # Show role instead of status when not validating
-            if len(role) > 18:
-                role_display = role[:15] + "..."
+            # Show job_title instead of status when not validating
+            if len(job_title) > 18:
+                job_title_display = job_title[:15] + "..."
             else:
-                role_display = role
-            print(f"  {idx:<4} {upn_display:<35} {dept_display:<15} {role_display}")
+                job_title_display = job_title
+            print(f"  {idx:<4} {upn_display:<35} {dept_display:<15} {job_title_display}")
     
     print(f"  {Colors.DIM}{'─' * 70}{Colors.NC}")
     print()
