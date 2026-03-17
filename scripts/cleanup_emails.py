@@ -24,7 +24,7 @@ from typing import Dict, List, Optional, Any
 SCRIPT_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(SCRIPT_DIR))
 
-from email_generator.config import load_mailbox_config, get_all_users
+from email_generator.config import load_mailbox_config, get_all_users, filter_excluded_users, is_exclusions_enabled
 from email_generator.graph_client import GraphClient
 from email_generator.utils import (
     Colors,
@@ -84,18 +84,43 @@ class EmailCleaner:
     def get_mailboxes(
         self,
         all_mailboxes: bool = False,
-        specific: Optional[List[str]] = None
+        specific: Optional[List[str]] = None,
+        respect_exclusions: bool = True
     ) -> List[Dict[str, Any]]:
-        """Get list of mailboxes to clean."""
+        """Get list of mailboxes to clean.
+        
+        Args:
+            all_mailboxes: If True, get all mailboxes from config.
+            specific: List of specific mailbox addresses to include.
+            respect_exclusions: If True, filter out excluded mailboxes based on
+                               allowed_domains whitelist or exclusion blacklist.
+        
+        Returns:
+            List of mailbox dictionaries.
+        """
         users = get_all_users(self.config)
         
         if not users:
             return []
         
-        # Filter by specific mailboxes
+        # Filter by specific mailboxes first
         if specific:
             specific_lower = [s.lower() for s in specific]
             users = [u for u in users if u.get("upn", "").lower() in specific_lower]
+        
+        # Apply exclusion filtering if enabled
+        if respect_exclusions and is_exclusions_enabled(self.config):
+            included_users, excluded_users = filter_excluded_users(users, self.config)
+            
+            if excluded_users:
+                print_info(f"Excluding {len(excluded_users)} mailbox(es) based on exclusion rules")
+                for user in excluded_users[:3]:
+                    upn = user.get("upn", "unknown")
+                    print(f"       {Colors.DIM}• {upn}{Colors.NC}")
+                if len(excluded_users) > 3:
+                    print(f"       {Colors.DIM}... and {len(excluded_users) - 3} more{Colors.NC}")
+            
+            return included_users
         
         return users
     
