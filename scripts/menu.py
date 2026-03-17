@@ -4797,8 +4797,8 @@ def remove_excluded_users_menu() -> None:
                 return
             
             import re
-            if not re.match(r'^PRJ-[A-Z0-9]{6}$', user_id):
-                print(f"  {Colors.RED}✗{Colors.NC} Invalid format. Expected PRJ-XXXXXX")
+            if not re.match(r'^PRJ-[A-Z0-9]{3,20}$', user_id):
+                print(f"  {Colors.RED}✗{Colors.NC} Invalid format. Expected PRJ-XXXXX (3-20 alphanumeric characters)")
                 print()
                 input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
                 return

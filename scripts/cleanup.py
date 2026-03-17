@@ -207,7 +207,8 @@ def extract_deployment_id_from_description(description: str) -> Optional[str]:
     
     # Match pattern like "| Ref: PRJ-XXXXXX" at end of description
     # The format is configurable but defaults to " | Ref: {id}"
-    match = re.search(r'\|\s*Ref:\s*(PRJ-[A-Z0-9]{6})\s*$', description)
+    # Allow flexible ID length (3-20 alphanumeric characters after PRJ-)
+    match = re.search(r'\|\s*Ref:\s*(PRJ-[A-Z0-9]{3,20})\s*$', description)
     if match:
         return match.group(1)
     
@@ -303,7 +304,7 @@ def prompt_for_deployment_id() -> Optional[str]:
         return ""  # Cancel
     elif not user_input:
         return None  # No filtering
-    elif re.match(r'^PRJ-[A-Z0-9]{6}$', user_input):
+    elif re.match(r'^PRJ-[A-Z0-9]{3,20}$', user_input):
         return user_input
     else:
         print_warning(f"Invalid format '{user_input}'. Expected PRJ-XXXXXX")
