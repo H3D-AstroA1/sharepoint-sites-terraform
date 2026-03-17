@@ -4692,47 +4692,61 @@ def remove_excluded_users_menu() -> None:
     print(f"  {Colors.GREEN}✓{Colors.NC} Access token obtained")
     print()
     
-    # Load configured sites from sites.json to only process those
-    print_info("Loading configured sites from sites.json...")
+    # Load configured sites from sites.json
     configured_site_names = set()
-    
     try:
         sites_list = sites_config.get("sites", [])
         for site in sites_list:
-            # Get the display_name which is what the M365 Group will be named
             display_name = site.get("display_name", site.get("name", ""))
             if display_name:
                 configured_site_names.add(display_name.lower())
-        
-        if not configured_site_names:
-            print(f"  {Colors.YELLOW}⚠{Colors.NC} No sites found in sites.json")
-            print()
-            input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
-            return
-        
-        print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(configured_site_names)} configured sites")
-        print()
-        print(f"  {Colors.WHITE}Sites that will be processed:{Colors.NC}")
-        for name in sorted(list(configured_site_names)[:10]):
-            print(f"    • {name}")
-        if len(configured_site_names) > 10:
-            print(f"    ... and {len(configured_site_names) - 10} more")
-        print()
-        
-    except Exception as e:
-        print(f"  {Colors.RED}✗{Colors.NC} Failed to load sites from sites.json: {e}")
+    except Exception:
+        pass
+    
+    # Load deployment tracking settings
+    deployment_tracking = sites_config.get("deployment_tracking", {})
+    deployment_id = deployment_tracking.get("deployment_id", "")
+    tracking_enabled = deployment_tracking.get("enabled", False)
+    
+    # Show scope selection menu
+    print(f"  {Colors.CYAN}Select which sites to process:{Colors.NC}")
+    print()
+    print(f"    {Colors.WHITE}[1]{Colors.NC} Filter by Deployment ID", end="")
+    if deployment_id:
+        print(f" {Colors.GREEN}(current: {deployment_id}){Colors.NC}")
+    else:
+        print(f" {Colors.DIM}(no ID configured){Colors.NC}")
+    print(f"        {Colors.DIM}Process sites with matching deployment ID in description{Colors.NC}")
+    print(f"        {Colors.DIM}(includes ad-hoc sites created by this tool){Colors.NC}")
+    print()
+    print(f"    {Colors.WHITE}[2]{Colors.NC} Filter by sites.json names", end="")
+    if configured_site_names:
+        print(f" {Colors.GREEN}({len(configured_site_names)} sites){Colors.NC}")
+    else:
+        print(f" {Colors.DIM}(no sites configured){Colors.NC}")
+    print(f"        {Colors.DIM}Process only sites defined in sites.json{Colors.NC}")
+    print()
+    print(f"    {Colors.WHITE}[3]{Colors.NC} Process ALL M365 Groups {Colors.RED}(use with caution!){Colors.NC}")
+    print(f"        {Colors.DIM}Process all M365 Groups in the tenant{Colors.NC}")
+    print()
+    print(f"    {Colors.WHITE}[Q]{Colors.NC} Cancel")
+    print()
+    
+    scope_choice = input(f"  {Colors.CYAN}Select option (1-3, Q):{Colors.NC} ").strip().lower()
+    
+    if scope_choice == 'q':
+        print_warning("Operation cancelled.")
         print()
         input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
         return
     
-    # Get list of SharePoint sites (M365 Groups)
-    print_info("Discovering M365 Groups matching configured sites...")
+    # Get all M365 Groups first
+    print()
+    print_info("Discovering M365 Groups...")
     
     try:
-        # Get M365 Groups (which back SharePoint sites)
-        # URL-encode the filter parameter to handle special characters
         filter_param = urllib.parse.quote("groupTypes/any(c:c eq 'Unified')")
-        url = f"https://graph.microsoft.com/v1.0/groups?$filter={filter_param}&$select=id,displayName&$top=200"
+        url = f"https://graph.microsoft.com/v1.0/groups?$filter={filter_param}&$select=id,displayName,description&$top=200"
         
         req = urllib.request.Request(url)
         req.add_header("Authorization", f"Bearer {access_token}")
@@ -4742,22 +4756,7 @@ def remove_excluded_users_menu() -> None:
             result = json.loads(response.read().decode())
             all_groups = result.get('value', [])
         
-        # Filter to only include groups that match our configured sites
-        groups = []
-        for group in all_groups:
-            group_name = group.get('displayName', '').lower()
-            if group_name in configured_site_names:
-                groups.append(group)
-        
-        if not groups:
-            print(f"  {Colors.YELLOW}⚠{Colors.NC} No M365 Groups found matching configured sites")
-            print(f"  {Colors.DIM}This could mean the sites haven't been created yet, or they have different names.{Colors.NC}")
-            print()
-            input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
-            return
-        
-        print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(groups)} M365 Groups matching configured sites (out of {len(all_groups)} total)")
-        print()
+        print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(all_groups)} M365 Groups in tenant")
         
     except Exception as e:
         print(f"  {Colors.RED}✗{Colors.NC} Failed to get groups: {e}")
@@ -4765,9 +4764,103 @@ def remove_excluded_users_menu() -> None:
         input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
         return
     
+    # Filter groups based on scope selection
+    groups = []
+    
+    if scope_choice == '1':
+        # Filter by deployment ID
+        if not deployment_id:
+            print()
+            print(f"  {Colors.YELLOW}No deployment ID configured.{Colors.NC}")
+            print(f"  Enter a deployment ID (format: PRJ-XXXXXX) or press Enter to cancel:")
+            user_id = input(f"  {Colors.CYAN}Deployment ID:{Colors.NC} ").strip().upper()
+            
+            if not user_id:
+                print_warning("Operation cancelled.")
+                print()
+                input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+                return
+            
+            import re
+            if not re.match(r'^PRJ-[A-Z0-9]{6}$', user_id):
+                print(f"  {Colors.RED}✗{Colors.NC} Invalid format. Expected PRJ-XXXXXX")
+                print()
+                input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+                return
+            
+            deployment_id = user_id
+        
+        print()
+        print_info(f"Filtering by deployment ID: {deployment_id}")
+        
+        # Filter groups by deployment ID in description
+        for group in all_groups:
+            description = group.get('description', '') or ''
+            if f"Ref: {deployment_id}" in description:
+                groups.append(group)
+        
+        if not groups:
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} No M365 Groups found with deployment ID: {deployment_id}")
+            print(f"  {Colors.DIM}Make sure sites were created with deployment tracking enabled.{Colors.NC}")
+            print()
+            input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            return
+        
+        print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(groups)} groups matching deployment ID")
+        
+    elif scope_choice == '2':
+        # Filter by sites.json names
+        if not configured_site_names:
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} No sites found in sites.json")
+            print()
+            input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            return
+        
+        print()
+        print_info(f"Filtering by sites.json ({len(configured_site_names)} sites)...")
+        
+        for group in all_groups:
+            group_name = group.get('displayName', '').lower()
+            if group_name in configured_site_names:
+                groups.append(group)
+        
+        if not groups:
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} No M365 Groups found matching configured sites")
+            print(f"  {Colors.DIM}This could mean the sites haven't been created yet.{Colors.NC}")
+            print()
+            input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            return
+        
+        print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(groups)} groups matching sites.json")
+        
+    elif scope_choice == '3':
+        # Process all groups - confirm first
+        print()
+        print(f"  {Colors.RED}{'─' * 50}{Colors.NC}")
+        print(f"  {Colors.RED}⚠ WARNING: This will process ALL {len(all_groups)} M365 Groups!{Colors.NC}")
+        print(f"  {Colors.RED}  This includes groups you may not have created.{Colors.NC}")
+        print(f"  {Colors.RED}{'─' * 50}{Colors.NC}")
+        print()
+        confirm = input(f"  {Colors.RED}Type 'YES' to confirm:{Colors.NC} ").strip()
+        
+        if confirm != 'YES':
+            print_warning("Operation cancelled.")
+            print()
+            input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            return
+        
+        groups = all_groups
+        print()
+        print_info(f"Processing all {len(groups)} M365 Groups")
+        
+    else:
+        print(f"  {Colors.RED}✗{Colors.NC} Invalid option")
+        print()
+        input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        return
+    
     # Confirm before proceeding
-    print(f"  {Colors.YELLOW}This will check {len(groups)} sites (from sites.json) and remove excluded users from ownership.{Colors.NC}")
-    print(f"  {Colors.DIM}Other M365 Groups in your tenant will NOT be affected.{Colors.NC}")
+    print(f"  {Colors.YELLOW}This will check {len(groups)} site(s) and remove excluded users from ownership.{Colors.NC}")
     print()
     confirm = input(f"  {Colors.YELLOW}Proceed? (y/N):{Colors.NC} ").strip().lower()
     
@@ -4777,7 +4870,7 @@ def remove_excluded_users_menu() -> None:
         return
     
     print()
-    print_info("Processing configured sites only...")
+    print_info(f"Processing {len(groups)} site(s)...")
     print()
     
     # Process each group
