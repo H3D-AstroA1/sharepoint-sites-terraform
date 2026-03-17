@@ -3821,7 +3821,199 @@ def list_files_in_sites_menu() -> None:
 # ============================================================================
 
 def list_mailboxes_menu() -> None:
-    """List mailboxes from configuration with validation status."""
+    """List mailboxes from configuration or Azure AD with validation status."""
+    import urllib.request
+    import urllib.error
+    
+    clear_screen()
+    print()
+    print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+    print(f"  {Colors.CYAN}{'📬 LIST MAILBOXES':^60}{Colors.NC}")
+    print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+    print()
+    
+    # Ask user what source to use
+    print(f"  {Colors.WHITE}Select mailbox source:{Colors.NC}")
+    print()
+    print(f"    {Colors.GREEN}[1]{Colors.NC} From mailboxes.yaml configuration")
+    print(f"        {Colors.DIM}Show mailboxes defined in config file{Colors.NC}")
+    print()
+    print(f"    {Colors.BLUE}[2]{Colors.NC} Discover from Azure AD")
+    print(f"        {Colors.DIM}List all users with mailboxes from tenant{Colors.NC}")
+    print()
+    print(f"    {Colors.WHITE}[Q]{Colors.NC} Cancel")
+    print()
+    
+    source_choice = input(f"  {Colors.YELLOW}Enter your choice (1-2, Q):{Colors.NC} ").strip().lower()
+    
+    if source_choice == 'q':
+        return
+    
+    if source_choice == '2':
+        # Discover mailboxes from Azure AD
+        _list_mailboxes_from_azure_ad()
+        return
+    
+    # Default: List from configuration
+    _list_mailboxes_from_config()
+
+
+def _list_mailboxes_from_azure_ad() -> None:
+    """Discover and list mailboxes directly from Azure AD."""
+    import urllib.request
+    import urllib.error
+    
+    clear_screen()
+    print()
+    print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+    print(f"  {Colors.CYAN}{'📬 AZURE AD MAILBOXES':^60}{Colors.NC}")
+    print(f"  {Colors.CYAN}{'═' * 60}{Colors.NC}")
+    print()
+    
+    # Get access token
+    print(f"  {Colors.WHITE}Connecting to Microsoft Graph...{Colors.NC}")
+    token = get_graph_access_token()
+    
+    if not token:
+        print(f"  {Colors.RED}✗{Colors.NC} Could not get access token")
+        print(f"  {Colors.DIM}Make sure you have set up the app registration via [A] Manage App Registration{Colors.NC}")
+        input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        return
+    
+    print(f"  {Colors.GREEN}✓{Colors.NC} Connected to Microsoft Graph")
+    print()
+    
+    # Ask for filter options
+    print(f"  {Colors.WHITE}Filter options:{Colors.NC}")
+    print()
+    print(f"    {Colors.GREEN}[1]{Colors.NC} All users with mailboxes")
+    print(f"    {Colors.BLUE}[2]{Colors.NC} Only licensed users (recommended)")
+    print(f"    {Colors.CYAN}[3]{Colors.NC} Filter by domain")
+    print()
+    
+    filter_choice = input(f"  {Colors.YELLOW}Enter your choice (1-3):{Colors.NC} ").strip()
+    
+    domain_filter = None
+    if filter_choice == '3':
+        domain_filter = input(f"  {Colors.YELLOW}Enter domain to filter (e.g., company.com):{Colors.NC} ").strip().lower()
+        if not domain_filter:
+            domain_filter = None
+    
+    print()
+    print(f"  {Colors.WHITE}Discovering mailboxes from Azure AD...{Colors.NC}")
+    
+    # Build the Graph API query
+    # Get users with mail attribute set (indicates they have a mailbox)
+    try:
+        if filter_choice == '2':
+            # Licensed users - filter by assignedLicenses
+            url = "https://graph.microsoft.com/v1.0/users?$filter=assignedLicenses/$count ne 0&$count=true&$select=id,displayName,userPrincipalName,mail,department,jobTitle,assignedLicenses&$top=100"
+        else:
+            # All users with mail
+            url = "https://graph.microsoft.com/v1.0/users?$filter=mail ne null&$select=id,displayName,userPrincipalName,mail,department,jobTitle&$top=100"
+        
+        all_users = []
+        
+        while url:
+            req = urllib.request.Request(url)
+            req.add_header("Authorization", f"Bearer {token}")
+            req.add_header("Content-Type", "application/json")
+            req.add_header("ConsistencyLevel", "eventual")
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                data = json.loads(response.read().decode())
+                users = data.get("value", [])
+                all_users.extend(users)
+                
+                # Check for pagination
+                url = data.get("@odata.nextLink")
+                if url and len(all_users) >= 500:
+                    # Limit to 500 users for performance
+                    break
+        
+        # Apply domain filter if specified
+        if domain_filter:
+            all_users = [u for u in all_users if u.get("mail", "").lower().endswith(f"@{domain_filter}") or
+                        u.get("userPrincipalName", "").lower().endswith(f"@{domain_filter}")]
+        
+        if not all_users:
+            print(f"  {Colors.YELLOW}ℹ{Colors.NC} No mailboxes found matching the criteria")
+            input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            return
+        
+        # Display results
+        clear_screen()
+        print()
+        print(f"  {Colors.CYAN}{'═' * 80}{Colors.NC}")
+        title = "📬 AZURE AD MAILBOXES"
+        if domain_filter:
+            title += f" (@{domain_filter})"
+        print(f"  {Colors.CYAN}{title:^80}{Colors.NC}")
+        print(f"  {Colors.CYAN}{'═' * 80}{Colors.NC}")
+        print()
+        print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(all_users)} mailboxes")
+        print()
+        
+        # Display header
+        print(f"  {Colors.WHITE}{'#':<4} {'Display Name':<25} {'Email/UPN':<35} {'Department':<15}{Colors.NC}")
+        print(f"  {Colors.DIM}{'─' * 80}{Colors.NC}")
+        
+        # Group by department for summary
+        departments: Dict[str, int] = {}
+        
+        for idx, user in enumerate(all_users, 1):
+            display_name = user.get("displayName", "Unknown")
+            email = user.get("mail") or user.get("userPrincipalName", "Unknown")
+            department = user.get("department", "N/A") or "N/A"
+            
+            # Track departments
+            departments[department] = departments.get(department, 0) + 1
+            
+            # Truncate long values
+            if len(display_name) > 23:
+                display_name = display_name[:20] + "..."
+            if len(email) > 33:
+                email = email[:30] + "..."
+            if len(department) > 13:
+                department = department[:10] + "..."
+            
+            print(f"  {idx:<4} {display_name:<25} {email:<35} {department:<15}")
+            
+            # Pause every 20 users
+            if idx % 20 == 0 and idx < len(all_users):
+                print()
+                more = input(f"  {Colors.YELLOW}Press Enter for more, or 'q' to stop:{Colors.NC} ").strip().lower()
+                if more == 'q':
+                    break
+                print()
+        
+        print(f"  {Colors.DIM}{'─' * 80}{Colors.NC}")
+        print()
+        
+        # Summary
+        print(f"  {Colors.WHITE}Summary:{Colors.NC}")
+        print(f"    Total mailboxes: {len(all_users)}")
+        print()
+        print(f"  {Colors.WHITE}By Department:{Colors.NC}")
+        for dept, count in sorted(departments.items(), key=lambda x: -x[1])[:10]:
+            print(f"    • {dept}: {count}")
+        if len(departments) > 10:
+            print(f"    {Colors.DIM}... and {len(departments) - 10} more departments{Colors.NC}")
+        
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            print(f"  {Colors.RED}✗{Colors.NC} Access denied - User.Read.All permission required")
+        else:
+            print(f"  {Colors.RED}✗{Colors.NC} Error: {e.code} - {e.reason}")
+    except Exception as e:
+        print(f"  {Colors.RED}✗{Colors.NC} Error discovering mailboxes: {e}")
+    
+    print()
+    input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+
+
+def _list_mailboxes_from_config() -> None:
+    """List mailboxes from mailboxes.yaml configuration."""
     import urllib.request
     import urllib.error
     
