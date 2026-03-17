@@ -513,6 +513,21 @@ exclusions:
   # Enable exclusions (default: true)
   enabled: true
   
+  # ==========================================================================
+  # WHITELIST: allowed_domains (takes precedence over blacklist)
+  # ==========================================================================
+  # If set, ONLY users from these domains will be used for email population.
+  # All other domains will be excluded. Leave empty to use blacklist instead.
+  allowed_domains: []
+  # Example:
+  # allowed_domains:
+  #   - yourtenant.onmicrosoft.com
+  #   - customdomain.com
+  
+  # ==========================================================================
+  # BLACKLIST: email_addresses, domains, patterns (only used if allowed_domains is empty)
+  # ==========================================================================
+  
   # Specific email addresses to exclude
   # These mailboxes will NOT receive any populated emails
   email_addresses: []

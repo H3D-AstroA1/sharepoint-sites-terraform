@@ -35,7 +35,7 @@ import urllib.error
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Optional, Any, Set
 
 # ============================================================================
 # CONFIGURATION
@@ -119,6 +119,190 @@ def read_sites_from_config(config_path: Path) -> List[Dict]:
         raise ValueError("No sites defined in configuration file")
     
     return sites
+
+
+def load_sites_config() -> Dict[str, Any]:
+    """Load the full sites.json configuration."""
+    try:
+        with open(DEFAULT_CONFIG_FILE, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return {}
+
+
+def load_deployment_tracking() -> Dict[str, Any]:
+    """Load deployment tracking settings from sites.json."""
+    config = load_sites_config()
+    return config.get("deployment_tracking", {})
+
+
+def get_configured_site_names() -> Set[str]:
+    """Get the set of site names defined in sites.json (lowercase for matching)."""
+    config = load_sites_config()
+    sites = config.get("sites", [])
+    names = set()
+    for site in sites:
+        display_name = site.get("display_name", site.get("name", ""))
+        if display_name:
+            names.add(display_name.lower())
+    return names
+
+
+def filter_sites_by_config(sites: List[Dict[str, Any]], configured_names: Set[str]) -> List[Dict[str, Any]]:
+    """Filter sites to only those matching names in sites.json."""
+    matching = []
+    for site in sites:
+        site_name = site.get("displayName", site.get("name", "")).lower()
+        if site_name in configured_names:
+            matching.append(site)
+    return matching
+
+
+def filter_sites_by_deployment_id(sites: List[Dict[str, Any]], deployment_id: str) -> List[Dict[str, Any]]:
+    """Filter sites to only those with matching deployment ID in description."""
+    import re
+    matching = []
+    for site in sites:
+        description = site.get("description", "") or ""
+        # Check for deployment ID pattern in description
+        if f"Ref: {deployment_id}" in description:
+            matching.append(site)
+    return matching
+
+
+def select_site_scope(sites: List[Dict[str, Any]], access_token: str) -> Tuple[List[Dict[str, Any]], str]:
+    """Present scope selection menu and return filtered sites.
+    
+    Returns:
+        Tuple of (filtered_sites, scope_description)
+    """
+    # Load configuration
+    configured_names = get_configured_site_names()
+    tracking = load_deployment_tracking()
+    deployment_id = tracking.get("deployment_id", "")
+    
+    print()
+    print(f"  {Colors.CYAN}Select which sites to populate with files:{Colors.NC}")
+    print()
+    print(f"    {Colors.WHITE}[1]{Colors.NC} Filter by Deployment ID", end="")
+    if deployment_id:
+        print(f" {Colors.GREEN}(current: {deployment_id}){Colors.NC}")
+    else:
+        print(f" {Colors.DIM}(no ID configured){Colors.NC}")
+    print(f"        {Colors.DIM}Process sites with matching deployment ID in description{Colors.NC}")
+    print()
+    print(f"    {Colors.WHITE}[2]{Colors.NC} Filter by sites.json names", end="")
+    if configured_names:
+        print(f" {Colors.GREEN}({len(configured_names)} sites){Colors.NC}")
+    else:
+        print(f" {Colors.DIM}(no sites configured){Colors.NC}")
+    print(f"        {Colors.DIM}Process only sites defined in sites.json{Colors.NC}")
+    print()
+    print(f"    {Colors.WHITE}[3]{Colors.NC} Process ALL discovered sites {Colors.YELLOW}(use with caution!){Colors.NC}")
+    print(f"        {Colors.DIM}Process all {len(sites)} sites found in tenant{Colors.NC}")
+    print()
+    print(f"    {Colors.WHITE}[Q]{Colors.NC} Cancel")
+    print()
+    
+    scope_choice = input(f"  {Colors.CYAN}Select option (1-3, Q):{Colors.NC} ").strip().lower()
+    
+    if scope_choice == 'q':
+        return [], "cancelled"
+    
+    if scope_choice == '1':
+        # Filter by deployment ID
+        if not deployment_id:
+            print()
+            print(f"  {Colors.YELLOW}No deployment ID configured.{Colors.NC}")
+            print(f"  Enter a deployment ID (format: PRJ-XXXXXX) or press Enter to cancel:")
+            user_id = input(f"  {Colors.CYAN}Deployment ID:{Colors.NC} ").strip().upper()
+            
+            if not user_id:
+                return [], "cancelled"
+            
+            import re
+            if not re.match(r'^PRJ-[A-Z0-9]{3,20}$', user_id):
+                print(f"  {Colors.RED}✗{Colors.NC} Invalid format. Expected PRJ-XXXXX (3-20 alphanumeric characters)")
+                return [], "invalid"
+            
+            deployment_id = user_id
+        
+        # Need to get M365 Groups to check descriptions (sites don't have descriptions)
+        print()
+        print_info(f"Filtering by deployment ID: {deployment_id}")
+        
+        # Get M365 Groups to match by description
+        try:
+            filter_param = urllib.parse.quote("groupTypes/any(c:c eq 'Unified')")
+            url = f"https://graph.microsoft.com/v1.0/groups?$filter={filter_param}&$select=id,displayName,description&$top=200"
+            
+            req = urllib.request.Request(url)
+            req.add_header("Authorization", f"Bearer {access_token}")
+            req.add_header("Content-Type", "application/json")
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                result = json.loads(response.read().decode())
+                groups = result.get('value', [])
+            
+            # Find groups with matching deployment ID
+            matching_group_names = set()
+            for group in groups:
+                description = group.get('description', '') or ''
+                if f"Ref: {deployment_id}" in description:
+                    matching_group_names.add(group.get('displayName', '').lower())
+            
+            if not matching_group_names:
+                print(f"  {Colors.YELLOW}⚠{Colors.NC} No sites found with deployment ID: {deployment_id}")
+                return [], "no_matches"
+            
+            # Filter sites by matching group names
+            filtered = [s for s in sites if s.get("displayName", s.get("name", "")).lower() in matching_group_names]
+            
+            if filtered:
+                print_success(f"Found {len(filtered)} sites matching deployment ID")
+            return filtered, f"deployment ID: {deployment_id}"
+            
+        except Exception as e:
+            print(f"  {Colors.RED}✗{Colors.NC} Failed to get groups: {e}")
+            return [], "error"
+    
+    elif scope_choice == '2':
+        # Filter by sites.json names
+        if not configured_names:
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} No sites found in sites.json")
+            return [], "no_config"
+        
+        print()
+        print_info(f"Filtering by sites.json ({len(configured_names)} sites)...")
+        
+        filtered = filter_sites_by_config(sites, configured_names)
+        
+        if not filtered:
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} No discovered sites match sites.json configuration")
+            print(f"  {Colors.DIM}This could mean the sites haven't been created yet.{Colors.NC}")
+            return [], "no_matches"
+        
+        print_success(f"Found {len(filtered)} sites matching sites.json")
+        return filtered, f"sites.json ({len(filtered)} sites)"
+    
+    elif scope_choice == '3':
+        # Process all sites - confirm first
+        print()
+        print(f"  {Colors.YELLOW}{'─' * 50}{Colors.NC}")
+        print(f"  {Colors.YELLOW}⚠ WARNING: This will populate ALL {len(sites)} sites!{Colors.NC}")
+        print(f"  {Colors.YELLOW}  This includes sites you may not have created.{Colors.NC}")
+        print(f"  {Colors.YELLOW}{'─' * 50}{Colors.NC}")
+        print()
+        confirm = input(f"  {Colors.YELLOW}Type 'YES' to confirm:{Colors.NC} ").strip()
+        
+        if confirm != 'YES':
+            return [], "cancelled"
+        
+        return sites, f"all sites ({len(sites)})"
+    
+    else:
+        print(f"  {Colors.RED}✗{Colors.NC} Invalid option")
+        return [], "invalid"
 
 
 def get_department_file_templates(config_path: Optional[Path] = None, warn_on_error: bool = False) -> Dict[str, Dict]:
@@ -659,12 +843,13 @@ class Colors:
     WHITE = '\033[97m'
     NC = '\033[0m'
     BOLD = '\033[1m'
+    DIM = '\033[2m'
 
     @classmethod
     def disable(cls) -> None:
         """Disable colors for non-terminal output."""
         cls.RED = cls.GREEN = cls.YELLOW = cls.BLUE = ''
-        cls.MAGENTA = cls.CYAN = cls.WHITE = cls.NC = cls.BOLD = ''
+        cls.MAGENTA = cls.CYAN = cls.WHITE = cls.NC = cls.BOLD = cls.DIM = ''
 
 # Disable colors if not a terminal
 if not sys.stdout.isatty():
@@ -2526,7 +2711,7 @@ Examples:
     
     print_success(f"Found {len(sites)} SharePoint sites")
     
-    # Filter sites if specified
+    # Filter sites if specified via command line
     if args.site:
         filter_term = args.site.lower()
         sites = [s for s in sites if filter_term in s.get("name", "").lower()
@@ -2548,8 +2733,30 @@ Examples:
         print()
         sys.exit(0)
     
-    # Step 5: Discover Azure AD Users & Groups
-    print_step(5, "Discover Azure AD Users & Groups")
+    # Step 5: Select Site Scope (only in interactive mode without --site filter)
+    if not args.site:
+        print_step(5, "Select Site Scope")
+        
+        print()
+        print(f"  {Colors.WHITE}To ensure files are only populated in sites you created,{Colors.NC}")
+        print(f"  {Colors.WHITE}select how to filter the discovered sites:{Colors.NC}")
+        
+        sites, scope_desc = select_site_scope(sites, access_token)
+        
+        if not sites:
+            if scope_desc == "cancelled":
+                print_warning("Operation cancelled.")
+            elif scope_desc == "no_matches":
+                print_warning("No matching sites found.")
+            elif scope_desc == "invalid":
+                print_error("Invalid selection.")
+            sys.exit(0)
+        
+        print()
+        print_success(f"Selected {len(sites)} sites ({scope_desc})")
+    
+    # Step 6: Discover Azure AD Users & Groups
+    print_step(6, "Discover Azure AD Users & Groups")
     
     print_info("Discovering Azure AD users and groups for realistic file naming...")
     users = discover_azure_ad_users(access_token)
@@ -2565,8 +2772,8 @@ Examples:
     else:
         print_warning("No Azure AD groups found (Group.Read.All permission may be missing)")
     
-    # Step 6: Select Population Mode
-    print_step(6, "Select File Population Mode")
+    # Step 7: Select Population Mode
+    print_step(7, "Select File Population Mode")
     
     population_mode = select_population_mode(users, groups)
     if population_mode == "quit":
@@ -2575,8 +2782,8 @@ Examples:
     
     print_success(f"Selected mode: {population_mode.replace('_', ' ').title()}")
     
-    # Step 7: Get file count
-    print_step(7, "Configure File Generation")
+    # Step 8: Get file count
+    print_step(8, "Configure File Generation")
     
     num_files = args.files
     if num_files <= 0:
@@ -2605,8 +2812,8 @@ Examples:
     
     print_success(f"Will create {num_files} files across {len(sites)} sites")
     
-    # Step 8: Confirm
-    print_step(8, "Confirm File Generation")
+    # Step 9: Confirm
+    print_step(9, "Confirm File Generation")
     
     # Map mode to friendly display name
     mode_names = {
@@ -2641,8 +2848,8 @@ Examples:
         print_warning("Operation cancelled")
         sys.exit(0)
     
-    # Step 9: Generate files
-    print_step(9, "Generate and Upload Files")
+    # Step 10: Generate files
+    print_step(10, "Generate and Upload Files")
     
     print()
     # Reset metadata counters before starting
@@ -2681,8 +2888,8 @@ Examples:
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()
     
-    # Step 10: Summary
-    print_step(10, "Summary")
+    # Step 11: Summary
+    print_step(11, "Summary")
     
     print()
     print(f"  {Colors.WHITE}File Generation Complete!{Colors.NC}")

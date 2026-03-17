@@ -809,6 +809,23 @@ def get_excluded_domains(config: Dict[str, Any]) -> List[str]:
     return [domain.lower() for domain in domains if domain]
 
 
+def get_allowed_domains(config: Dict[str, Any]) -> List[str]:
+    """
+    Get list of allowed domains (whitelist).
+    
+    If set, ONLY users from these domains will be used.
+    Takes precedence over blacklist (excluded domains/addresses/patterns).
+    
+    Args:
+        config: Full mailbox configuration.
+        
+    Returns:
+        List of allowed domains (lowercase). Empty list means no whitelist.
+    """
+    domains = get_exclusions_config(config).get("allowed_domains", [])
+    return [domain.lower() for domain in domains if domain]
+
+
 def get_exclusion_patterns(config: Dict[str, Any]) -> List[str]:
     """
     Get list of exclusion patterns.
@@ -853,6 +870,12 @@ def is_email_excluded(email: str, config: Dict[str, Any]) -> Tuple[bool, Optiona
     """
     Check if an email address should be excluded.
     
+    Uses a two-tier approach:
+    1. WHITELIST (allowed_domains): If set, ONLY users from these domains are allowed
+    2. BLACKLIST (email_addresses, domains, patterns): Exclude specific users/domains
+    
+    Whitelist takes precedence - if allowed_domains is set, blacklist is ignored.
+    
     Args:
         email: Email address to check.
         config: Full mailbox configuration.
@@ -865,6 +888,25 @@ def is_email_excluded(email: str, config: Dict[str, Any]) -> Tuple[bool, Optiona
     
     email_lower = email.lower()
     
+    # Extract domain from email
+    user_domain = ""
+    if "@" in email_lower:
+        user_domain = email_lower.split("@")[1]
+    
+    # WHITELIST CHECK: If allowed_domains is set, ONLY allow users from those domains
+    allowed_domains = get_allowed_domains(config)
+    if allowed_domains:
+        if not user_domain:
+            return True, f"email '{email}' has no domain (allowed_domains whitelist is active)"
+        
+        if user_domain not in allowed_domains:
+            return True, f"domain '{user_domain}' is not in allowed_domains whitelist"
+        
+        # User is in allowed domain - skip blacklist checks
+        return False, None
+    
+    # BLACKLIST CHECKS (only if whitelist is not active)
+    
     # Check exact email address match
     excluded_addresses = get_excluded_email_addresses(config)
     if email_lower in excluded_addresses:
@@ -872,10 +914,8 @@ def is_email_excluded(email: str, config: Dict[str, Any]) -> Tuple[bool, Optiona
     
     # Check domain match
     excluded_domains = get_excluded_domains(config)
-    if "@" in email_lower:
-        domain = email_lower.split("@")[1]
-        if domain in excluded_domains:
-            return True, f"domain '{domain}' is in exclusion list"
+    if user_domain and user_domain in excluded_domains:
+        return True, f"domain '{user_domain}' is in exclusion list"
     
     # Check pattern match
     exclusion_patterns = get_exclusion_patterns(config)
