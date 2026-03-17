@@ -232,6 +232,12 @@ def is_user_excluded(upn: str, exclusions: Dict[str, Any]) -> Tuple[bool, Option
     """
     Check if a user should be excluded from owner/member assignment.
     
+    Uses a two-tier approach:
+    1. WHITELIST (allowed_domains): If set, ONLY users from these domains are allowed
+    2. BLACKLIST (email_addresses, domains, patterns): Exclude specific users/domains
+    
+    Whitelist takes precedence - if allowed_domains is set, blacklist is ignored.
+    
     Args:
         upn: User Principal Name (email) to check.
         exclusions: Exclusions configuration dictionary.
@@ -243,6 +249,26 @@ def is_user_excluded(upn: str, exclusions: Dict[str, Any]) -> Tuple[bool, Option
         return False, None
     
     upn_lower = upn.lower()
+    user_domain = ""
+    if "@" in upn_lower:
+        user_domain = upn_lower.split("@")[1]
+    
+    # WHITELIST CHECK: If allowed_domains is set, ONLY allow users from those domains
+    allowed_domains = exclusions.get("allowed_domains", [])
+    if allowed_domains:
+        # Filter out empty strings
+        allowed_domains = [d.lower() for d in allowed_domains if d]
+        if allowed_domains:
+            if not user_domain:
+                return True, f"email '{upn}' has no domain (allowed_domains whitelist is active)"
+            
+            if user_domain not in allowed_domains:
+                return True, f"domain '{user_domain}' is not in allowed_domains whitelist"
+            
+            # User is in allowed domain - they're allowed (skip blacklist checks)
+            return False, None
+    
+    # BLACKLIST CHECKS (only if whitelist is not active)
     
     # Check exact email address match
     email_addresses = exclusions.get("email_addresses", [])
@@ -252,8 +278,7 @@ def is_user_excluded(upn: str, exclusions: Dict[str, Any]) -> Tuple[bool, Option
     
     # Check domain match
     domains = exclusions.get("domains", [])
-    if "@" in upn_lower:
-        user_domain = upn_lower.split("@")[1]
+    if user_domain:
         for domain in domains:
             if domain and user_domain == domain.lower():
                 return True, f"domain '{user_domain}' is in exclusion list"

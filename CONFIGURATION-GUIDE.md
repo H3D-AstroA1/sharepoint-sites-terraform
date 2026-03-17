@@ -285,12 +285,35 @@ You can exclude specific email addresses or domains from being assigned as site 
 
 ### SharePoint Site Exclusions (sites.json)
 
-When using "Azure AD Discovery" for owner/member assignment, you can exclude certain users from being randomly assigned to sites. This is useful for:
-- Preventing your admin account from being assigned to test sites
-- Excluding external/guest domains
-- Keeping specific users out of the random assignment pool
+When using "Azure AD Discovery" for owner/member assignment, you can control which users are assigned to sites using two approaches:
 
-Edit the `exclusions` section in `config/sites.json`:
+1. **Whitelist (allowed_domains)**: ONLY use users from specific domains
+2. **Blacklist (email_addresses, domains, patterns)**: Exclude specific users/domains
+
+**Whitelist takes precedence** - if `allowed_domains` is set, the blacklist is ignored.
+
+#### Whitelist Approach (Recommended)
+
+Use `allowed_domains` to ONLY assign users from specific domains:
+
+```json
+"exclusions": {
+  "enabled": true,
+  "allowed_domains": [
+    "customdomain.com",
+    "company.onmicrosoft.com"
+  ]
+}
+```
+
+This is useful when:
+- You have a custom domain and want to use only those users
+- You want to avoid using the default `.onmicrosoft.com` domain
+- You want precise control over which domains are used
+
+#### Blacklist Approach
+
+Use `email_addresses`, `domains`, and `patterns` to exclude specific users:
 
 ```json
 "exclusions": {
@@ -311,13 +334,21 @@ Edit the `exclusions` section in `config/sites.json`:
 }
 ```
 
-| Field | Description | Example |
-|-------|-------------|---------|
-| `enabled` | Enable/disable exclusions | `true` or `false` |
-| `email_addresses` | Specific emails to exclude | `["admin@contoso.com"]` |
-| `domains` | Domains to exclude (all users) | `["external.com"]` |
-| `patterns` | Wildcard patterns (fnmatch) | `["test-*@*"]` |
-| `log_exclusions` | Show excluded users in output | `true` or `false` |
+This is useful for:
+- Preventing your admin account from being assigned to test sites
+- Excluding external/guest domains
+- Keeping specific users out of the random assignment pool
+
+#### Configuration Reference
+
+| Field | Type | Description | Example |
+|-------|------|-------------|---------|
+| `enabled` | bool | Enable/disable exclusions | `true` or `false` |
+| `allowed_domains` | array | **WHITELIST**: Only use users from these domains | `["customdomain.com"]` |
+| `email_addresses` | array | **BLACKLIST**: Specific emails to exclude | `["admin@contoso.com"]` |
+| `domains` | array | **BLACKLIST**: Domains to exclude (all users) | `["external.com"]` |
+| `patterns` | array | **BLACKLIST**: Wildcard patterns (fnmatch) | `["test-*@*"]` |
+| `log_exclusions` | bool | Show excluded users in output | `true` or `false` |
 
 ### Email Population Exclusions (mailboxes.yaml)
 

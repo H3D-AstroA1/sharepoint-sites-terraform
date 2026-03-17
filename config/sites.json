@@ -214,27 +214,37 @@
   "_exclusions_instructions": [
     "Define email addresses and domains to EXCLUDE from being assigned as site owners or members.",
     "This is useful when you (the admin running the script) don't want to be associated with the created sites.",
-    "Exclusions apply when using 'Random Azure AD' owner assignment mode."
+    "Exclusions apply when using 'Random Azure AD' owner assignment mode.",
+    "",
+    "You can also use 'allowed_domains' to ONLY use users from specific domains (whitelist approach).",
+    "If allowed_domains is set, it takes precedence over excluded domains."
   ],
   
   "exclusions": {
     "enabled": true,
     
-    "_email_addresses_comment": "Specific email addresses to exclude from owner/member assignment",
+    "_allowed_domains_comment": "WHITELIST: Only use users from these domains (takes precedence over exclusions)",
+    "allowed_domains": [],
+    "_allowed_domains_example": [
+      "customdomain.com",
+      "company.onmicrosoft.com"
+    ],
+    
+    "_email_addresses_comment": "BLACKLIST: Specific email addresses to exclude from owner/member assignment",
     "email_addresses": [],
     "_email_addresses_example": [
       "admin@yourtenant.onmicrosoft.com",
       "your-email@company.com"
     ],
     
-    "_domains_comment": "Domains to exclude - all users from these domains will be excluded",
+    "_domains_comment": "BLACKLIST: Domains to exclude - all users from these domains will be excluded",
     "domains": [],
     "_domains_example": [
       "external-admin.com",
       "your-company.com"
     ],
     
-    "_patterns_comment": "Wildcard patterns to exclude (supports * for any characters)",
+    "_patterns_comment": "BLACKLIST: Wildcard patterns to exclude (supports * for any characters)",
     "patterns": [],
     "_patterns_example": [
       "admin*@*",
