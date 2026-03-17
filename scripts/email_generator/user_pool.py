@@ -3,6 +3,7 @@ User Pool Module for M365 Email Population.
 
 This module manages pools of users and groups for email generation,
 supporting both YAML-configured users and Azure AD discovered users.
+Includes support for exclusion filtering.
 """
 
 import random
@@ -16,6 +17,11 @@ from .azure_ad_discovery import (
     DiscoveryCache,
     UserCategory,
     RecipientType,
+)
+from .config import (
+    is_exclusions_enabled,
+    is_email_excluded,
+    should_log_exclusions,
 )
 from .utils import print_info, print_warning
 
@@ -180,20 +186,45 @@ class UserPool:
         for user in azure_users:
             user_map[user.email.lower()] = user
         
-        # Categorize users
+        # Track exclusion statistics
+        excluded_count = 0
+        should_log = should_log_exclusions(self.config)
+        
+        # Categorize users (with exclusion filtering)
         for user in user_map.values():
+            # Check if user should be excluded
+            is_excluded, reason = is_email_excluded(user.email, self.config)
+            
+            if is_excluded:
+                excluded_count += 1
+                if should_log:
+                    print_warning(f"Excluding {user.email}: {reason}")
+                continue
+            
             self._all_users.append(user)
             if user.has_mailbox:
                 self._mailbox_users.append(user)
             else:
                 self._non_mailbox_users.append(user)
         
-        # Add groups
-        self._groups = azure_groups
+        # Add groups (also filter excluded domains)
+        for group in azure_groups:
+            is_excluded, reason = is_email_excluded(group.email, self.config)
+            if not is_excluded:
+                self._groups.append(group)
+            elif should_log:
+                print_warning(f"Excluding group {group.email}: {reason}")
         
-        print_info(f"User pool initialized: {len(self._mailbox_users)} mailbox users, "
-                   f"{len(self._non_mailbox_users)} non-mailbox users, "
-                   f"{len(self._groups)} groups")
+        # Log summary
+        if excluded_count > 0:
+            print_info(f"User pool initialized: {len(self._mailbox_users)} mailbox users, "
+                       f"{len(self._non_mailbox_users)} non-mailbox users, "
+                       f"{len(self._groups)} groups "
+                       f"({excluded_count} excluded)")
+        else:
+            print_info(f"User pool initialized: {len(self._mailbox_users)} mailbox users, "
+                       f"{len(self._non_mailbox_users)} non-mailbox users, "
+                       f"{len(self._groups)} groups")
     
     def _load_yaml_users(self) -> List[EmailRecipient]:
         """Load users from YAML configuration."""

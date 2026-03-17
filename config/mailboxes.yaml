@@ -500,3 +500,52 @@ folder_distribution:
       inbox: 80
       sentitems: 15
       drafts: 5
+
+# =============================================================================
+# Exclusions Configuration
+# =============================================================================
+# Define email addresses and domains to exclude from email population.
+# Excluded addresses will NOT receive any populated emails.
+# Excluded domains will exclude ALL users from that domain.
+# =============================================================================
+
+exclusions:
+  # Enable exclusions (default: true)
+  enabled: true
+  
+  # Specific email addresses to exclude
+  # These mailboxes will NOT receive any populated emails
+  email_addresses: []
+  # Example:
+  # email_addresses:
+  #   - admin@yourtenant.onmicrosoft.com
+  #   - service-account@yourtenant.onmicrosoft.com
+  #   - noreply@yourtenant.onmicrosoft.com
+  #   - shared-mailbox@yourtenant.onmicrosoft.com
+  
+  # Domains to exclude (all users from these domains will be excluded)
+  # Useful for excluding external/guest domains or specific tenant domains
+  domains: []
+  # Example:
+  # domains:
+  #   - external-partner.com
+  #   - contractor-domain.com
+  #   - guest.onmicrosoft.com
+  
+  # Patterns to exclude (supports wildcards: * for any characters)
+  # Useful for excluding service accounts, shared mailboxes, etc.
+  patterns: []
+  # Example:
+  # patterns:
+  #   - "service-*"           # Exclude all service accounts
+  #   - "*-noreply@*"         # Exclude all noreply addresses
+  #   - "shared-*@*"          # Exclude all shared mailboxes
+  #   - "*admin*@*"           # Exclude any address containing 'admin'
+  
+  # Exclude users without mailboxes (default: true)
+  # When true, users discovered from Azure AD without mailboxes are excluded
+  exclude_no_mailbox: true
+  
+  # Log excluded addresses (default: true)
+  # When true, excluded addresses are logged for visibility
+  log_exclusions: true

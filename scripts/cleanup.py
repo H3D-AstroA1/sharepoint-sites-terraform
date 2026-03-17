@@ -64,6 +64,7 @@ CONFIG_DIR = PROJECT_DIR / "config"
 TERRAFORM_DIR = PROJECT_DIR / "terraform"
 TERRAFORM_TFVARS_FILE = TERRAFORM_DIR / "terraform.tfvars"
 ENVIRONMENTS_FILE = CONFIG_DIR / "environments.json"
+SITES_CONFIG_FILE = CONFIG_DIR / "sites.json"
 # App config file path (same as menu.py - in scripts folder as hidden file)
 APP_CONFIG_FILE = SCRIPT_DIR / ".app_config.json"
 
@@ -158,6 +159,156 @@ def categorize_sites(sites: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]],
             deletable.append(site)
     
     return deletable, system
+
+# ============================================================================
+# DEPLOYMENT TRACKING
+# ============================================================================
+
+def load_deployment_tracking() -> Dict[str, Any]:
+    """Load deployment tracking settings from sites.json.
+    
+    Returns:
+        Dictionary with deployment tracking settings, or empty dict if not configured.
+    """
+    if not SITES_CONFIG_FILE.exists():
+        return {}
+    
+    try:
+        with open(SITES_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        return config.get("deployment_tracking", {})
+    except (json.JSONDecodeError, IOError):
+        return {}
+
+
+def get_deployment_id_from_config() -> str:
+    """Get the current deployment ID from sites.json.
+    
+    Returns:
+        The deployment ID string, or empty string if not set.
+    """
+    tracking = load_deployment_tracking()
+    return tracking.get("deployment_id", "")
+
+
+def extract_deployment_id_from_description(description: str) -> Optional[str]:
+    """Extract deployment ID from a site description.
+    
+    Looks for patterns like "| Ref: PRJ-XXXXXX" at the end of descriptions.
+    
+    Args:
+        description: The site description to parse
+        
+    Returns:
+        The deployment ID if found, None otherwise.
+    """
+    if not description:
+        return None
+    
+    # Match pattern like "| Ref: PRJ-XXXXXX" at end of description
+    # The format is configurable but defaults to " | Ref: {id}"
+    match = re.search(r'\|\s*Ref:\s*(PRJ-[A-Z0-9]{6})\s*$', description)
+    if match:
+        return match.group(1)
+    
+    return None
+
+
+def site_matches_deployment_id(site: Dict[str, Any], deployment_id: str) -> bool:
+    """Check if a site's description contains the specified deployment ID.
+    
+    Args:
+        site: Site dictionary with description field
+        deployment_id: The deployment ID to match
+        
+    Returns:
+        True if the site's description contains the deployment ID.
+    """
+    if not deployment_id:
+        return False
+    
+    description = site.get("description", "")
+    extracted_id = extract_deployment_id_from_description(description)
+    return extracted_id == deployment_id
+
+
+def filter_sites_by_deployment_id(sites: List[Dict[str, Any]], deployment_id: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Filter sites to only those matching the deployment ID.
+    
+    Args:
+        sites: List of sites to filter
+        deployment_id: The deployment ID to match
+        
+    Returns:
+        Tuple of (matching_sites, non_matching_sites)
+    """
+    matching = []
+    non_matching = []
+    
+    for site in sites:
+        if site_matches_deployment_id(site, deployment_id):
+            matching.append(site)
+        else:
+            non_matching.append(site)
+    
+    return matching, non_matching
+
+
+def prompt_for_deployment_id() -> Optional[str]:
+    """Prompt user to enter a deployment ID for filtering.
+    
+    Returns:
+        The deployment ID entered, or None if user cancels.
+    """
+    # First check if there's a configured deployment ID
+    config_id = get_deployment_id_from_config()
+    
+    print()
+    print(f"  {Colors.CYAN}Deployment ID Filtering{Colors.NC}")
+    print(f"  {Colors.DIM}Only sites created by this tool will be affected.{Colors.NC}")
+    print()
+    
+    if config_id:
+        print(f"  Current deployment ID from config: {Colors.GREEN}{config_id}{Colors.NC}")
+        print()
+        print("  Options:")
+        print(f"    {Colors.WHITE}[1]{Colors.NC} Use current deployment ID ({config_id})")
+        print(f"    {Colors.WHITE}[2]{Colors.NC} Enter a different deployment ID")
+        print(f"    {Colors.WHITE}[3]{Colors.NC} Skip filtering (process ALL sites)")
+        print(f"    {Colors.WHITE}[Q]{Colors.NC} Cancel")
+        print()
+        
+        choice = input(f"  {Colors.CYAN}Select option:{Colors.NC} ").strip().lower()
+        
+        if choice == '1':
+            return config_id
+        elif choice == '2':
+            pass  # Fall through to manual entry
+        elif choice == '3':
+            return None  # No filtering
+        elif choice == 'q':
+            return ""  # Empty string signals cancel
+        else:
+            print_warning("Invalid choice, using current deployment ID")
+            return config_id
+    
+    # Manual entry
+    print(f"  Enter the deployment ID (format: PRJ-XXXXXX)")
+    print(f"  {Colors.DIM}Leave blank to skip filtering, or 'Q' to cancel{Colors.NC}")
+    print()
+    
+    user_input = input(f"  {Colors.CYAN}Deployment ID:{Colors.NC} ").strip().upper()
+    
+    if user_input.lower() == 'q':
+        return ""  # Cancel
+    elif not user_input:
+        return None  # No filtering
+    elif re.match(r'^PRJ-[A-Z0-9]{6}$', user_input):
+        return user_input
+    else:
+        print_warning(f"Invalid format '{user_input}'. Expected PRJ-XXXXXX")
+        return ""  # Cancel
+
 
 # ============================================================================
 # CONSOLE OUTPUT HELPERS
@@ -4172,6 +4323,42 @@ def delete_sites_mode(
         print()
         print_warning("No deletable sites found. All selected sites are protected system sites.")
         return
+    
+    # Check if deployment tracking is enabled and prompt for filtering
+    tracking = load_deployment_tracking()
+    if tracking.get("enabled", False) and not auto_confirm:
+        deployment_id = prompt_for_deployment_id()
+        
+        if deployment_id == "":  # User cancelled
+            print_warning("Operation cancelled.")
+            return
+        
+        if deployment_id:  # User provided a deployment ID to filter by
+            matching_sites, non_matching_sites = filter_sites_by_deployment_id(deletable_sites, deployment_id)
+            
+            if non_matching_sites:
+                print()
+                print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+                print(f"  {Colors.CYAN}ℹ The following sites do NOT match deployment ID {deployment_id}:{Colors.NC}")
+                print(f"  {Colors.DIM}  (These will be SKIPPED){Colors.NC}")
+                print()
+                for site in non_matching_sites:
+                    site_name = site.get("displayName", site.get("name", "Unknown"))
+                    desc = site.get("description", "")[:40]
+                    print(f"    {Colors.DIM}⊘ {site_name}{Colors.NC}")
+                    if desc:
+                        print(f"      {Colors.DIM}Description: {desc}...{Colors.NC}")
+                print()
+                print(f"  {Colors.CYAN}{'─' * 60}{Colors.NC}")
+            
+            if not matching_sites:
+                print()
+                print_warning(f"No sites found matching deployment ID: {deployment_id}")
+                return
+            
+            deletable_sites = matching_sites
+            print()
+            print_info(f"Filtered to {len(deletable_sites)} site(s) matching deployment ID: {deployment_id}")
     
     print()
     print_danger(f"This will permanently delete the following {len(deletable_sites)} site(s):")

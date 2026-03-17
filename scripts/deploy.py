@@ -20,6 +20,7 @@ Requirements:
 """
 
 import argparse
+import fnmatch
 import json
 import os
 import platform
@@ -29,10 +30,11 @@ import subprocess
 import sys
 import urllib.request
 import urllib.parse
+import urllib.error
 import zipfile
 import shutil
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Set
+from typing import Dict, List, Tuple, Optional, Set, Any
 
 # ============================================================================
 # CONFIGURATION
@@ -198,6 +200,231 @@ ADHOC_SITES = [
     {"name": "meeting-room-tips", "display_name": "Meeting Room Tips", "description": "Meeting room booking tips and AV guides", "visibility": "Public", "template": "STS#3"},
     {"name": "new-hire-buddies", "display_name": "New Hire Buddies", "description": "Buddy program for new employees", "visibility": "Public", "template": "STS#3"},
 ]
+
+# ============================================================================
+# OWNER/MEMBER EXCLUSION HELPERS
+# ============================================================================
+
+def load_sites_exclusions() -> Dict[str, Any]:
+    """
+    Load exclusions configuration from sites.json.
+    
+    Returns:
+        Dictionary with exclusion settings, or empty dict if not configured.
+    """
+    try:
+        if not DEFAULT_CONFIG_FILE.exists():
+            return {}
+        
+        with open(DEFAULT_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        
+        exclusions = config.get("exclusions", {})
+        if not exclusions.get("enabled", True):
+            return {}
+        
+        return exclusions
+    except Exception:
+        return {}
+
+
+def is_user_excluded(upn: str, exclusions: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """
+    Check if a user should be excluded from owner/member assignment.
+    
+    Args:
+        upn: User Principal Name (email) to check.
+        exclusions: Exclusions configuration dictionary.
+        
+    Returns:
+        Tuple of (is_excluded, reason). Reason is None if not excluded.
+    """
+    if not exclusions or not exclusions.get("enabled", True):
+        return False, None
+    
+    upn_lower = upn.lower()
+    
+    # Check exact email address match
+    email_addresses = exclusions.get("email_addresses", [])
+    for addr in email_addresses:
+        if addr and upn_lower == addr.lower():
+            return True, f"email '{upn}' is in exclusion list"
+    
+    # Check domain match
+    domains = exclusions.get("domains", [])
+    if "@" in upn_lower:
+        user_domain = upn_lower.split("@")[1]
+        for domain in domains:
+            if domain and user_domain == domain.lower():
+                return True, f"domain '{user_domain}' is in exclusion list"
+    
+    # Check pattern match
+    patterns = exclusions.get("patterns", [])
+    for pattern in patterns:
+        if pattern and fnmatch.fnmatch(upn_lower, pattern.lower()):
+            return True, f"email '{upn}' matches exclusion pattern '{pattern}'"
+    
+    return False, None
+
+
+def filter_excluded_users(
+    users: List[Dict],
+    exclusions: Dict[str, Any],
+    log_exclusions: bool = True
+) -> Tuple[List[Dict], int]:
+    """
+    Filter out excluded users from a list.
+    
+    Args:
+        users: List of user dictionaries with 'upn' field.
+        exclusions: Exclusions configuration dictionary.
+        log_exclusions: Whether to log excluded users.
+        
+    Returns:
+        Tuple of (filtered_users, excluded_count).
+    """
+    if not exclusions or not exclusions.get("enabled", True):
+        return users, 0
+    
+    should_log = log_exclusions and exclusions.get("log_exclusions", True)
+    filtered = []
+    excluded_count = 0
+    
+    for user in users:
+        upn = user.get("upn", "")
+        if not upn:
+            continue
+        
+        is_excluded, reason = is_user_excluded(upn, exclusions)
+        
+        if is_excluded:
+            excluded_count += 1
+            if should_log:
+                print(f"  {Colors.DIM}Excluding {upn}: {reason}{Colors.NC}")
+        else:
+            filtered.append(user)
+    
+    return filtered, excluded_count
+
+
+# ============================================================================
+# DEPLOYMENT TRACKING FUNCTIONS
+# ============================================================================
+
+def generate_deployment_id() -> str:
+    """Generate a random deployment ID that looks like an internal reference code.
+    
+    Format: PRJ-XXXXXX where X is alphanumeric (uppercase letters and digits)
+    Examples: PRJ-7X9K2M, PRJ-A3F8B2, PRJ-9D4H7N
+    
+    Returns:
+        A unique deployment ID string
+    """
+    import secrets
+    import string
+    
+    # Use uppercase letters and digits for a professional look
+    chars = string.ascii_uppercase + string.digits
+    # Generate 6 random characters
+    random_part = ''.join(secrets.choice(chars) for _ in range(6))
+    return f"PRJ-{random_part}"
+
+
+def load_deployment_tracking() -> Dict[str, Any]:
+    """Load deployment tracking settings from sites.json.
+    
+    Returns:
+        Dictionary with deployment tracking settings
+    """
+    default_tracking = {
+        "enabled": True,
+        "deployment_id": "",
+        "append_to_description": True,
+        "description_format": " | Ref: {id}"
+    }
+    
+    try:
+        if DEFAULT_CONFIG_FILE.exists():
+            with open(DEFAULT_CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+            tracking = config.get("deployment_tracking", {})
+            # Merge with defaults
+            for key, value in default_tracking.items():
+                if key not in tracking:
+                    tracking[key] = value
+            return tracking
+    except Exception:
+        pass
+    
+    return default_tracking
+
+
+def get_or_create_deployment_id() -> str:
+    """Get the deployment ID from config, or generate and save a new one.
+    
+    Returns:
+        The deployment ID string
+    """
+    tracking = load_deployment_tracking()
+    
+    if not tracking.get("enabled", True):
+        return ""
+    
+    deployment_id = tracking.get("deployment_id", "").strip()
+    
+    if not deployment_id:
+        # Generate a new deployment ID
+        deployment_id = generate_deployment_id()
+        
+        # Save it back to sites.json
+        try:
+            if DEFAULT_CONFIG_FILE.exists():
+                with open(DEFAULT_CONFIG_FILE, 'r') as f:
+                    config = json.load(f)
+                
+                if "deployment_tracking" not in config:
+                    config["deployment_tracking"] = {}
+                
+                config["deployment_tracking"]["deployment_id"] = deployment_id
+                
+                with open(DEFAULT_CONFIG_FILE, 'w') as f:
+                    json.dump(config, f, indent=2)
+                
+                print_info(f"Generated new deployment ID: {deployment_id}")
+        except Exception as e:
+            print_warning(f"Could not save deployment ID to config: {e}")
+    
+    return deployment_id
+
+
+def append_deployment_id_to_description(description: str, deployment_id: str) -> str:
+    """Append the deployment ID to a site description.
+    
+    Args:
+        description: The original site description
+        deployment_id: The deployment ID to append
+    
+    Returns:
+        The description with deployment ID appended
+    """
+    if not deployment_id:
+        return description
+    
+    tracking = load_deployment_tracking()
+    
+    if not tracking.get("enabled", True) or not tracking.get("append_to_description", True):
+        return description
+    
+    # Check if the deployment ID is already in the description
+    if deployment_id in description:
+        return description
+    
+    # Get the format string
+    format_str = tracking.get("description_format", " | Ref: {id}")
+    suffix = format_str.replace("{id}", deployment_id)
+    
+    return description + suffix
+
 
 # ============================================================================
 # CONSOLE OUTPUT HELPERS
@@ -938,7 +1165,9 @@ def discover_azure_ad_users(access_token: str, max_users: int = 100) -> List[Dic
     
     try:
         # Get users, filtering for member users (not guests)
-        url = f"https://graph.microsoft.com/v1.0/users?$filter=userType eq 'Member'&$select=id,userPrincipalName,displayName,department,jobTitle&$top={max_users}"
+        # URL-encode the filter parameter to handle spaces
+        filter_param = urllib.parse.quote("userType eq 'Member'")
+        url = f"https://graph.microsoft.com/v1.0/users?$filter={filter_param}&$select=id,userPrincipalName,displayName,department,jobTitle&$top={max_users}"
         
         req = urllib.request.Request(url)
         req.add_header("Authorization", f"Bearer {access_token}")
@@ -1145,13 +1374,29 @@ def select_owner_assignment_mode(sites: List[Dict], admin_email: str) -> List[Di
         users = discover_azure_ad_users(access_token, max_users=100)
         print_success(f"Found {len(users)} users")
         
+        # Apply exclusions from sites.json
+        exclusions = load_sites_exclusions()
+        if exclusions and exclusions.get("enabled", True):
+            excluded_emails = exclusions.get("email_addresses", [])
+            excluded_domains = exclusions.get("domains", [])
+            excluded_patterns = exclusions.get("patterns", [])
+            
+            has_exclusions = excluded_emails or excluded_domains or excluded_patterns
+            if has_exclusions:
+                print()
+                print_info("Applying owner/member exclusions from sites.json...")
+                users, excluded_count = filter_excluded_users(users, exclusions)
+                if excluded_count > 0:
+                    print_success(f"Filtered out {excluded_count} excluded user(s)")
+                    print_info(f"Remaining users for assignment: {len(users)}")
+        
         # Discover groups
         print_info("Querying Azure AD for groups...")
         groups = discover_azure_ad_groups(access_token, max_groups=50)
         print_success(f"Found {len(groups)} groups")
         
         if not users:
-            print_warning("No users found. Falling back to admin-only mode.")
+            print_warning("No users found after exclusions. Falling back to admin-only mode.")
             for site in sites:
                 site['owners'] = [admin_email]
                 site['members'] = []
@@ -1213,14 +1458,25 @@ def select_owner_assignment_mode(sites: List[Dict], admin_email: str) -> List[Di
     return sites
 
 
-def format_terraform_sites_block(sites: List[Dict]) -> str:
-    """Format sites as a Terraform HCL block."""
+def format_terraform_sites_block(sites: List[Dict], deployment_id: str = "") -> str:
+    """Format sites as a Terraform HCL block.
+    
+    Args:
+        sites: List of site configurations
+        deployment_id: Optional deployment ID to append to descriptions for tracking
+    """
     lines = ["sharepoint_sites = {"]
     
     for site in sites:
         lines.append(f'  "{site["name"]}" = {{')
         lines.append(f'    display_name = "{site.get("display_name", site["name"])}"')
-        lines.append(f'    description  = "{site.get("description", "")}"')
+        
+        # Get description and optionally append deployment_id for tracking
+        description = site.get("description", "")
+        if deployment_id:
+            description = append_deployment_id_to_description(description, deployment_id)
+        lines.append(f'    description  = "{description}"')
+        
         lines.append(f'    template     = "{site.get("template", "STS#3")}"')
         lines.append(f'    visibility   = "{site.get("visibility", "Private")}"')
         
@@ -1611,6 +1867,294 @@ def terraform_output() -> None:
         subprocess.run(['terraform', 'output', 'deployment_summary'], cwd=TERRAFORM_DIR, check=False, env=get_terraform_env())
     except Exception:
         pass
+
+
+# ============================================================================
+# POST-DEPLOYMENT CLEANUP FUNCTIONS
+# ============================================================================
+
+def get_m365_group_id_by_name(group_name: str, access_token: str) -> Optional[str]:
+    """Get the M365 Group ID by display name.
+    
+    Args:
+        group_name: The display name of the group (site name)
+        access_token: Microsoft Graph access token
+    
+    Returns:
+        The group ID if found, None otherwise
+    """
+    try:
+        # URL-encode the group name for the filter
+        filter_value = urllib.parse.quote(f"displayName eq '{group_name}'")
+        url = f"https://graph.microsoft.com/v1.0/groups?$filter={filter_value}&$select=id,displayName"
+        
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {access_token}")
+        req.add_header("Content-Type", "application/json")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode())
+            groups = result.get('value', [])
+            if groups:
+                return groups[0].get('id')
+    except Exception as e:
+        print_warning(f"Could not find group '{group_name}': {e}")
+    
+    return None
+
+
+def get_user_id_by_upn(upn: str, access_token: str) -> Optional[str]:
+    """Get the Azure AD user ID by UPN.
+    
+    Args:
+        upn: User Principal Name (email)
+        access_token: Microsoft Graph access token
+    
+    Returns:
+        The user ID if found, None otherwise
+    """
+    try:
+        # URL-encode the UPN
+        encoded_upn = urllib.parse.quote(upn)
+        url = f"https://graph.microsoft.com/v1.0/users/{encoded_upn}?$select=id"
+        
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {access_token}")
+        req.add_header("Content-Type", "application/json")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode())
+            return result.get('id')
+    except Exception as e:
+        # User not found is expected for some cases
+        pass
+    
+    return None
+
+
+def remove_user_from_group_owners(group_id: str, user_id: str, access_token: str) -> bool:
+    """Remove a user from a group's owners.
+    
+    Args:
+        group_id: The M365 Group ID
+        user_id: The Azure AD user ID
+        access_token: Microsoft Graph access token
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        url = f"https://graph.microsoft.com/v1.0/groups/{group_id}/owners/{user_id}/$ref"
+        
+        req = urllib.request.Request(url, method='DELETE')
+        req.add_header("Authorization", f"Bearer {access_token}")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            return True
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            # User is not an owner - that's fine
+            return True
+        elif e.code == 400:
+            # Cannot remove last owner - expected
+            return False
+    except Exception:
+        pass
+    
+    return False
+
+
+def remove_user_from_group_members(group_id: str, user_id: str, access_token: str) -> bool:
+    """Remove a user from a group's members.
+    
+    Args:
+        group_id: The M365 Group ID
+        user_id: The Azure AD user ID
+        access_token: Microsoft Graph access token
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        url = f"https://graph.microsoft.com/v1.0/groups/{group_id}/members/{user_id}/$ref"
+        
+        req = urllib.request.Request(url, method='DELETE')
+        req.add_header("Authorization", f"Bearer {access_token}")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            return True
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            # User is not a member - that's fine
+            return True
+    except Exception:
+        pass
+    
+    return False
+
+
+def remove_excluded_users_from_sites(sites: List[Dict], m365_tenant: str) -> Tuple[int, int]:
+    """Remove excluded users from M365 Groups after site creation.
+    
+    This function removes users that match the exclusion criteria from the
+    M365 Groups that back SharePoint sites. This is necessary because M365
+    automatically adds the creator as an owner.
+    
+    Args:
+        sites: List of site dictionaries
+        m365_tenant: The M365 tenant name
+    
+    Returns:
+        Tuple of (groups_processed, users_removed)
+    """
+    # Load exclusions
+    exclusions = load_sites_exclusions()
+    if not exclusions or not exclusions.get("enabled", True):
+        return (0, 0)
+    
+    excluded_emails = [e.lower() for e in exclusions.get("email_addresses", [])]
+    excluded_domains = [d.lower() for d in exclusions.get("domains", [])]
+    excluded_patterns = exclusions.get("patterns", [])
+    
+    if not excluded_emails and not excluded_domains and not excluded_patterns:
+        return (0, 0)
+    
+    # Get access token
+    access_token = get_graph_access_token()
+    if not access_token:
+        print_warning("Could not get access token for post-deployment cleanup")
+        return (0, 0)
+    
+    groups_processed = 0
+    users_removed = 0
+    
+    print()
+    print_info("Removing excluded users from site ownership...")
+    
+    for site in sites:
+        site_name = site.get('display_name', site.get('name', ''))
+        if not site_name:
+            continue
+        
+        # Get the M365 Group ID
+        group_id = get_m365_group_id_by_name(site_name, access_token)
+        if not group_id:
+            continue
+        
+        groups_processed += 1
+        
+        # Check each excluded email/domain/pattern
+        users_to_check = []
+        
+        # Add specific email addresses
+        users_to_check.extend(excluded_emails)
+        
+        # For domains, we need to find users with that domain
+        # We'll check the current user (admin) specifically
+        app_config = load_app_config()
+        if app_config:
+            # Try to get the current user's email from the token or config
+            pass
+        
+        # Try to remove each excluded user
+        for email in users_to_check:
+            user_id = get_user_id_by_upn(email, access_token)
+            if user_id:
+                # Try to remove from owners
+                if remove_user_from_group_owners(group_id, user_id, access_token):
+                    users_removed += 1
+                    print(f"    {Colors.GREEN}✓{Colors.NC} Removed {email} from '{site_name}' owners")
+                
+                # Also remove from members
+                remove_user_from_group_members(group_id, user_id, access_token)
+        
+        # For domain exclusions, we need to get the group's current owners/members
+        # and check if any match the excluded domains
+        if excluded_domains:
+            removed = remove_domain_users_from_group(group_id, excluded_domains, excluded_patterns, access_token, site_name)
+            users_removed += removed
+    
+    return (groups_processed, users_removed)
+
+
+def remove_domain_users_from_group(group_id: str, excluded_domains: List[str], excluded_patterns: List[str], access_token: str, site_name: str) -> int:
+    """Remove users matching excluded domains from a group.
+    
+    Args:
+        group_id: The M365 Group ID
+        excluded_domains: List of domains to exclude
+        excluded_patterns: List of patterns to exclude
+        access_token: Microsoft Graph access token
+        site_name: Site name for logging
+    
+    Returns:
+        Number of users removed
+    """
+    users_removed = 0
+    
+    try:
+        # Get current owners
+        url = f"https://graph.microsoft.com/v1.0/groups/{group_id}/owners?$select=id,userPrincipalName"
+        
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {access_token}")
+        req.add_header("Content-Type", "application/json")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode())
+            owners = result.get('value', [])
+            
+            for owner in owners:
+                upn = owner.get('userPrincipalName', '').lower()
+                user_id = owner.get('id')
+                
+                if not upn or not user_id:
+                    continue
+                
+                # Check if user matches excluded domain
+                should_remove = False
+                for domain in excluded_domains:
+                    if upn.endswith(f"@{domain.lower()}"):
+                        should_remove = True
+                        break
+                
+                # Check patterns
+                if not should_remove:
+                    for pattern in excluded_patterns:
+                        if _matches_pattern(upn, pattern):
+                            should_remove = True
+                            break
+                
+                if should_remove:
+                    # Don't remove if this is the last owner
+                    if len(owners) <= 1:
+                        print(f"    {Colors.YELLOW}⚠{Colors.NC} Cannot remove {upn} - last owner of '{site_name}'")
+                        continue
+                    
+                    if remove_user_from_group_owners(group_id, user_id, access_token):
+                        users_removed += 1
+                        print(f"    {Colors.GREEN}✓{Colors.NC} Removed {upn} from '{site_name}' owners")
+                        # Also remove from members
+                        remove_user_from_group_members(group_id, user_id, access_token)
+    
+    except Exception as e:
+        print_warning(f"Could not process owners for group: {e}")
+    
+    return users_removed
+
+
+def _matches_pattern(email: str, pattern: str) -> bool:
+    """Check if an email matches a wildcard pattern.
+    
+    Args:
+        email: Email address to check
+        pattern: Wildcard pattern (e.g., "test-*@*")
+    
+    Returns:
+        True if the email matches the pattern
+    """
+    import fnmatch
+    return fnmatch.fnmatch(email.lower(), pattern.lower())
 
 
 # ============================================================================
@@ -2160,7 +2704,14 @@ def generate_terraform_config(
     """Generate the terraform.tfvars file."""
     print_step(step_num, "Generating Terraform Configuration")
     
-    sites_block = format_terraform_sites_block(sites)
+    # Get deployment ID for tracking if enabled
+    deployment_id = ""
+    tracking = load_deployment_tracking()
+    if tracking.get("enabled", False) and tracking.get("append_to_description", True):
+        deployment_id = get_or_create_deployment_id()
+        print_info(f"Deployment tracking enabled - ID: {deployment_id}")
+    
+    sites_block = format_terraform_sites_block(sites, deployment_id)
     
     from datetime import datetime
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -2495,6 +3046,25 @@ Examples:
     
     print_success("Terraform apply completed successfully!")
     verified_site_urls = get_verified_sharepoint_site_urls(sites, m365_tenant)
+    
+    # Post-deployment: Remove excluded users from site ownership
+    # M365 automatically adds the creator as owner, so we need to remove them
+    exclusions = load_sites_exclusions()
+    if exclusions and exclusions.get("enabled", True):
+        has_exclusions = (
+            exclusions.get("email_addresses", []) or
+            exclusions.get("domains", []) or
+            exclusions.get("patterns", [])
+        )
+        if has_exclusions:
+            print()
+            print_info("Post-deployment: Checking for excluded users to remove from site ownership...")
+            print_info("(M365 automatically adds the creator as owner - removing if excluded)")
+            groups_processed, users_removed = remove_excluded_users_from_sites(sites, m365_tenant)
+            if users_removed > 0:
+                print_success(f"Removed {users_removed} excluded user(s) from {groups_processed} site(s)")
+            elif groups_processed > 0:
+                print_info("No excluded users found in site ownership")
     
     current_step += 1
     

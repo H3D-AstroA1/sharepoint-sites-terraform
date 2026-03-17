@@ -279,6 +279,127 @@ use_existing_resource_group = true
 
 ---
 
+## 🚫 Exclusions Configuration
+
+You can exclude specific email addresses or domains from being assigned as site owners/members during SharePoint site creation, and from receiving populated emails.
+
+### SharePoint Site Exclusions (sites.json)
+
+When using "Azure AD Discovery" for owner/member assignment, you can exclude certain users from being randomly assigned to sites. This is useful for:
+- Preventing your admin account from being assigned to test sites
+- Excluding external/guest domains
+- Keeping specific users out of the random assignment pool
+
+Edit the `exclusions` section in `config/sites.json`:
+
+```json
+"exclusions": {
+  "enabled": true,
+  "email_addresses": [
+    "admin@yourtenant.onmicrosoft.com",
+    "service-account@yourtenant.onmicrosoft.com"
+  ],
+  "domains": [
+    "external-partner.com",
+    "yourtenant.onmicrosoft.com"
+  ],
+  "patterns": [
+    "test-*@*",
+    "*-noreply@*"
+  ],
+  "log_exclusions": true
+}
+```
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| `enabled` | Enable/disable exclusions | `true` or `false` |
+| `email_addresses` | Specific emails to exclude | `["admin@contoso.com"]` |
+| `domains` | Domains to exclude (all users) | `["external.com"]` |
+| `patterns` | Wildcard patterns (fnmatch) | `["test-*@*"]` |
+| `log_exclusions` | Show excluded users in output | `true` or `false` |
+
+### Email Population Exclusions (mailboxes.yaml)
+
+Similarly, you can exclude addresses from receiving populated emails. Edit the `exclusions` section in `config/mailboxes.yaml`:
+
+```yaml
+exclusions:
+  enabled: true
+  email_addresses:
+    - admin@yourtenant.onmicrosoft.com
+  domains:
+    - yourtenant.onmicrosoft.com
+  patterns:
+    - "test-*@*"
+  exclude_no_mailbox: true
+  log_exclusions: true
+```
+
+| Field | Description |
+|-------|-------------|
+| `enabled` | Enable/disable exclusions |
+| `email_addresses` | Specific emails to exclude |
+| `domains` | Domains to exclude |
+| `patterns` | Wildcard patterns |
+| `exclude_no_mailbox` | Skip users without mailboxes |
+| `log_exclusions` | Show excluded users in output |
+
+---
+
+## 🏷️ Deployment Tracking
+
+Deployment tracking allows you to tag sites created by this tool with a unique identifier, making it easy to identify and clean up only the sites you created without affecting other tenant resources.
+
+### How It Works
+
+When enabled, a unique deployment ID (format: `PRJ-XXXXXX`) is automatically generated and appended to each site's description during deployment. This ID is then used during cleanup to filter sites.
+
+### Configuration (sites.json)
+
+Edit the `deployment_tracking` section in `config/sites.json`:
+
+```json
+"deployment_tracking": {
+  "enabled": true,
+  "deployment_id": "",
+  "append_to_description": true,
+  "description_format": " | Ref: {id}"
+}
+```
+
+### Settings
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `enabled` | Enable/disable deployment tracking | `true` |
+| `deployment_id` | Current deployment ID (auto-generated if empty) | `""` |
+| `append_to_description` | Append ID to site descriptions | `true` |
+| `description_format` | Format string for the ID suffix | `" \| Ref: {id}"` |
+
+### Example
+
+When you deploy sites with tracking enabled:
+
+1. **First deployment**: A new ID like `PRJ-A7X9K2` is generated
+2. **Site descriptions** become: `"Finance team collaboration | Ref: PRJ-A7X9K2"`
+3. **During cleanup**: You can filter to only delete sites with that ID
+
+### Using Deployment IDs During Cleanup
+
+When you run `[3] Delete Files or Sites` from the menu:
+
+1. If tracking is enabled, you'll be prompted to filter by deployment ID
+2. Options:
+   - **Use current ID**: Use the ID from your config
+   - **Enter different ID**: Specify a different deployment's ID
+   - **Skip filtering**: Process all sites (use with caution!)
+   - **Cancel**: Abort the operation
+
+This ensures you only delete sites created by your specific deployment, not other tenant resources.
+
+---
+
 ## 🌐 SharePoint Sites Configuration
 
 ### Default Sites

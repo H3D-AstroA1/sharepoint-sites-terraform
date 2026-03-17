@@ -45,6 +45,10 @@ from email_generator.config import (
     check_yaml_installed,
     is_azure_ad_enabled,
     get_cc_bcc_config,
+    is_exclusions_enabled,
+    is_email_excluded,
+    should_log_exclusions,
+    filter_excluded_users,
 )
 from email_generator.content_generator import EmailContentGenerator
 from email_generator.graph_client import GraphClient
@@ -225,13 +229,30 @@ class EmailPopulator:
         specific: Optional[List[str]] = None,
         department: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Get list of mailboxes to populate based on selection criteria."""
+        """Get list of mailboxes to populate based on selection criteria.
+        
+        Automatically filters out excluded email addresses and domains
+        based on the exclusions configuration in mailboxes.yaml.
+        """
         import random
         
         users = get_all_users(self.config)
         
         if not users:
             return []
+        
+        # Filter out excluded users based on exclusions configuration
+        if is_exclusions_enabled(self.config):
+            included_users, excluded_users = filter_excluded_users(
+                users,
+                self.config,
+                log_func=print_warning if should_log_exclusions(self.config) else None
+            )
+            
+            if excluded_users:
+                print_info(f"Filtered out {len(excluded_users)} excluded mailbox(es)")
+            
+            users = included_users
         
         # Filter by specific mailboxes
         if specific:

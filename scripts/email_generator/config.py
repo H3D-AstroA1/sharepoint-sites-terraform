@@ -6,12 +6,15 @@ Handles loading and validation of:
 - sites.json - SharePoint sites configuration
 - environments.json - Tenant/environment configuration
 - Azure AD auto-discovery settings
+- Exclusions configuration
 """
 
+import fnmatch
 import json
 import os
+import re
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Try to import yaml, provide helpful error if not installed
 try:
@@ -314,6 +317,15 @@ def apply_defaults(config: Dict[str, Any]) -> Dict[str, Any]:
                 "probability": 0.1,
                 "max_recipients": 3,
             },
+        },
+        # Exclusions configuration defaults
+        "exclusions": {
+            "enabled": True,
+            "email_addresses": [],
+            "domains": [],
+            "patterns": [],
+            "exclude_no_mailbox": True,
+            "log_exclusions": True,
         },
     }
     
@@ -737,3 +749,198 @@ def validate_azure_ad_config(config: Dict[str, Any]) -> List[str]:
         warnings.append("cc_bcc.bcc.max_recipients should be at least 1")
     
     return warnings
+
+
+# =============================================================================
+# EXCLUSIONS CONFIGURATION HELPERS
+# =============================================================================
+
+def get_exclusions_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Get exclusions configuration section.
+    
+    Args:
+        config: Full mailbox configuration.
+        
+    Returns:
+        Exclusions configuration dictionary.
+    """
+    return config.get("exclusions", {})
+
+
+def is_exclusions_enabled(config: Dict[str, Any]) -> bool:
+    """
+    Check if exclusions are enabled.
+    
+    Args:
+        config: Full mailbox configuration.
+        
+    Returns:
+        True if exclusions are enabled.
+    """
+    return get_exclusions_config(config).get("enabled", True)
+
+
+def get_excluded_email_addresses(config: Dict[str, Any]) -> List[str]:
+    """
+    Get list of excluded email addresses.
+    
+    Args:
+        config: Full mailbox configuration.
+        
+    Returns:
+        List of email addresses to exclude (lowercase).
+    """
+    addresses = get_exclusions_config(config).get("email_addresses", [])
+    return [addr.lower() for addr in addresses if addr]
+
+
+def get_excluded_domains(config: Dict[str, Any]) -> List[str]:
+    """
+    Get list of excluded domains.
+    
+    Args:
+        config: Full mailbox configuration.
+        
+    Returns:
+        List of domains to exclude (lowercase).
+    """
+    domains = get_exclusions_config(config).get("domains", [])
+    return [domain.lower() for domain in domains if domain]
+
+
+def get_exclusion_patterns(config: Dict[str, Any]) -> List[str]:
+    """
+    Get list of exclusion patterns.
+    
+    Args:
+        config: Full mailbox configuration.
+        
+    Returns:
+        List of patterns to exclude (lowercase).
+    """
+    patterns = get_exclusions_config(config).get("patterns", [])
+    return [pattern.lower() for pattern in patterns if pattern]
+
+
+def should_exclude_no_mailbox(config: Dict[str, Any]) -> bool:
+    """
+    Check if users without mailboxes should be excluded.
+    
+    Args:
+        config: Full mailbox configuration.
+        
+    Returns:
+        True if users without mailboxes should be excluded.
+    """
+    return get_exclusions_config(config).get("exclude_no_mailbox", True)
+
+
+def should_log_exclusions(config: Dict[str, Any]) -> bool:
+    """
+    Check if exclusions should be logged.
+    
+    Args:
+        config: Full mailbox configuration.
+        
+    Returns:
+        True if exclusions should be logged.
+    """
+    return get_exclusions_config(config).get("log_exclusions", True)
+
+
+def is_email_excluded(email: str, config: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """
+    Check if an email address should be excluded.
+    
+    Args:
+        email: Email address to check.
+        config: Full mailbox configuration.
+        
+    Returns:
+        Tuple of (is_excluded, reason). Reason is None if not excluded.
+    """
+    if not is_exclusions_enabled(config):
+        return False, None
+    
+    email_lower = email.lower()
+    
+    # Check exact email address match
+    excluded_addresses = get_excluded_email_addresses(config)
+    if email_lower in excluded_addresses:
+        return True, f"email address '{email}' is in exclusion list"
+    
+    # Check domain match
+    excluded_domains = get_excluded_domains(config)
+    if "@" in email_lower:
+        domain = email_lower.split("@")[1]
+        if domain in excluded_domains:
+            return True, f"domain '{domain}' is in exclusion list"
+    
+    # Check pattern match
+    exclusion_patterns = get_exclusion_patterns(config)
+    for pattern in exclusion_patterns:
+        # Convert wildcard pattern to regex
+        if _matches_pattern(email_lower, pattern):
+            return True, f"email '{email}' matches exclusion pattern '{pattern}'"
+    
+    return False, None
+
+
+def _matches_pattern(email: str, pattern: str) -> bool:
+    """
+    Check if an email matches a wildcard pattern.
+    
+    Supports:
+    - * for any characters
+    - ? for single character
+    
+    Args:
+        email: Email address to check (lowercase).
+        pattern: Pattern to match against (lowercase).
+        
+    Returns:
+        True if email matches the pattern.
+    """
+    # Use fnmatch for wildcard matching
+    return fnmatch.fnmatch(email, pattern)
+
+
+def filter_excluded_users(
+    users: List[Dict[str, Any]],
+    config: Dict[str, Any],
+    log_func: Optional[Callable[[str], None]] = None
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Filter out excluded users from a list.
+    
+    Args:
+        users: List of user dictionaries with 'upn' or 'email' field.
+        config: Full mailbox configuration.
+        log_func: Optional function to log exclusions.
+        
+    Returns:
+        Tuple of (included_users, excluded_users).
+    """
+    if not is_exclusions_enabled(config):
+        return users, []
+    
+    included = []
+    excluded = []
+    should_log = should_log_exclusions(config)
+    
+    for user in users:
+        email = user.get("upn", user.get("email", ""))
+        if not email:
+            continue
+        
+        is_excluded, reason = is_email_excluded(email, config)
+        
+        if is_excluded:
+            excluded.append(user)
+            if should_log and log_func:
+                log_func(f"Excluding {email}: {reason}")
+        else:
+            included.append(user)
+    
+    return included, excluded

@@ -18,6 +18,7 @@ This project automates the creation of **SharePoint Online sites** using Terrafo
 
 - **Azure AD User/Group Discovery** - Automatically discover real users and groups from your tenant
 - **Random Owner Assignment** - Assign discovered users as site owners/members for realism
+- **User/Domain Exclusions** - Exclude specific emails or domains from site ownership and email population
 - **Key Vault Configuration** - Optional custom Key Vault name or auto-generated
 - **60+ Ad-hoc Site Templates** - Projects, teams, events, clubs, regional offices
 - **40 Department Site Templates** - HR, Finance, IT, Legal, Marketing, and more

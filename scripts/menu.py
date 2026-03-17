@@ -23,6 +23,9 @@ import platform
 import shutil
 import subprocess
 import sys
+import urllib.request
+import urllib.parse
+import urllib.error
 from pathlib import Path
 from typing import Tuple, Optional, Dict, Any
 
@@ -2127,8 +2130,64 @@ def check_prerequisites(auto_install: bool = False) -> dict:
     
     return results
 
-def display_prerequisites_status(results: dict) -> None:
-    """Display the prerequisites check results."""
+
+def get_configured_tenant_info() -> dict:
+    """
+    Load tenant information from environments.json.
+    
+    Returns:
+        Dictionary with tenant_id, tenant_name, and environment_name.
+        Returns empty dict if file doesn't exist or has placeholder values.
+    """
+    try:
+        if not ENVIRONMENTS_FILE.exists():
+            return {}
+        
+        with open(ENVIRONMENTS_FILE, 'r') as f:
+            data = json.load(f)
+        
+        environments = data.get("environments", [])
+        if not environments:
+            return {}
+        
+        # Get default environment or first one
+        default_name = data.get("default_environment")
+        env = None
+        
+        if default_name:
+            for e in environments:
+                if e.get("name") == default_name:
+                    env = e
+                    break
+        
+        if not env:
+            env = environments[0]
+        
+        azure_config = env.get("azure", {})
+        tenant_id = azure_config.get("tenant_id", "")
+        tenant_name = azure_config.get("tenant_name", "")
+        env_name = env.get("name", "Default")
+        
+        # Check if values are still placeholders
+        if "<<" in tenant_id or not tenant_id:
+            return {}
+        
+        return {
+            "tenant_id": tenant_id,
+            "tenant_name": tenant_name,
+            "environment_name": env_name,
+            "subscription_id": azure_config.get("subscription_id", ""),
+        }
+    except Exception:
+        return {}
+
+
+def display_prerequisites_status(results: dict) -> dict:
+    """Display the prerequisites check results.
+    
+    Returns:
+        Dictionary with tenant_mismatch info if detected.
+    """
     print()
     print(f"  {Colors.WHITE}{Colors.BOLD}Prerequisites Status:{Colors.NC}")
     print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
@@ -2171,6 +2230,9 @@ def display_prerequisites_status(results: dict) -> None:
     else:
         print(f"  {Colors.YELLOW}⚠{Colors.NC} PnP.PowerShell: Not installed (required for site recycle bin purge)")
     
+    # Track tenant mismatch for return value
+    tenant_mismatch_info = {}
+    
     # Azure Login
     if results["azure_cli"]["installed"]:
         if results["azure_login"]["logged_in"]:
@@ -2181,11 +2243,37 @@ def display_prerequisites_status(results: dict) -> None:
                 user_name = account_info.get('user', {}).get('name', 'Unknown')
                 subscription_name = account_info.get('name', 'Unknown')
                 subscription_id = account_info.get('id', 'Unknown')
-                tenant_id = account_info.get('tenantId', 'Unknown')
+                current_tenant_id = account_info.get('tenantId', 'Unknown')
                 print(f"    {Colors.CYAN}├─ User:{Colors.NC} {user_name}")
                 print(f"    {Colors.CYAN}├─ Subscription:{Colors.NC} {subscription_name}")
                 print(f"    {Colors.CYAN}├─ Subscription ID:{Colors.NC} {subscription_id}")
-                print(f"    {Colors.CYAN}└─ Tenant ID:{Colors.NC} {tenant_id}")
+                print(f"    {Colors.CYAN}└─ Tenant ID:{Colors.NC} {current_tenant_id}")
+                
+                # Check for tenant mismatch with environments.json
+                configured_tenant = get_configured_tenant_info()
+                if configured_tenant:
+                    configured_tenant_id = configured_tenant.get("tenant_id", "")
+                    configured_tenant_name = configured_tenant.get("tenant_name", "")
+                    env_name = configured_tenant.get("environment_name", "Default")
+                    
+                    if configured_tenant_id and current_tenant_id != configured_tenant_id:
+                        print()
+                        print(f"  {Colors.YELLOW}⚠{Colors.NC} {Colors.BOLD}Tenant Mismatch Detected!{Colors.NC}")
+                        print(f"    {Colors.YELLOW}├─ Connected to:{Colors.NC} {current_tenant_id}")
+                        print(f"    {Colors.YELLOW}├─ Configured ({env_name}):{Colors.NC} {configured_tenant_id}")
+                        if configured_tenant_name:
+                            print(f"    {Colors.YELLOW}└─ Configured tenant name:{Colors.NC} {configured_tenant_name}")
+                        else:
+                            print(f"    {Colors.YELLOW}└─{Colors.NC} {Colors.DIM}(from environments.json){Colors.NC}")
+                        
+                        # Store mismatch info for caller
+                        tenant_mismatch_info = {
+                            "mismatch": True,
+                            "current_tenant_id": current_tenant_id,
+                            "configured_tenant_id": configured_tenant_id,
+                            "configured_tenant_name": configured_tenant_name,
+                            "environment_name": env_name,
+                        }
         else:
             print(f"  {Colors.YELLOW}⚠{Colors.NC} Azure Login: Not logged in")
     
@@ -2233,6 +2321,9 @@ def display_prerequisites_status(results: dict) -> None:
         print(f"  {Colors.DIM}  Select option [0] to install missing tools.{Colors.NC}")
     
     print()
+    
+    return tenant_mismatch_info
+
 
 def run_prerequisites_check_menu() -> None:
     """Run the prerequisites check and install menu."""
@@ -2247,7 +2338,71 @@ def run_prerequisites_check_menu() -> None:
     print()
     
     results = check_prerequisites(auto_install=False)
-    display_prerequisites_status(results)
+    tenant_mismatch = display_prerequisites_status(results)
+    
+    # Handle tenant mismatch - offer to switch tenants
+    if tenant_mismatch and tenant_mismatch.get("mismatch"):
+        print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
+        print(f"  {Colors.WHITE}{Colors.BOLD}Tenant Mismatch Options{Colors.NC}")
+        print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
+        print()
+        configured_tenant_id = tenant_mismatch.get("configured_tenant_id", "")
+        configured_tenant_name = tenant_mismatch.get("configured_tenant_name", "")
+        env_name = tenant_mismatch.get("environment_name", "Default")
+        
+        tenant_display = configured_tenant_name if configured_tenant_name else configured_tenant_id[:20] + "..."
+        
+        print(f"  {Colors.WHITE}You are connected to a different tenant than configured in{Colors.NC}")
+        print(f"  {Colors.WHITE}environments.json ({env_name}).{Colors.NC}")
+        print()
+        print(f"    {Colors.GREEN}[S]{Colors.NC} Switch to configured tenant ({tenant_display})")
+        print(f"    {Colors.YELLOW}[C]{Colors.NC} Continue with current tenant")
+        print(f"    {Colors.RED}[L]{Colors.NC} Logout and login to different tenant manually")
+        print()
+        
+        choice = input(f"  {Colors.YELLOW}Choice:{Colors.NC} ").strip().lower()
+        
+        if choice == 's':
+            print()
+            print_info(f"Switching to tenant: {configured_tenant_id}")
+            az_path = find_azure_cli_path()
+            if az_path:
+                try:
+                    subprocess.run([az_path, "login", "--tenant", configured_tenant_id], check=True)
+                    print()
+                    print_success("Successfully switched to configured tenant!")
+                    # Re-check prerequisites after tenant switch
+                    results = check_prerequisites(auto_install=False)
+                    display_prerequisites_status(results)
+                except subprocess.CalledProcessError as e:
+                    print_error(f"Failed to switch tenant: {e}")
+                except Exception as e:
+                    print_error(f"Failed to switch tenant: {e}")
+            else:
+                print_error("Azure CLI not found")
+        elif choice == 'l':
+            print()
+            print_info("Logging out of Azure...")
+            az_path = find_azure_cli_path()
+            if az_path:
+                try:
+                    subprocess.run([az_path, "logout"], check=True)
+                    print_success("Logged out successfully!")
+                    print()
+                    print_info("Opening browser for Azure login...")
+                    subprocess.run([az_path, "login"], check=True)
+                    print()
+                    print_success("Azure login successful!")
+                    # Re-check prerequisites after login
+                    results = check_prerequisites(auto_install=False)
+                    display_prerequisites_status(results)
+                except subprocess.CalledProcessError as e:
+                    print_error(f"Azure operation failed: {e}")
+                except Exception as e:
+                    print_error(f"Azure operation failed: {e}")
+            else:
+                print_error("Azure CLI not found")
+        # 'c' or any other choice continues with current tenant
     
     all_installed = (
         results["azure_cli"]["installed"] and 
@@ -2480,6 +2635,9 @@ def print_menu(prereq_status: dict) -> None:
     print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.MAGENTA}[A]{Colors.NC} {Colors.WHITE}🔑 Manage App Registration{Colors.NC}                            {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Setup or remove custom app for permissions{Colors.NC}            {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.YELLOW}[R]{Colors.NC} {Colors.WHITE}🧹 Remove Excluded Users from Sites{Colors.NC}                   {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Remove yourself from site ownership{Colors.NC}                   {Colors.CYAN}│{Colors.NC}")
+    print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.WHITE}[H]{Colors.NC} {Colors.WHITE}❓ Help & Documentation{Colors.NC}                               {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.WHITE}[Q]{Colors.NC} {Colors.WHITE}🚪 Quit{Colors.NC}                                                {Colors.CYAN}│{Colors.NC}")
     print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
@@ -2597,11 +2755,33 @@ def manage_app_registration_menu() -> None:
         app_config = load_app_config()
         existing_app = find_existing_app() if not app_config else None
         
+        # Check for tenant mismatch between cached app config and current Azure CLI session
+        app_tenant_mismatch = False
+        current_cli_tenant = None
+        if check_azure_login():
+            account_info = get_azure_account_info()
+            if account_info:
+                current_cli_tenant = account_info.get('tenantId')
+        
         if app_config:
+            cached_tenant = app_config.get('tenant_id', '')
             print(f"  {Colors.GREEN}✓{Colors.NC} Custom app is configured:")
             print(f"    {Colors.DIM}App ID: {app_config.get('app_id', 'Unknown')}{Colors.NC}")
             print(f"    {Colors.DIM}Name: {app_config.get('display_name', CUSTOM_APP_NAME)}{Colors.NC}")
-            print(f"    {Colors.DIM}Tenant: {app_config.get('tenant_id', 'Unknown')}{Colors.NC}")
+            print(f"    {Colors.DIM}Tenant: {cached_tenant}{Colors.NC}")
+            
+            # Check if cached tenant matches current CLI tenant
+            if current_cli_tenant and cached_tenant and current_cli_tenant != cached_tenant:
+                app_tenant_mismatch = True
+                print()
+                print(f"  {Colors.RED}⚠ TENANT MISMATCH!{Colors.NC}")
+                print(f"    {Colors.YELLOW}├─ App registered in:{Colors.NC} {cached_tenant}")
+                print(f"    {Colors.YELLOW}├─ Currently logged into:{Colors.NC} {current_cli_tenant}")
+                print(f"    {Colors.YELLOW}└─ The cached app config is for a different tenant!{Colors.NC}")
+                print()
+                print(f"  {Colors.WHITE}Options:{Colors.NC}")
+                print(f"    • Delete the app config and create a new one for this tenant")
+                print(f"    • Or switch back to the original tenant using Step 0")
         elif existing_app:
             print(f"  {Colors.YELLOW}⚠{Colors.NC} Found existing app (not in local config):")
             print(f"    {Colors.DIM}App ID: {existing_app.get('appId', 'Unknown')}{Colors.NC}")
@@ -2686,40 +2866,89 @@ def manage_app_registration_menu() -> None:
                 input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
                 continue
             
-            print(f"  {Colors.RED}{Colors.BOLD}⚠️  WARNING: This will delete the app registration!{Colors.NC}")
-            print()
-            print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
-            print(f"  {Colors.WHITE}App Details:{Colors.NC}")
-            if app_config:
-                print(f"    • Name:      {Colors.YELLOW}{app_config.get('display_name', CUSTOM_APP_NAME)}{Colors.NC}")
-                print(f"    • App ID:    {app_config.get('app_id', 'Unknown')}")
-                print(f"    • Tenant:    {app_config.get('tenant_id', 'Unknown')}")
-            elif existing_app:
-                print(f"    • Name:      {Colors.YELLOW}{existing_app.get('displayName', CUSTOM_APP_NAME)}{Colors.NC}")
-                print(f"    • App ID:    {existing_app.get('appId', 'Unknown')}")
-            print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
-            print()
-            print(f"  {Colors.YELLOW}This action cannot be undone.{Colors.NC}")
-            print(f"  {Colors.DIM}You will need to set up the app again to use SharePoint/Email features.{Colors.NC}")
-            print()
-            print(f"  Type '{Colors.RED}DELETE{Colors.NC}' to confirm, or '{Colors.GREEN}C{Colors.NC}' to cancel:")
-            print()
+            # Check for tenant mismatch - if the cached config is for a different tenant
+            cached_tenant = app_config.get('tenant_id', '') if app_config else None
+            current_tenant = None
+            tenant_mismatch = False
             
-            confirm = input(f"  {Colors.YELLOW}Your choice:{Colors.NC} ").strip()
+            account_info = get_azure_account_info()
+            if account_info:
+                current_tenant = account_info.get('tenantId')
             
-            if confirm == 'DELETE':
-                if delete_custom_app():
-                    print()
-                    print(f"  {Colors.GREEN}✓{Colors.NC} App registration deleted successfully!")
+            if cached_tenant and current_tenant and cached_tenant != current_tenant:
+                tenant_mismatch = True
+                print(f"  {Colors.YELLOW}{Colors.BOLD}⚠️  TENANT MISMATCH DETECTED{Colors.NC}")
+                print()
+                print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
+                print(f"  {Colors.WHITE}The cached app config is for a different tenant:{Colors.NC}")
+                print(f"    • Cached tenant:   {Colors.YELLOW}{cached_tenant}{Colors.NC}")
+                print(f"    • Current tenant:  {Colors.GREEN}{current_tenant}{Colors.NC}")
+                print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
+                print()
+                print(f"  {Colors.WHITE}Since you're in a different tenant, you cannot delete{Colors.NC}")
+                print(f"  {Colors.WHITE}the app from Azure. However, you can:{Colors.NC}")
+                print()
+                print(f"    {Colors.GREEN}[L]{Colors.NC} Clear local config only (recommended)")
+                print(f"        {Colors.DIM}Removes .app_config.json so you can create a new app{Colors.NC}")
+                print()
+                print(f"    {Colors.RED}[C]{Colors.NC} Cancel")
+                print()
+                
+                confirm = input(f"  {Colors.YELLOW}Your choice:{Colors.NC} ").strip().upper()
+                
+                if confirm == 'L':
+                    # Just delete the local config file
+                    try:
+                        if APP_CONFIG_FILE.exists():
+                            APP_CONFIG_FILE.unlink()
+                            print()
+                            print(f"  {Colors.GREEN}✓{Colors.NC} Local app config cleared successfully!")
+                            print(f"  {Colors.DIM}You can now create a new app registration for this tenant.{Colors.NC}")
+                        else:
+                            print()
+                            print(f"  {Colors.YELLOW}⚠{Colors.NC} No local config file found.")
+                    except Exception as e:
+                        print()
+                        print(f"  {Colors.RED}✗{Colors.NC} Failed to clear local config: {e}")
                 else:
                     print()
-                    print(f"  {Colors.RED}✗{Colors.NC} Failed to delete app registration.")
-            elif confirm.upper() == 'C':
-                print()
-                print(f"  {Colors.GREEN}✓{Colors.NC} Operation cancelled. No changes made.")
+                    print(f"  {Colors.GREEN}✓{Colors.NC} Operation cancelled. No changes made.")
             else:
+                # Normal deletion flow - same tenant
+                print(f"  {Colors.RED}{Colors.BOLD}⚠️  WARNING: This will delete the app registration!{Colors.NC}")
                 print()
-                print(f"  {Colors.DIM}Deletion cancelled. (Type 'DELETE' to confirm or 'C' to cancel){Colors.NC}")
+                print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
+                print(f"  {Colors.WHITE}App Details:{Colors.NC}")
+                if app_config:
+                    print(f"    • Name:      {Colors.YELLOW}{app_config.get('display_name', CUSTOM_APP_NAME)}{Colors.NC}")
+                    print(f"    • App ID:    {app_config.get('app_id', 'Unknown')}")
+                    print(f"    • Tenant:    {app_config.get('tenant_id', 'Unknown')}")
+                elif existing_app:
+                    print(f"    • Name:      {Colors.YELLOW}{existing_app.get('displayName', CUSTOM_APP_NAME)}{Colors.NC}")
+                    print(f"    • App ID:    {existing_app.get('appId', 'Unknown')}")
+                print(f"  {Colors.CYAN}{'─' * 50}{Colors.NC}")
+                print()
+                print(f"  {Colors.YELLOW}This action cannot be undone.{Colors.NC}")
+                print(f"  {Colors.DIM}You will need to set up the app again to use SharePoint/Email features.{Colors.NC}")
+                print()
+                print(f"  Type '{Colors.RED}DELETE{Colors.NC}' to confirm, or '{Colors.GREEN}C{Colors.NC}' to cancel:")
+                print()
+                
+                confirm = input(f"  {Colors.YELLOW}Your choice:{Colors.NC} ").strip()
+                
+                if confirm == 'DELETE':
+                    if delete_custom_app():
+                        print()
+                        print(f"  {Colors.GREEN}✓{Colors.NC} App registration deleted successfully!")
+                    else:
+                        print()
+                        print(f"  {Colors.RED}✗{Colors.NC} Failed to delete app registration.")
+                elif confirm.upper() == 'C':
+                    print()
+                    print(f"  {Colors.GREEN}✓{Colors.NC} Operation cancelled. No changes made.")
+                else:
+                    print()
+                    print(f"  {Colors.DIM}Deletion cancelled. (Type 'DELETE' to confirm or 'C' to cancel){Colors.NC}")
             
             input(f"\n  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
             
@@ -3882,9 +4111,11 @@ def edit_configuration_menu() -> None:
         print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.BLUE}[2]{Colors.NC} {Colors.WHITE}📋 Edit sites.json{Colors.NC}                                    {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Define custom SharePoint sites to create{Colors.NC}             {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Add/remove email addresses or domains to exclude{Colors.NC}     {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.MAGENTA}[3]{Colors.NC} {Colors.WHITE}📧 Edit mailboxes.yaml{Colors.NC}                                {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Configure email mailboxes for population{Colors.NC}             {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Add/remove email addresses or domains to exclude{Colors.NC}     {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}├──────────────────────────────────────────────────────────────┤{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
@@ -4378,6 +4609,292 @@ def _clear_azure_ad_cache() -> None:
 
 
 # ============================================================================
+# POST-DEPLOYMENT CLEANUP FUNCTIONS
+# ============================================================================
+
+def remove_excluded_users_menu() -> None:
+    """Menu to remove excluded users from SharePoint site ownership."""
+    clear_screen()
+    print()
+    print(f"  {Colors.YELLOW}{Colors.BOLD}🧹 Remove Excluded Users from Sites{Colors.NC}")
+    print(f"  {Colors.CYAN}{'─' * 40}{Colors.NC}")
+    print()
+    print(f"  {Colors.WHITE}This will remove users matching your exclusion rules from{Colors.NC}")
+    print(f"  {Colors.WHITE}SharePoint site ownership. Useful after site creation when{Colors.NC}")
+    print(f"  {Colors.WHITE}M365 automatically adds you as an owner.{Colors.NC}")
+    print()
+    
+    # Load and display current exclusions
+    sites_config_path = SCRIPT_DIR.parent / "config" / "sites.json"
+    try:
+        with open(sites_config_path, 'r') as f:
+            sites_config = json.load(f)
+        
+        exclusions = sites_config.get("exclusions", {})
+        if not exclusions.get("enabled", True):
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} Exclusions are disabled in sites.json")
+            print()
+            input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            return
+        
+        excluded_emails = exclusions.get("email_addresses", [])
+        excluded_domains = exclusions.get("domains", [])
+        excluded_patterns = exclusions.get("patterns", [])
+        
+        if not excluded_emails and not excluded_domains and not excluded_patterns:
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} No exclusions configured in sites.json")
+            print()
+            print(f"  {Colors.DIM}Add exclusions to config/sites.json under the 'exclusions' section:{Colors.NC}")
+            print(f"  {Colors.DIM}  - email_addresses: specific emails to exclude{Colors.NC}")
+            print(f"  {Colors.DIM}  - domains: domains to exclude (all users){Colors.NC}")
+            print(f"  {Colors.DIM}  - patterns: wildcard patterns{Colors.NC}")
+            print()
+            input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            return
+        
+        print(f"  {Colors.WHITE}Current exclusions:{Colors.NC}")
+        if excluded_emails:
+            print(f"    {Colors.CYAN}Email addresses:{Colors.NC}")
+            for email in excluded_emails[:5]:
+                print(f"      • {email}")
+            if len(excluded_emails) > 5:
+                print(f"      ... and {len(excluded_emails) - 5} more")
+        if excluded_domains:
+            print(f"    {Colors.CYAN}Domains:{Colors.NC}")
+            for domain in excluded_domains[:5]:
+                print(f"      • @{domain}")
+            if len(excluded_domains) > 5:
+                print(f"      ... and {len(excluded_domains) - 5} more")
+        if excluded_patterns:
+            print(f"    {Colors.CYAN}Patterns:{Colors.NC}")
+            for pattern in excluded_patterns[:5]:
+                print(f"      • {pattern}")
+            if len(excluded_patterns) > 5:
+                print(f"      ... and {len(excluded_patterns) - 5} more")
+        print()
+        
+    except Exception as e:
+        print(f"  {Colors.RED}✗{Colors.NC} Could not load sites.json: {e}")
+        print()
+        input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        return
+    
+    # Get access token
+    print_info("Getting access token...")
+    access_token = get_graph_access_token()
+    if not access_token:
+        print(f"  {Colors.RED}✗{Colors.NC} Could not get access token")
+        print(f"  {Colors.DIM}Make sure you have set up the app registration via [A] Manage App Registration{Colors.NC}")
+        print()
+        input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        return
+    
+    print(f"  {Colors.GREEN}✓{Colors.NC} Access token obtained")
+    print()
+    
+    # Load configured sites from sites.json to only process those
+    print_info("Loading configured sites from sites.json...")
+    configured_site_names = set()
+    
+    try:
+        sites_list = sites_config.get("sites", [])
+        for site in sites_list:
+            # Get the display_name which is what the M365 Group will be named
+            display_name = site.get("display_name", site.get("name", ""))
+            if display_name:
+                configured_site_names.add(display_name.lower())
+        
+        if not configured_site_names:
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} No sites found in sites.json")
+            print()
+            input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            return
+        
+        print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(configured_site_names)} configured sites")
+        print()
+        print(f"  {Colors.WHITE}Sites that will be processed:{Colors.NC}")
+        for name in sorted(list(configured_site_names)[:10]):
+            print(f"    • {name}")
+        if len(configured_site_names) > 10:
+            print(f"    ... and {len(configured_site_names) - 10} more")
+        print()
+        
+    except Exception as e:
+        print(f"  {Colors.RED}✗{Colors.NC} Failed to load sites from sites.json: {e}")
+        print()
+        input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        return
+    
+    # Get list of SharePoint sites (M365 Groups)
+    print_info("Discovering M365 Groups matching configured sites...")
+    
+    try:
+        # Get M365 Groups (which back SharePoint sites)
+        # URL-encode the filter parameter to handle special characters
+        filter_param = urllib.parse.quote("groupTypes/any(c:c eq 'Unified')")
+        url = f"https://graph.microsoft.com/v1.0/groups?$filter={filter_param}&$select=id,displayName&$top=200"
+        
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {access_token}")
+        req.add_header("Content-Type", "application/json")
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode())
+            all_groups = result.get('value', [])
+        
+        # Filter to only include groups that match our configured sites
+        groups = []
+        for group in all_groups:
+            group_name = group.get('displayName', '').lower()
+            if group_name in configured_site_names:
+                groups.append(group)
+        
+        if not groups:
+            print(f"  {Colors.YELLOW}⚠{Colors.NC} No M365 Groups found matching configured sites")
+            print(f"  {Colors.DIM}This could mean the sites haven't been created yet, or they have different names.{Colors.NC}")
+            print()
+            input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+            return
+        
+        print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(groups)} M365 Groups matching configured sites (out of {len(all_groups)} total)")
+        print()
+        
+    except Exception as e:
+        print(f"  {Colors.RED}✗{Colors.NC} Failed to get groups: {e}")
+        print()
+        input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        return
+    
+    # Confirm before proceeding
+    print(f"  {Colors.YELLOW}This will check {len(groups)} sites (from sites.json) and remove excluded users from ownership.{Colors.NC}")
+    print(f"  {Colors.DIM}Other M365 Groups in your tenant will NOT be affected.{Colors.NC}")
+    print()
+    confirm = input(f"  {Colors.YELLOW}Proceed? (y/N):{Colors.NC} ").strip().lower()
+    
+    if confirm != 'y':
+        print(f"  {Colors.YELLOW}Operation cancelled{Colors.NC}")
+        input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+        return
+    
+    print()
+    print_info("Processing configured sites only...")
+    print()
+    
+    # Process each group
+    groups_processed = 0
+    users_removed = 0
+    
+    for group in groups:
+        group_id = group.get('id')
+        group_name = group.get('displayName', 'Unknown')
+        
+        if not group_id:
+            continue
+        
+        # Get owners of this group
+        try:
+            owners_url = f"https://graph.microsoft.com/v1.0/groups/{group_id}/owners?$select=id,userPrincipalName"
+            
+            req = urllib.request.Request(owners_url)
+            req.add_header("Authorization", f"Bearer {access_token}")
+            req.add_header("Content-Type", "application/json")
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                result = json.loads(response.read().decode())
+                owners = result.get('value', [])
+            
+            groups_processed += 1
+            
+            # Check each owner against exclusions
+            for owner in owners:
+                upn = owner.get('userPrincipalName', '').lower()
+                user_id = owner.get('id')
+                
+                if not upn or not user_id:
+                    continue
+                
+                should_remove = False
+                reason = ""
+                
+                # Check email addresses
+                if upn in [e.lower() for e in excluded_emails]:
+                    should_remove = True
+                    reason = "email address"
+                
+                # Check domains
+                if not should_remove:
+                    for domain in excluded_domains:
+                        if upn.endswith(f"@{domain.lower()}"):
+                            should_remove = True
+                            reason = f"domain @{domain}"
+                            break
+                
+                # Check patterns
+                if not should_remove:
+                    import fnmatch
+                    for pattern in excluded_patterns:
+                        if fnmatch.fnmatch(upn, pattern.lower()):
+                            should_remove = True
+                            reason = f"pattern {pattern}"
+                            break
+                
+                if should_remove:
+                    # Don't remove if this is the last owner
+                    if len(owners) <= 1:
+                        print(f"    {Colors.YELLOW}⚠{Colors.NC} Cannot remove {upn} from '{group_name}' - last owner")
+                        continue
+                    
+                    # Remove from owners
+                    try:
+                        delete_url = f"https://graph.microsoft.com/v1.0/groups/{group_id}/owners/{user_id}/$ref"
+                        
+                        delete_req = urllib.request.Request(delete_url, method='DELETE')
+                        delete_req.add_header("Authorization", f"Bearer {access_token}")
+                        
+                        with urllib.request.urlopen(delete_req, timeout=30):
+                            users_removed += 1
+                            print(f"    {Colors.GREEN}✓{Colors.NC} Removed {upn} from '{group_name}' ({reason})")
+                            
+                            # Also try to remove from members
+                            try:
+                                member_url = f"https://graph.microsoft.com/v1.0/groups/{group_id}/members/{user_id}/$ref"
+                                member_req = urllib.request.Request(member_url, method='DELETE')
+                                member_req.add_header("Authorization", f"Bearer {access_token}")
+                                urllib.request.urlopen(member_req, timeout=30)
+                            except Exception:
+                                pass  # Not a member or already removed
+                    
+                    except urllib.error.HTTPError as e:
+                        if e.code == 404:
+                            pass  # Already removed
+                        elif e.code == 400:
+                            print(f"    {Colors.YELLOW}⚠{Colors.NC} Cannot remove {upn} from '{group_name}' - may be last owner")
+                        else:
+                            print(f"    {Colors.RED}✗{Colors.NC} Failed to remove {upn} from '{group_name}': {e.code}")
+                    except Exception as e:
+                        print(f"    {Colors.RED}✗{Colors.NC} Failed to remove {upn} from '{group_name}': {e}")
+        
+        except Exception as e:
+            # Skip groups we can't access
+            pass
+    
+    print()
+    print(f"  {Colors.CYAN}{'─' * 40}{Colors.NC}")
+    print(f"  {Colors.WHITE}Summary:{Colors.NC}")
+    print(f"    Sites processed: {groups_processed}")
+    print(f"    Users removed: {users_removed}")
+    print()
+    
+    if users_removed > 0:
+        print(f"  {Colors.GREEN}✓{Colors.NC} Successfully removed {users_removed} excluded user(s) from site ownership")
+    else:
+        print(f"  {Colors.YELLOW}ℹ{Colors.NC} No excluded users found in site ownership")
+    
+    print()
+    input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
+
+
+# ============================================================================
 # MAIN FUNCTION
 # ============================================================================
 
@@ -4715,6 +5232,10 @@ def main() -> None:
             manage_app_registration_menu()
             # Refresh prereq status after app management
             prereq_status = check_prerequisites(auto_install=False)
+            
+        elif choice == 'r':
+            # Remove Excluded Users from Sites
+            remove_excluded_users_menu()
             
         elif choice == 'h':
             print_help()

@@ -208,5 +208,62 @@
       "SITEPAGEPUBLISHING#0": "Communication site"
     },
     "_visibility_options": ["Private", "Public"]
+  },
+
+  "_exclusions_comment": "=== OWNER/MEMBER EXCLUSIONS ===",
+  "_exclusions_instructions": [
+    "Define email addresses and domains to EXCLUDE from being assigned as site owners or members.",
+    "This is useful when you (the admin running the script) don't want to be associated with the created sites.",
+    "Exclusions apply when using 'Random Azure AD' owner assignment mode."
+  ],
+  
+  "exclusions": {
+    "enabled": true,
+    
+    "_email_addresses_comment": "Specific email addresses to exclude from owner/member assignment",
+    "email_addresses": [],
+    "_email_addresses_example": [
+      "admin@yourtenant.onmicrosoft.com",
+      "your-email@company.com"
+    ],
+    
+    "_domains_comment": "Domains to exclude - all users from these domains will be excluded",
+    "domains": [],
+    "_domains_example": [
+      "external-admin.com",
+      "your-company.com"
+    ],
+    
+    "_patterns_comment": "Wildcard patterns to exclude (supports * for any characters)",
+    "patterns": [],
+    "_patterns_example": [
+      "admin*@*",
+      "*-external@*"
+    ],
+    
+    "_log_exclusions_comment": "Log when users are excluded (for visibility)",
+    "log_exclusions": true
+  },
+
+  "_deployment_tracking_comment": "=== DEPLOYMENT TRACKING ===",
+  "_deployment_tracking_instructions": [
+    "A unique deployment ID is used to track which sites were created by this tool.",
+    "This ID is appended to site descriptions and used during cleanup to identify managed sites.",
+    "If deployment_id is empty, a random one will be auto-generated on first deployment.",
+    "Format: Looks like an internal reference code (e.g., 'PRJ-7X9K2M') - not identifiable as test data."
+  ],
+  
+  "deployment_tracking": {
+    "enabled": true,
+    
+    "_deployment_id_comment": "Unique identifier for this deployment (auto-generated if empty)",
+    "deployment_id": "",
+    "_deployment_id_example": "PRJ-7X9K2M",
+    
+    "_append_to_description_comment": "Append deployment ID to site descriptions for tracking",
+    "append_to_description": true,
+    
+    "_description_format_comment": "How to append the ID to descriptions. Use {id} as placeholder.",
+    "description_format": " | Ref: {id}"
   }
 }
