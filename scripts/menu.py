@@ -4111,7 +4111,7 @@ def edit_configuration_menu() -> None:
         print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.BLUE}[2]{Colors.NC} {Colors.WHITE}📋 Edit sites.json{Colors.NC}                                    {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Define custom SharePoint sites to create{Colors.NC}             {Colors.CYAN}│{Colors.NC}")
-        print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Add/remove email addresses or domains to exclude{Colors.NC}     {Colors.CYAN}│{Colors.NC}")
+        print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Set allowed_domains (whitelist) or exclusions{Colors.NC}        {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}                                                              {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}   {Colors.MAGENTA}[3]{Colors.NC} {Colors.WHITE}📧 Edit mailboxes.yaml{Colors.NC}                                {Colors.CYAN}│{Colors.NC}")
         print(f"  {Colors.CYAN}│{Colors.NC}       {Colors.DIM}Configure email mailboxes for population{Colors.NC}             {Colors.CYAN}│{Colors.NC}")
@@ -4641,34 +4641,49 @@ def remove_excluded_users_menu() -> None:
         excluded_domains = exclusions.get("domains", [])
         excluded_patterns = exclusions.get("patterns", [])
         
-        if not excluded_emails and not excluded_domains and not excluded_patterns:
+        # Check for allowed_domains (whitelist) - if set, it takes precedence
+        allowed_domains = exclusions.get("allowed_domains", [])
+        
+        if not excluded_emails and not excluded_domains and not excluded_patterns and not allowed_domains:
             print(f"  {Colors.YELLOW}⚠{Colors.NC} No exclusions configured in sites.json")
             print()
             print(f"  {Colors.DIM}Add exclusions to config/sites.json under the 'exclusions' section:{Colors.NC}")
-            print(f"  {Colors.DIM}  - email_addresses: specific emails to exclude{Colors.NC}")
-            print(f"  {Colors.DIM}  - domains: domains to exclude (all users){Colors.NC}")
-            print(f"  {Colors.DIM}  - patterns: wildcard patterns{Colors.NC}")
+            print(f"  {Colors.DIM}  - allowed_domains: whitelist - ONLY use users from these domains{Colors.NC}")
+            print(f"  {Colors.DIM}  - email_addresses: blacklist - specific emails to exclude{Colors.NC}")
+            print(f"  {Colors.DIM}  - domains: blacklist - domains to exclude (all users){Colors.NC}")
+            print(f"  {Colors.DIM}  - patterns: blacklist - wildcard patterns{Colors.NC}")
             print()
             input(f"  {Colors.YELLOW}Press Enter to continue...{Colors.NC}")
             return
         
-        print(f"  {Colors.WHITE}Current exclusions:{Colors.NC}")
+        print(f"  {Colors.WHITE}Current configuration:{Colors.NC}")
+        
+        # Show whitelist (allowed_domains) first if configured
+        if allowed_domains:
+            print(f"    {Colors.GREEN}Allowed domains (whitelist):{Colors.NC}")
+            for domain in allowed_domains[:5]:
+                print(f"      ✓ @{domain}")
+            if len(allowed_domains) > 5:
+                print(f"      ... and {len(allowed_domains) - 5} more")
+            print(f"    {Colors.DIM}(Only users from these domains will be kept){Colors.NC}")
+        
+        # Show blacklist items
         if excluded_emails:
-            print(f"    {Colors.CYAN}Email addresses:{Colors.NC}")
+            print(f"    {Colors.CYAN}Excluded email addresses:{Colors.NC}")
             for email in excluded_emails[:5]:
-                print(f"      • {email}")
+                print(f"      ✗ {email}")
             if len(excluded_emails) > 5:
                 print(f"      ... and {len(excluded_emails) - 5} more")
         if excluded_domains:
-            print(f"    {Colors.CYAN}Domains:{Colors.NC}")
+            print(f"    {Colors.CYAN}Excluded domains:{Colors.NC}")
             for domain in excluded_domains[:5]:
-                print(f"      • @{domain}")
+                print(f"      ✗ @{domain}")
             if len(excluded_domains) > 5:
                 print(f"      ... and {len(excluded_domains) - 5} more")
         if excluded_patterns:
-            print(f"    {Colors.CYAN}Patterns:{Colors.NC}")
+            print(f"    {Colors.CYAN}Excluded patterns:{Colors.NC}")
             for pattern in excluded_patterns[:5]:
-                print(f"      • {pattern}")
+                print(f"      ✗ {pattern}")
             if len(excluded_patterns) > 5:
                 print(f"      ... and {len(excluded_patterns) - 5} more")
         print()
