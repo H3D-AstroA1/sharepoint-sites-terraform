@@ -346,11 +346,15 @@ flowchart LR
 
 ## 🚫 Exclusions System
 
+The exclusions system provides whitelist/blacklist filtering for Azure AD users. This applies to:
+- **Site Owner/Member Assignment** - When assigning random Azure AD users as site owners or members
+- **File Population** - When using Azure AD user names in file and folder names
+
 ### Exclusion Architecture
 
 ```mermaid
 flowchart TB
-    subgraph Input
+    subgraph Input Sources
         USERS[Azure AD Users]
         GROUPS[M365 Groups]
     end
@@ -362,37 +366,41 @@ flowchart TB
         PATTERNS[Wildcard Patterns]
     end
 
-    subgraph Decision
+    subgraph Decision Flow
         CHECK{Whitelist Set?}
+        CHECK_WL{In Whitelist?}
+        CHECK_BL{In Blacklist?}
         ALLOW[Allow User]
         DENY[Exclude User]
     end
 
-    subgraph Output
-        FILTERED[Filtered User List]
+    subgraph Usage
+        OWNERS[Site Owners/Members]
+        FILES[File/Folder Names]
     end
 
     USERS --> CHECK
-    GROUPS --> CHECK
     
-    CHECK -->|Yes| WHITELIST
-    CHECK -->|No| BLACKLIST_EMAIL
-    CHECK -->|No| BLACKLIST_DOMAIN
-    CHECK -->|No| PATTERNS
+    CHECK -->|Yes| CHECK_WL
+    CHECK -->|No| CHECK_BL
     
-    WHITELIST -->|Match| ALLOW
-    WHITELIST -->|No Match| DENY
+    CHECK_WL -->|Yes| CHECK_BL
+    CHECK_WL -->|No| DENY
     
-    BLACKLIST_EMAIL -->|Match| DENY
-    BLACKLIST_DOMAIN -->|Match| DENY
-    PATTERNS -->|Match| DENY
+    CHECK_BL -->|Yes| DENY
+    CHECK_BL -->|No| ALLOW
     
-    BLACKLIST_EMAIL -->|No Match| ALLOW
-    BLACKLIST_DOMAIN -->|No Match| ALLOW
-    PATTERNS -->|No Match| ALLOW
-    
-    ALLOW --> FILTERED
+    ALLOW --> OWNERS
+    ALLOW --> FILES
 ```
+
+### Exclusion Functions
+
+| Function | Location | Purpose |
+|----------|----------|---------|
+| [`load_exclusions_config()`](../scripts/populate_files.py:144) | populate_files.py | Load exclusions from sites.json |
+| [`is_user_excluded()`](../scripts/populate_files.py:165) | populate_files.py | Check if user matches exclusion rules |
+| [`filter_users_by_exclusions()`](../scripts/populate_files.py:232) | populate_files.py | Filter user list and log summary |
 
 ### Configuration Example
 
@@ -400,14 +408,39 @@ flowchart TB
 {
   "exclusions": {
     "enabled": true,
-    "allowed_domains": ["customdomain.com"],
-    "email_addresses": ["admin@contoso.com"],
-    "domains": ["external.com"],
-    "patterns": ["test-*@*"],
+    
+    "_allowed_domains_comment": "WHITELIST: Only use users from these domains (takes precedence)",
+    "allowed_domains": ["customdomain.com", "company.onmicrosoft.com"],
+    
+    "_email_addresses_comment": "BLACKLIST: Specific email addresses to exclude",
+    "email_addresses": ["admin@contoso.com", "service@contoso.com"],
+    
+    "_domains_comment": "BLACKLIST: Entire domains to exclude",
+    "domains": ["external.com", "contractor.com"],
+    
+    "_patterns_comment": "BLACKLIST: Wildcard patterns (supports * for any characters)",
+    "patterns": ["admin*@*", "*-external@*", "test-*@*"],
+    
     "log_exclusions": true
   }
 }
 ```
+
+### Exclusion Priority
+
+1. **Whitelist Check** - If `allowed_domains` is set, user must be from one of those domains
+2. **Email Blacklist** - Check against specific `email_addresses`
+3. **Domain Blacklist** - Check against `domains` list
+4. **Pattern Blacklist** - Check against wildcard `patterns`
+
+### Use Cases
+
+| Scenario | Configuration |
+|----------|---------------|
+| Only use company users | `"allowed_domains": ["company.com"]` |
+| Exclude admin accounts | `"patterns": ["admin*@*"]` |
+| Exclude external contractors | `"domains": ["contractor.com"]` |
+| Exclude specific person | `"email_addresses": ["john.doe@company.com"]` |
 
 ---
 
@@ -495,9 +528,24 @@ flowchart TB
 
 1. **Site Discovery** - List available SharePoint sites via Graph API
 2. **Site Filtering** - Exclude system sites that cause 403 errors
-3. **Document Generation** - Create department-appropriate files
-4. **Upload** - Upload to site document libraries via Graph API
-5. **Verification** - Confirm successful upload
+3. **User Discovery** - Discover Azure AD users for file naming (optional)
+4. **User Filtering** - Apply whitelist/blacklist exclusions from `sites.json`
+5. **Document Generation** - Create department-appropriate files with user names
+6. **Upload** - Upload to site document libraries via Graph API
+7. **Verification** - Confirm successful upload
+
+### File Naming with Azure AD Users
+
+When using Azure AD modes, files and folders can include user names:
+
+| File Type | Example |
+|-----------|---------|
+| Personal Document | `John Smith - Meeting Notes 2024-03-15.docx` |
+| Expense Report | `Jane Doe - Expense Report March_2024.xlsx` |
+| Shared Document | `Shared by John Smith - Budget Document.docx` |
+| User Folder | `John Smith/` |
+
+**Important:** The exclusions configuration in `sites.json` filters which users can appear in file/folder names. This prevents admin accounts, service accounts, or specific domains from being used.
 
 ---
 

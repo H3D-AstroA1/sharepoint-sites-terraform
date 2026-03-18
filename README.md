@@ -425,7 +425,11 @@ python menu.py
 
 ## 🚫 Exclusions
 
-Exclude specific users or domains from all operations.
+Exclude specific users or domains from all operations. The exclusions system uses a **whitelist/blacklist** approach that applies to:
+
+- **Site Owner/Member Assignment** - When assigning random Azure AD users as site owners or members
+- **File Population** - When using Azure AD user names in file and folder names
+- **Email Population** - When selecting recipients for email generation
 
 ### Email Exclusions (mailboxes.yaml)
 
@@ -441,18 +445,42 @@ exclusions:
     - contoso.onmicrosoft.com
 ```
 
-### Site Exclusions (sites.json)
+### Site & File Exclusions (sites.json)
+
+The exclusions in `sites.json` apply to both site ownership AND file/folder naming:
 
 ```json
 {
   "exclusions": {
     "enabled": true,
+    
+    "allowed_domains": ["company.com"],
     "email_addresses": ["admin@contoso.com"],
     "domains": ["external.com"],
-    "patterns": ["*-test@*"]
+    "patterns": ["*-test@*", "admin*@*"],
+    
+    "log_exclusions": true
   }
 }
 ```
+
+| Rule Type | Priority | Description |
+|-----------|----------|-------------|
+| `allowed_domains` | 1 (Whitelist) | Only users from these domains are included |
+| `email_addresses` | 2 (Blacklist) | Specific emails to exclude |
+| `domains` | 3 (Blacklist) | Entire domains to exclude |
+| `patterns` | 4 (Blacklist) | Wildcard patterns (e.g., `admin*@*`) |
+
+### File Population with Exclusions
+
+When populating files with Azure AD user names, the exclusions filter ensures:
+- Admin accounts don't appear in file names
+- Service accounts are excluded
+- Only users from allowed domains are used
+
+Example file names that would be generated:
+- `John Smith - Meeting Notes 2024-03-15.docx`
+- `Jane Doe - Expense Report March_2024.xlsx`
 
 ### Remove Excluded Users from Sites
 
