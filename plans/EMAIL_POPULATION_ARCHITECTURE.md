@@ -701,6 +701,25 @@ azure_ad:
     max_members: 50
 ```
 
+### Mailbox Validation Options
+
+When discovering users from Azure AD, mailbox validation can be configured for performance:
+
+| Option | Validation Limit | Use Case |
+|--------|------------------|----------|
+| Skip validation | 0 | Fastest - no mailbox checks |
+| Validate first 100 | 100 (default) | Balanced performance |
+| Validate first 500 | 500 | More thorough |
+| Validate all | Unlimited | Complete validation (slow for large tenants) |
+
+### Pagination Support
+
+The Azure AD discovery module supports pagination for large tenants:
+
+- **M365 Groups API**: Automatically paginates through all groups
+- **Safety limit**: 2000 groups maximum to prevent excessive API calls
+- **URL encoding**: Filter parameters are properly URL-encoded for reliability
+
 ---
 
 ## 🚫 Exclusions System
