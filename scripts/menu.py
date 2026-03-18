@@ -3862,6 +3862,7 @@ def _list_mailboxes_from_azure_ad() -> None:
     """Discover and list mailboxes directly from Azure AD."""
     import urllib.request
     import urllib.error
+    import urllib.parse
     
     clear_screen()
     print()
@@ -3887,14 +3888,22 @@ def _list_mailboxes_from_azure_ad() -> None:
     print(f"  {Colors.WHITE}Filter options:{Colors.NC}")
     print()
     print(f"    {Colors.GREEN}[1]{Colors.NC} All users with mailboxes")
-    print(f"    {Colors.BLUE}[2]{Colors.NC} Only licensed users (recommended)")
-    print(f"    {Colors.CYAN}[3]{Colors.NC} Filter by domain")
+    print(f"    {Colors.BLUE}[2]{Colors.NC} Only licensed users")
+    print(f"    {Colors.CYAN}[3]{Colors.NC} Filter by domain (all users)")
+    print(f"    {Colors.MAGENTA}[4]{Colors.NC} Licensed users by domain (recommended)")
+    print()
+    print(f"    {Colors.WHITE}[B]{Colors.NC} Back to previous menu")
     print()
     
-    filter_choice = input(f"  {Colors.YELLOW}Enter your choice (1-3):{Colors.NC} ").strip()
+    filter_choice = input(f"  {Colors.YELLOW}Enter your choice (1-4, B):{Colors.NC} ").strip().lower()
+    
+    if filter_choice == 'b':
+        return  # Go back to list_mailboxes_menu
     
     domain_filter = None
-    if filter_choice == '3':
+    licensed_only = filter_choice in ('2', '4')
+    
+    if filter_choice in ('3', '4'):
         domain_filter = input(f"  {Colors.YELLOW}Enter domain to filter (e.g., company.com):{Colors.NC} ").strip().lower()
         if not domain_filter:
             domain_filter = None
@@ -3903,16 +3912,13 @@ def _list_mailboxes_from_azure_ad() -> None:
     print(f"  {Colors.WHITE}Discovering mailboxes from Azure AD...{Colors.NC}")
     
     # Build the Graph API query
-    # Get users with mail attribute set (indicates they have a mailbox)
+    # Get all users and filter client-side for those with mail addresses
     try:
-        if filter_choice == '2':
-            # Licensed users - filter by assignedLicenses
-            url = "https://graph.microsoft.com/v1.0/users?$filter=assignedLicenses/$count ne 0&$count=true&$select=id,displayName,userPrincipalName,mail,department,jobTitle,assignedLicenses&$top=100"
-        else:
-            # All users with mail
-            url = "https://graph.microsoft.com/v1.0/users?$filter=mail ne null&$select=id,displayName,userPrincipalName,mail,department,jobTitle&$top=100"
+        # Get all users - we'll filter client-side for those with mail
+        url = "https://graph.microsoft.com/v1.0/users?$select=id,displayName,userPrincipalName,mail,department,jobTitle,assignedLicenses&$top=100"
         
         all_users = []
+        page_count = 0
         
         while url:
             req = urllib.request.Request(url)
@@ -3924,17 +3930,38 @@ def _list_mailboxes_from_azure_ad() -> None:
                 data = json.loads(response.read().decode())
                 users = data.get("value", [])
                 all_users.extend(users)
+                page_count += 1
+                
+                # Show progress
+                print(f"\r  {Colors.DIM}Fetched {len(all_users)} users (page {page_count})...{Colors.NC}", end="", flush=True)
                 
                 # Check for pagination
                 url = data.get("@odata.nextLink")
-                if url and len(all_users) >= 500:
-                    # Limit to 500 users for performance
+                if url and len(all_users) >= 2000:
+                    # Limit to 2000 users for performance
                     break
+        
+        print()  # New line after progress
+        total_fetched = len(all_users)
+        
+        # Filter users based on selected option
+        # Include users with mail attribute OR userPrincipalName (for users without mail set)
+        # Exclude external/guest users (those with #EXT# in UPN)
+        all_users = [u for u in all_users if
+                     (u.get("mail") or u.get("userPrincipalName")) and
+                     "#EXT#" not in u.get("userPrincipalName", "")]
+        
+        # Apply licensed users filter if selected
+        if licensed_only:
+            all_users = [u for u in all_users if u.get("assignedLicenses") and len(u.get("assignedLicenses", [])) > 0]
         
         # Apply domain filter if specified
         if domain_filter:
-            all_users = [u for u in all_users if u.get("mail", "").lower().endswith(f"@{domain_filter}") or
-                        u.get("userPrincipalName", "").lower().endswith(f"@{domain_filter}")]
+            all_users = [u for u in all_users if
+                        (u.get("mail") or "").lower().endswith(f"@{domain_filter}") or
+                        (u.get("userPrincipalName") or "").lower().endswith(f"@{domain_filter}")]
+        
+        print(f"  {Colors.DIM}(Fetched {total_fetched} total users, {len(all_users)} with mailboxes){Colors.NC}")
         
         if not all_users:
             print(f"  {Colors.YELLOW}ℹ{Colors.NC} No mailboxes found matching the criteria")
@@ -3951,7 +3978,7 @@ def _list_mailboxes_from_azure_ad() -> None:
         print(f"  {Colors.CYAN}{title:^80}{Colors.NC}")
         print(f"  {Colors.CYAN}{'═' * 80}{Colors.NC}")
         print()
-        print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(all_users)} mailboxes")
+        print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(all_users)} mailboxes {Colors.DIM}(from {total_fetched} total users){Colors.NC}")
         print()
         
         # Display header
@@ -4660,16 +4687,44 @@ def _run_azure_ad_discovery(token: str, discover_users: bool = True, discover_gr
             print(f"\r  {Colors.CYAN}[{percentage:5.1f}%]{Colors.NC} {message:<50}", end='', flush=True)
         
         if discover_users:
+            # Ask about mailbox validation (can be slow for large tenants)
+            print(f"  {Colors.YELLOW}Mailbox Validation Options:{Colors.NC}")
+            print(f"    {Colors.GREEN}[1]{Colors.NC} Skip mailbox validation (fastest)")
+            print(f"    {Colors.BLUE}[2]{Colors.NC} Validate first 100 mailboxes (default)")
+            print(f"    {Colors.CYAN}[3]{Colors.NC} Validate first 500 mailboxes")
+            print(f"    {Colors.MAGENTA}[4]{Colors.NC} Validate all mailboxes (slow for large tenants)")
+            print()
+            
+            validation_choice = input(f"  {Colors.WHITE}Select option [1-4, default=2]: {Colors.NC}").strip().lower()
+            
+            if validation_choice == '1':
+                validate_mailboxes = False
+                mailbox_limit = 0
+            elif validation_choice == '3':
+                validate_mailboxes = True
+                mailbox_limit = 500
+            elif validation_choice == '4':
+                validate_mailboxes = True
+                mailbox_limit = 0  # 0 = unlimited
+            else:  # Default to option 2
+                validate_mailboxes = True
+                mailbox_limit = 100
+            
+            print()
             print(f"  {Colors.BLUE}ℹ{Colors.NC} Discovering users from Azure AD...")
             print()
             users = discovery.discover_users(
-                validate_mailboxes=True,
+                validate_mailboxes=validate_mailboxes,
+                mailbox_validation_limit=mailbox_limit,
                 progress_callback=progress_callback
             )
             print()
             print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(users)} users")
-            mailbox_count = len([u for u in users if u.has_mailbox])
-            print(f"    {Colors.DIM}{mailbox_count} users have mailboxes{Colors.NC}")
+            if validate_mailboxes:
+                mailbox_count = len([u for u in users if u.has_mailbox])
+                print(f"    {Colors.DIM}{mailbox_count} users have mailboxes (validated){Colors.NC}")
+            else:
+                print(f"    {Colors.DIM}Mailbox validation skipped{Colors.NC}")
             print()
         
         if discover_groups:
@@ -4953,15 +5008,20 @@ def remove_excluded_users_menu() -> None:
     
     try:
         filter_param = urllib.parse.quote("groupTypes/any(c:c eq 'Unified')")
-        url = f"https://graph.microsoft.com/v1.0/groups?$filter={filter_param}&$select=id,displayName,description&$top=200"
+        url: Optional[str] = f"https://graph.microsoft.com/v1.0/groups?$filter={filter_param}&$select=id,displayName,description&$top=200"
         
-        req = urllib.request.Request(url)
-        req.add_header("Authorization", f"Bearer {access_token}")
-        req.add_header("Content-Type", "application/json")
-        
-        with urllib.request.urlopen(req, timeout=30) as response:
-            result = json.loads(response.read().decode())
-            all_groups = result.get('value', [])
+        all_groups = []
+        while url:
+            req = urllib.request.Request(url)
+            req.add_header("Authorization", f"Bearer {access_token}")
+            req.add_header("Content-Type", "application/json")
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                result = json.loads(response.read().decode())
+                all_groups.extend(result.get('value', []))
+                url = result.get('@odata.nextLink')
+                if url and len(all_groups) >= 2000:
+                    break  # Safety limit
         
         print(f"  {Colors.GREEN}✓{Colors.NC} Found {len(all_groups)} M365 Groups in tenant")
         

@@ -231,18 +231,23 @@ def select_site_scope(sites: List[Dict[str, Any]], access_token: str) -> Tuple[L
         print()
         print_info(f"Filtering by deployment ID: {deployment_id}")
         
-        # Get M365 Groups to match by description
+        # Get M365 Groups to match by description (with pagination)
         try:
             filter_param = urllib.parse.quote("groupTypes/any(c:c eq 'Unified')")
-            url = f"https://graph.microsoft.com/v1.0/groups?$filter={filter_param}&$select=id,displayName,description&$top=200"
+            url: Optional[str] = f"https://graph.microsoft.com/v1.0/groups?$filter={filter_param}&$select=id,displayName,description&$top=200"
             
-            req = urllib.request.Request(url)
-            req.add_header("Authorization", f"Bearer {access_token}")
-            req.add_header("Content-Type", "application/json")
-            
-            with urllib.request.urlopen(req, timeout=30) as response:
-                result = json.loads(response.read().decode())
-                groups = result.get('value', [])
+            groups = []
+            while url:
+                req = urllib.request.Request(url)
+                req.add_header("Authorization", f"Bearer {access_token}")
+                req.add_header("Content-Type", "application/json")
+                
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    result = json.loads(response.read().decode())
+                    groups.extend(result.get('value', []))
+                    url = result.get('@odata.nextLink')
+                    if url and len(groups) >= 2000:
+                        break  # Safety limit
             
             # Find groups with matching deployment ID
             matching_group_names = set()

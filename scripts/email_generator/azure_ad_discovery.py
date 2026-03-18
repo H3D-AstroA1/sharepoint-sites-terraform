@@ -8,6 +8,7 @@ lists from Azure AD for use in email population scenarios.
 import json
 import urllib.request
 import urllib.error
+import urllib.parse
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
@@ -308,6 +309,7 @@ class AzureADDiscovery:
         exclude_external: bool = False,
         exclude_service_accounts: bool = True,
         validate_mailboxes: bool = True,
+        mailbox_validation_limit: int = 100,
         progress_callback: Optional[Callable] = None
     ) -> List[AzureADUser]:
         """
@@ -320,6 +322,7 @@ class AzureADDiscovery:
             exclude_external: Exclude guest/external users
             exclude_service_accounts: Exclude service accounts
             validate_mailboxes: Check if users have mailboxes
+            mailbox_validation_limit: Max users to validate for mailboxes (0 = unlimited, default 100)
             progress_callback: Callback for progress updates
             
         Returns:
@@ -331,11 +334,12 @@ class AzureADDiscovery:
         select_fields = "id,userPrincipalName,displayName,mail,department,jobTitle,officeLocation,accountEnabled,userType"
         url = f"https://graph.microsoft.com/v1.0/users?$select={select_fields}&$top=999"
         
-        # Add filter for enabled accounts
+        # Add filter for enabled accounts (URL-encoded)
         filters = ["accountEnabled eq true"]
         
         if filters:
-            url += f"&$filter={' and '.join(filters)}"
+            filter_str = urllib.parse.quote(' and '.join(filters))
+            url += f"&$filter={filter_str}"
         
         # Fetch users
         raw_users = self._paginate_request(url, max_users)
@@ -368,9 +372,9 @@ class AzureADDiscovery:
         
         print_info(f"Filtered to {len(users)} users")
         
-        # Validate mailboxes
+        # Validate mailboxes (with optional limit for performance)
         if validate_mailboxes:
-            users = self._validate_mailboxes(users, progress_callback)
+            users = self._validate_mailboxes(users, mailbox_validation_limit, progress_callback)
         
         self.cache.users = users
         self.cache.timestamp = datetime.now()
@@ -380,13 +384,33 @@ class AzureADDiscovery:
     def _validate_mailboxes(
         self,
         users: List[AzureADUser],
+        limit: int = 100,
         progress_callback: Optional[Callable] = None
     ) -> List[AzureADUser]:
-        """Validate which users have mailboxes."""
-        print_info("Validating mailboxes...")
+        """Validate which users have mailboxes.
+        
+        Args:
+            users: List of users to validate
+            limit: Maximum number of users to validate (0 = unlimited, default 100)
+            progress_callback: Callback for progress updates
+            
+        Returns:
+            List of users (with has_mailbox flag set for validated users)
+        """
+        total_users = len(users)
+        
+        # Apply limit if specified
+        if limit > 0 and total_users > limit:
+            print_info(f"Validating mailboxes for first {limit} of {total_users} users (limit applied for performance)")
+            users_to_validate = users[:limit]
+            remaining_users = users[limit:]
+        else:
+            print_info(f"Validating mailboxes for {total_users} users...")
+            users_to_validate = users
+            remaining_users = []
         
         mailbox_count = 0
-        for i, user in enumerate(users):
+        for i, user in enumerate(users_to_validate):
             # Check if user has a mailbox by trying to access their inbox
             url = f"https://graph.microsoft.com/v1.0/users/{user.id}/mailFolders/inbox"
             response = self._make_request(url)
@@ -397,10 +421,12 @@ class AzureADDiscovery:
                 mailbox_count += 1
             
             if progress_callback and i % 50 == 0:
-                progress_callback(i, len(users), f"Validating mailboxes... ({mailbox_count} found)")
+                progress_callback(i, len(users_to_validate), f"Validating mailboxes... ({mailbox_count} found)")
         
-        print_info(f"Found {mailbox_count} users with mailboxes")
-        return users
+        print_info(f"Found {mailbox_count} users with mailboxes (validated {len(users_to_validate)} of {total_users})")
+        
+        # Return all users (validated + remaining unvalidated)
+        return users_to_validate + remaining_users
     
     def discover_groups(
         self,
@@ -433,7 +459,8 @@ class AzureADDiscovery:
         
         # Discover M365 groups
         if include_m365_groups:
-            url = "https://graph.microsoft.com/v1.0/groups?$filter=groupTypes/any(c:c eq 'Unified')&$select=id,displayName,mail,description,groupTypes,mailEnabled,securityEnabled&$top=999"
+            filter_str = urllib.parse.quote("groupTypes/any(c:c eq 'Unified')")
+            url = f"https://graph.microsoft.com/v1.0/groups?$filter={filter_str}&$select=id,displayName,mail,description,groupTypes,mailEnabled,securityEnabled&$top=999"
             raw_groups = self._paginate_request(url, max_groups)
             
             for raw_group in raw_groups:
@@ -443,7 +470,8 @@ class AzureADDiscovery:
         
         # Discover distribution lists
         if include_distribution_lists:
-            url = "https://graph.microsoft.com/v1.0/groups?$filter=mailEnabled eq true and securityEnabled eq false&$select=id,displayName,mail,description,groupTypes,mailEnabled,securityEnabled&$top=999"
+            filter_str = urllib.parse.quote("mailEnabled eq true and securityEnabled eq false")
+            url = f"https://graph.microsoft.com/v1.0/groups?$filter={filter_str}&$select=id,displayName,mail,description,groupTypes,mailEnabled,securityEnabled&$top=999"
             raw_groups = self._paginate_request(url, max_groups)
             
             for raw_group in raw_groups:
@@ -453,7 +481,8 @@ class AzureADDiscovery:
         
         # Discover mail-enabled security groups
         if include_security_groups:
-            url = "https://graph.microsoft.com/v1.0/groups?$filter=mailEnabled eq true and securityEnabled eq true&$select=id,displayName,mail,description,groupTypes,mailEnabled,securityEnabled&$top=999"
+            filter_str = urllib.parse.quote("mailEnabled eq true and securityEnabled eq true")
+            url = f"https://graph.microsoft.com/v1.0/groups?$filter={filter_str}&$select=id,displayName,mail,description,groupTypes,mailEnabled,securityEnabled&$top=999"
             raw_groups = self._paginate_request(url, max_groups)
             
             for raw_group in raw_groups:
