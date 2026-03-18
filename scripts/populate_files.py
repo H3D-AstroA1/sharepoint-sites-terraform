@@ -33,6 +33,8 @@ import threading
 import urllib.request
 import urllib.error
 import urllib.parse
+import fnmatch
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any, Set
@@ -51,6 +53,9 @@ ENVIRONMENTS_FILE = CONFIG_DIR / "environments.json"
 MAX_FILES = 1000
 METADATA_UPDATE_WORKERS = 8
 VARIATION_LEVEL = "medium"
+
+# Global exclusions configuration (loaded from sites.json)
+_exclusions_config: Optional[Dict[str, Any]] = None
 
 VARIATION_PROFILES = {
     "low": {
@@ -134,6 +139,146 @@ def load_deployment_tracking() -> Dict[str, Any]:
     """Load deployment tracking settings from sites.json."""
     config = load_sites_config()
     return config.get("deployment_tracking", {})
+
+
+def load_exclusions_config() -> Dict[str, Any]:
+    """Load exclusions configuration from sites.json.
+    
+    Returns the exclusions config which includes:
+    - enabled: bool - whether exclusions are active
+    - allowed_domains: list - whitelist of domains (takes precedence)
+    - email_addresses: list - blacklist of specific emails
+    - domains: list - blacklist of domains
+    - patterns: list - wildcard patterns to exclude
+    - log_exclusions: bool - whether to log when users are excluded
+    """
+    global _exclusions_config
+    if _exclusions_config is not None:
+        return _exclusions_config
+    
+    config = load_sites_config()
+    exclusions = config.get("exclusions", {})
+    _exclusions_config = exclusions
+    return exclusions
+
+
+def is_user_excluded(user: Dict[str, Any], log_exclusion: bool = False) -> bool:
+    """Check if a user should be excluded based on exclusions configuration.
+    
+    This applies the whitelist/blacklist rules from sites.json to filter
+    users from being used in file and folder names.
+    
+    Args:
+        user: User dict with 'upn' (userPrincipalName) and 'displayName'
+        log_exclusion: Whether to print when a user is excluded
+        
+    Returns:
+        True if the user should be excluded, False if they should be included
+    """
+    exclusions = load_exclusions_config()
+    
+    # If exclusions are disabled, include all users
+    if not exclusions.get("enabled", False):
+        return False
+    
+    upn = user.get("upn", "").lower()
+    display_name = user.get("displayName", "")
+    
+    if not upn:
+        return True  # Exclude users without UPN
+    
+    # Extract domain from UPN
+    domain = upn.split("@")[-1] if "@" in upn else ""
+    
+    should_log = exclusions.get("log_exclusions", False) and log_exclusion
+    
+    # WHITELIST: If allowed_domains is set, only include users from those domains
+    allowed_domains = exclusions.get("allowed_domains", [])
+    if allowed_domains:
+        allowed_domains_lower = [d.lower() for d in allowed_domains]
+        if domain not in allowed_domains_lower:
+            if should_log:
+                print_info(f"Excluded (not in allowed domains): {display_name} ({upn})")
+            return True
+        # User is in allowed domain, continue to check blacklists
+    
+    # BLACKLIST: Check specific email addresses
+    excluded_emails = exclusions.get("email_addresses", [])
+    if excluded_emails:
+        excluded_emails_lower = [e.lower() for e in excluded_emails]
+        if upn in excluded_emails_lower:
+            if should_log:
+                print_info(f"Excluded (email blacklist): {display_name} ({upn})")
+            return True
+    
+    # BLACKLIST: Check domains
+    excluded_domains = exclusions.get("domains", [])
+    if excluded_domains:
+        excluded_domains_lower = [d.lower() for d in excluded_domains]
+        if domain in excluded_domains_lower:
+            if should_log:
+                print_info(f"Excluded (domain blacklist): {display_name} ({upn})")
+            return True
+    
+    # BLACKLIST: Check wildcard patterns
+    patterns = exclusions.get("patterns", [])
+    for pattern in patterns:
+        # Convert wildcard pattern to regex
+        regex_pattern = fnmatch.translate(pattern.lower())
+        if re.match(regex_pattern, upn):
+            if should_log:
+                print_info(f"Excluded (pattern '{pattern}'): {display_name} ({upn})")
+            return True
+    
+    return False
+
+
+def filter_users_by_exclusions(users: List[Dict[str, Any]], log_summary: bool = True) -> List[Dict[str, Any]]:
+    """Filter a list of users based on exclusions configuration.
+    
+    Args:
+        users: List of user dicts from Azure AD discovery
+        log_summary: Whether to print a summary of exclusions
+        
+    Returns:
+        Filtered list of users that are not excluded
+    """
+    exclusions = load_exclusions_config()
+    
+    # If exclusions are disabled, return all users
+    if not exclusions.get("enabled", False):
+        return users
+    
+    filtered_users = []
+    excluded_count = 0
+    
+    for user in users:
+        if is_user_excluded(user, log_exclusion=False):
+            excluded_count += 1
+        else:
+            filtered_users.append(user)
+    
+    if log_summary and excluded_count > 0:
+        print_info(f"Excluded {excluded_count} users based on whitelist/blacklist configuration")
+        
+        # Show what filters are active
+        allowed_domains = exclusions.get("allowed_domains", [])
+        if allowed_domains:
+            print_info(f"  Whitelist domains: {', '.join(allowed_domains)}")
+        
+        excluded_domains = exclusions.get("domains", [])
+        if excluded_domains:
+            print_info(f"  Blacklist domains: {', '.join(excluded_domains)}")
+        
+        excluded_emails = exclusions.get("email_addresses", [])
+        if excluded_emails:
+            print_info(f"  Blacklist emails: {len(excluded_emails)} addresses")
+        
+        patterns = exclusions.get("patterns", [])
+        if patterns:
+            print_info(f"  Blacklist patterns: {', '.join(patterns)}")
+    
+    return filtered_users
 
 
 def get_configured_site_names() -> Set[str]:
@@ -702,11 +847,19 @@ SHARED_TOPICS = [
 # AZURE AD DISCOVERY FUNCTIONS
 # ============================================================================
 
-def discover_azure_ad_users(access_token: str, max_users: int = 50) -> List[Dict[str, Any]]:
+def discover_azure_ad_users(access_token: str, max_users: int = 50, apply_exclusions: bool = True) -> List[Dict[str, Any]]:
     """Discover Azure AD users from the tenant.
     
     Returns a list of users with their display names and UPNs.
-    Filters out guest users and service accounts.
+    Filters out guest users, service accounts, and users matching exclusion rules.
+    
+    Args:
+        access_token: Microsoft Graph API access token
+        max_users: Maximum number of users to retrieve
+        apply_exclusions: Whether to apply whitelist/blacklist from sites.json
+        
+    Returns:
+        List of user dicts with id, upn, displayName, department, jobTitle
     """
     users = []
     try:
@@ -741,6 +894,10 @@ def discover_azure_ad_users(access_token: str, max_users: int = 50) -> List[Dict
                 })
     except Exception as e:
         print_warning(f"Could not discover Azure AD users: {e}")
+    
+    # Apply whitelist/blacklist exclusions from sites.json
+    if apply_exclusions and users:
+        users = filter_users_by_exclusions(users, log_summary=True)
     
     return users
 
